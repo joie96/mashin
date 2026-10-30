@@ -7,6 +7,7 @@
 
 import 'dart:async';
 
+import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:go_router/go_router.dart';
@@ -285,6 +286,93 @@ void main() {
     expect(find.byType(TextFormField), findsNWidgets(3));
     expect(find.widgetWithText(FilledButton, 'Anmelden'), findsOneWidget);
   });
+
+  for (final isDark in <bool>[true, false]) {
+    testWidgets(
+      'desktop user menu matches theme button and opens settings in ${isDark ? 'dark' : 'light'} theme',
+      (WidgetTester tester) async {
+        tester.view.physicalSize = const Size(1400, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+
+        final session = _PlaylistShellSession(_PlaylistShellBridge());
+        final navigatorKey = GlobalKey<NavigatorState>();
+        final observer = ShellNavigationObserver();
+        final router = GoRouter(
+          initialLocation: AppRoutes.home,
+          routes: <RouteBase>[
+            ShellRoute(
+              navigatorKey: navigatorKey,
+              observers: <NavigatorObserver>[observer],
+              builder: (context, state, child) => AppShell(
+                session: session,
+                navigatorKey: navigatorKey,
+                navigationObserver: observer,
+                child: child,
+              ),
+              routes: <RouteBase>[
+                GoRoute(
+                  path: AppRoutes.home,
+                  builder: (context, state) => const Text('Home'),
+                ),
+                GoRoute(
+                  path: AppRoutes.settings,
+                  builder: (context, state) => const Text('Settings page'),
+                ),
+              ],
+            ),
+          ],
+        );
+        addTearDown(router.dispose);
+        addTearDown(session.dispose);
+        await tester.pumpWidget(
+          MaterialApp.router(
+            routerConfig: router,
+            theme: isDark ? AppTheme.dark() : AppTheme.light(),
+          ),
+        );
+        await tester.pumpAndSettle();
+
+        final userButton = find.widgetWithIcon(
+          IconButton,
+          Icons.person_outlined,
+        );
+        final themeButton = find.byWidgetPredicate(
+          (widget) =>
+              widget is IconButton && widget.tooltip == 'Theme wechseln',
+        );
+        final userIconButton = tester.widget<IconButton>(userButton);
+        final themeIconButton = tester.widget<IconButton>(themeButton);
+        expect(userIconButton.style, themeIconButton.style);
+        expect(userIconButton.constraints, themeIconButton.constraints);
+        expect(userIconButton.padding, themeIconButton.padding);
+        expect(userIconButton.visualDensity, themeIconButton.visualDensity);
+        expect(tester.getSize(userButton), tester.getSize(themeButton));
+
+        final mouse = await tester.createGesture(kind: PointerDeviceKind.mouse);
+        await mouse.addPointer(location: Offset.zero);
+        await mouse.moveTo(tester.getCenter(userButton));
+        await tester.pumpAndSettle();
+        expect(find.text('Einstellungen'), findsNothing);
+        expect(find.byType(PopupMenuButton<Object>), findsNothing);
+
+        await tester.tap(userButton);
+        await tester.pumpAndSettle();
+        expect(find.text('Einstellungen'), findsOneWidget);
+        expect(find.byIcon(Icons.settings_outlined), findsOneWidget);
+        expect(tester.takeException(), isNull);
+
+        await tester.tap(find.text('Einstellungen'));
+        await tester.pumpAndSettle();
+        expect(find.text('Settings page'), findsOneWidget);
+        expect(find.text('Einstellungen'), findsNothing);
+        await mouse.removePointer();
+        await tester.pumpWidget(const SizedBox.shrink());
+        await tester.pumpAndSettle();
+      },
+    );
+  }
 
   testWidgets(
     'desktop sidebar updates when a playlist is created and its cover changes',

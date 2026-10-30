@@ -22,11 +22,9 @@ class _SettingsInfoViewState extends State<SettingsInfoView> {
 
   late final _service = widget.service ?? AppUpdateService();
   String _version = 'Wird geladen ...';
-  String _status = 'Noch nicht auf Updates geprüft.';
+  DateTime? _lastCheckedAt;
   bool _isChecking = false;
   bool _isShowingUpdate = false;
-  bool _hasError = false;
-  AppUpdate? _availableUpdate;
 
   // App information and request lifetime.
   @override
@@ -59,31 +57,32 @@ class _SettingsInfoViewState extends State<SettingsInfoView> {
 
   Future<void> _checkForUpdate() async {
     if (_isChecking || _isShowingUpdate) return;
-    setState(() {
-      _isChecking = true;
-      _hasError = false;
-      _availableUpdate = null;
-      _status = 'Updates werden gesucht ...';
-    });
+    setState(() => _isChecking = true);
     try {
       final update = await _service.checkForUpdate();
       if (!mounted) return;
       setState(() {
         _isChecking = false;
-        _availableUpdate = update;
-        _status = update == null
-            ? 'Mashin ist auf dem neuesten Stand.'
-            : 'Update ${update.version} verfügbar';
+        _lastCheckedAt = DateTime.now();
       });
-      if (update != null) await _showUpdate(update);
+      if (update != null) {
+        await _showUpdate(update);
+      } else {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Mashin ist auf dem neuesten Stand.')),
+        );
+      }
     } catch (error) {
       debugPrint('Manual update check failed: $error');
       if (!mounted) return;
-      setState(() {
-        _isChecking = false;
-        _hasError = true;
-        _status = 'Update-Prüfung fehlgeschlagen. Bitte erneut versuchen.';
-      });
+      setState(() => _isChecking = false);
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text(
+            'Update-Prüfung fehlgeschlagen. Bitte erneut versuchen.',
+          ),
+        ),
+      );
     }
   }
 
@@ -104,9 +103,39 @@ class _SettingsInfoViewState extends State<SettingsInfoView> {
   // App information and update status.
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
     final colors = context.mashinColors;
+    final isCompact = MediaQuery.sizeOf(context).width < 720;
     final isBusy = _isChecking || _isShowingUpdate;
+    final lastCheckedAt = _lastCheckedAt;
+    final localizations = MaterialLocalizations.of(context);
+    final updateDetails = Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: <Widget>[
+        Text('Updates', style: Theme.of(context).textTheme.titleMedium),
+        if (lastCheckedAt != null) ...<Widget>[
+          const SizedBox(height: 6),
+          Text(
+            'Zuletzt geprüft: ${localizations.formatShortDate(lastCheckedAt)}, '
+            '${localizations.formatTimeOfDay(TimeOfDay.fromDateTime(lastCheckedAt), alwaysUse24HourFormat: MediaQuery.alwaysUse24HourFormatOf(context))}',
+            style: TextStyle(color: colors.textSecondary),
+          ),
+        ],
+      ],
+    );
+    final updateButton = OutlinedButton.icon(
+      onPressed: isBusy ? null : _checkForUpdate,
+      icon: _isChecking
+          ? SizedBox.square(
+              dimension: 18,
+              child: CircularProgressIndicator(
+                strokeWidth: 2,
+                color: colors.textSecondary,
+              ),
+            )
+          : const Icon(Icons.refresh, size: 18),
+      label: const Text('Update suchen'),
+      style: OutlinedButton.styleFrom(foregroundColor: colors.textPrimary),
+    );
     final platform = switch (Platform.operatingSystem) {
       'windows' => 'Windows',
       'android' => 'Android',
@@ -116,82 +145,68 @@ class _SettingsInfoViewState extends State<SettingsInfoView> {
       final name => name,
     };
     return ListView(
-      padding: MediaQuery.sizeOf(context).width >= 720
-          ? const EdgeInsets.symmetric(vertical: 24)
-          : const EdgeInsets.all(20),
+      padding: isCompact
+          ? const EdgeInsets.all(20)
+          : const EdgeInsets.fromLTRB(24, 12, 24, 24),
       children: [
-        Text(
-          'Mashin',
-          style: theme.textTheme.headlineSmall?.copyWith(
-            fontWeight: FontWeight.w600,
-          ),
-        ),
-        const SizedBox(height: 8),
-        Text(
-          'Music Assistant Client',
-          style: TextStyle(color: colors.textSecondary),
-        ),
-        const SizedBox(height: 28),
-        Text('Version', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 6),
-        SelectableText(_version),
-        const SizedBox(height: 20),
-        Text('Plattform', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 6),
-        Text(platform),
-        const SizedBox(height: 20),
-        Text('Projekt', style: theme.textTheme.titleSmall),
-        const SizedBox(height: 6),
         Align(
           alignment: Alignment.centerLeft,
-          child: TextButton.icon(
-            onPressed: _openProject,
-            icon: const Icon(Icons.open_in_new, size: 18),
-            label: const Text('github.com/joie96/mashin'),
-            style: TextButton.styleFrom(foregroundColor: colors.textPrimary),
+          child: ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 640),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: <Widget>[
+                _SettingsInfoRow(
+                  label: 'Version',
+                  isCompact: isCompact,
+                  child: SelectableText(_version),
+                ),
+                SizedBox(height: isCompact ? 16 : 8),
+                _SettingsInfoRow(
+                  label: 'Plattform',
+                  isCompact: isCompact,
+                  child: Text(platform),
+                ),
+                SizedBox(height: isCompact ? 16 : 8),
+                _SettingsInfoRow(
+                  label: 'Projekt',
+                  isCompact: isCompact,
+                  child: TextButton.icon(
+                    onPressed: _openProject,
+                    icon: const Icon(Icons.open_in_new, size: 18),
+                    label: const Text('github.com/joie96/mashin'),
+                    style: TextButton.styleFrom(
+                      foregroundColor: colors.textPrimary,
+                      padding: EdgeInsets.zero,
+                      minimumSize: const Size(0, 40),
+                      alignment: Alignment.centerLeft,
+                    ),
+                  ),
+                ),
+              ],
+            ),
           ),
         ),
         const SizedBox(height: 24),
         Divider(color: colors.border),
         const SizedBox(height: 24),
-        Text('Updates', style: theme.textTheme.titleMedium),
-        const SizedBox(height: 12),
-        Text(
-          _status,
-          style: TextStyle(
-            color: _hasError ? theme.colorScheme.error : colors.textSecondary,
+        if (isCompact)
+          Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              updateDetails,
+              const SizedBox(height: 12),
+              updateButton,
+            ],
+          )
+        else
+          Row(
+            children: <Widget>[
+              Expanded(child: updateDetails),
+              const SizedBox(width: 24),
+              updateButton,
+            ],
           ),
-        ),
-        const SizedBox(height: 20),
-        Wrap(
-          spacing: 12,
-          runSpacing: 12,
-          children: [
-            OutlinedButton.icon(
-              onPressed: isBusy ? null : _checkForUpdate,
-              icon: _isChecking
-                  ? SizedBox.square(
-                      dimension: 18,
-                      child: CircularProgressIndicator(
-                        strokeWidth: 2,
-                        color: colors.textSecondary,
-                      ),
-                    )
-                  : const Icon(Icons.refresh, size: 18),
-              label: const Text('Nach Updates suchen'),
-              style: OutlinedButton.styleFrom(
-                foregroundColor: colors.textPrimary,
-              ),
-            ),
-            FilledButton.icon(
-              onPressed: isBusy || _availableUpdate == null
-                  ? null
-                  : () => _showUpdate(_availableUpdate!),
-              icon: const Icon(Icons.system_update_alt, size: 18),
-              label: const Text('Update'),
-            ),
-          ],
-        ),
       ],
     );
   }
@@ -205,5 +220,46 @@ class _SettingsInfoViewState extends State<SettingsInfoView> {
       debugPrint('App version unavailable: $error');
       if (mounted) setState(() => _version = 'Nicht verfügbar');
     }
+  }
+}
+
+class _SettingsInfoRow extends StatelessWidget {
+  const _SettingsInfoRow({
+    required this.label,
+    required this.isCompact,
+    required this.child,
+  });
+
+  final String label;
+  final bool isCompact;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    final title = Text(
+      label,
+      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+        color: context.mashinColors.textSecondary,
+        fontWeight: FontWeight.normal,
+      ),
+    );
+    if (isCompact) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[title, const SizedBox(height: 6), child],
+      );
+    }
+    return ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 40),
+      child: Row(
+        children: <Widget>[
+          SizedBox(width: 120, child: title),
+          const SizedBox(width: 24),
+          Expanded(
+            child: Align(alignment: Alignment.centerLeft, child: child),
+          ),
+        ],
+      ),
+    );
   }
 }

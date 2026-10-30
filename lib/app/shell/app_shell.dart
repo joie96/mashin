@@ -1243,8 +1243,6 @@ class _QueueUiScope extends StatelessWidget {
 }
 
 /// Desktop UI components
-enum _DesktopUserMenuAction { settings }
-
 class _DesktopTopBar extends StatelessWidget {
   final bool canGoBack;
   final VoidCallback onBack;
@@ -1366,8 +1364,8 @@ class _DesktopTopBar extends StatelessWidget {
             tooltip: 'Theme wechseln',
             onPressed: onToggleTheme,
             padding: EdgeInsets.zero,
-            constraints: const BoxConstraints(minWidth: 32, minHeight: 32),
-            visualDensity: VisualDensity.compact,
+            constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+            visualDensity: VisualDensity.standard,
             icon: Icon(
               isDarkTheme
                   ? Icons.light_mode_outlined
@@ -1376,32 +1374,25 @@ class _DesktopTopBar extends StatelessWidget {
             ),
           ),
           const SizedBox(width: 12),
-          PopupMenuButton<_DesktopUserMenuAction>(
-            tooltip: 'Benutzermenü',
-            icon: CircleAvatar(
-              radius: 16,
-              backgroundColor: colors.bgTertiary,
-              child: Icon(
-                Icons.person_outlined,
-                size: 18,
-                color: colors.textSecondary,
-              ),
-            ),
-            onSelected: (_DesktopUserMenuAction action) {
-              if (action == _DesktopUserMenuAction.settings) {
-                context.push(AppRoutes.settings);
-              }
-            },
-            itemBuilder: (BuildContext context) =>
-                const <PopupMenuEntry<_DesktopUserMenuAction>>[
-                  PopupMenuItem<_DesktopUserMenuAction>(
-                    value: _DesktopUserMenuAction.settings,
-                    child: ListTile(
-                      leading: Icon(Icons.settings_outlined),
-                      title: Text('Einstellungen'),
-                    ),
+          Builder(
+            builder: (BuildContext buttonContext) => IconButton(
+              tooltip: 'Benutzermenü',
+              onPressed: () => const AppContextMenuController().showContextMenu(
+                context: context,
+                anchorContext: buttonContext,
+                actions: <ContextMenuAction>[
+                  ContextMenuAction(
+                    label: 'Einstellungen',
+                    icon: Icons.settings_outlined,
+                    onSelected: () => context.push(AppRoutes.settings),
                   ),
                 ],
+              ),
+              padding: EdgeInsets.zero,
+              constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
+              visualDensity: VisualDensity.standard,
+              icon: const Icon(Icons.person_outlined, size: 18),
+            ),
           ),
           const SizedBox(width: 24),
         ],

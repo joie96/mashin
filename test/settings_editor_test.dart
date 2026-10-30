@@ -11,7 +11,7 @@ import 'package:mashin/features/settings/settings_screen.dart';
 import 'package:pub_semver/pub_semver.dart';
 
 void main() {
-  for (final width in [390.0, 1200.0]) {
+  for (final width in [320.0, 390.0, 720.0, 1200.0]) {
     testWidgets('Info shows app metadata and reuses update overlay at $width', (
       tester,
     ) async {
@@ -36,41 +36,67 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      expect(find.text('Mashin'), findsOneWidget);
+      expect(find.text('Mashin'), findsNothing);
+      expect(find.text('Music Assistant Client'), findsNothing);
       expect(find.text('0.0.1-dev.7'), findsOneWidget);
+      expect(find.textContaining('Zuletzt geprüft:'), findsNothing);
+      for (final entry in <String, Finder>{
+        'Version': find.text('0.0.1-dev.7'),
+        'Projekt': find.widgetWithText(TextButton, 'github.com/joie96/mashin'),
+        'Updates': find.widgetWithText(OutlinedButton, 'Update suchen'),
+      }.entries) {
+        final labelRect = tester.getRect(find.text(entry.key));
+        final valueRect = tester.getRect(entry.value);
+        if (width >= 720) {
+          expect(valueRect.left, greaterThan(labelRect.right));
+          expect(valueRect.center.dy, closeTo(labelRect.center.dy, 2));
+          if (entry.key == 'Updates') {
+            expect(valueRect.right, greaterThan(width * .8));
+          } else {
+            expect(valueRect.left - labelRect.left, closeTo(144, 2));
+            expect(valueRect.right, lessThan(width - 24));
+          }
+        } else {
+          expect(valueRect.top, greaterThan(labelRect.bottom));
+        }
+      }
       await tester.tap(find.text('github.com/joie96/mashin'));
       expect(projectUri.toString(), 'https://github.com/joie96/mashin');
-      expect(
-        tester
-            .widget<FilledButton>(find.widgetWithText(FilledButton, 'Update'))
-            .onPressed,
-        isNull,
-      );
-      await tester.tap(find.text('Nach Updates suchen'));
+      expect(find.widgetWithText(FilledButton, 'Update'), findsNothing);
+      await tester.tap(find.text('Update suchen'));
       await tester.pumpAndSettle();
       expect(service.checkCount, 1);
       expect(find.byType(AppUpdateDialog), findsOneWidget);
       await tester.tap(find.text('Abbrechen'));
       await tester.pumpAndSettle();
-      await tester.tap(find.text('Update'));
+      expect(find.textContaining('Zuletzt geprüft:'), findsOneWidget);
+      await tester.tap(find.text('Update suchen'));
       await tester.pumpAndSettle();
       expect(find.byType(AppUpdateDialog), findsOneWidget);
-      expect(service.checkCount, 1);
+      expect(service.checkCount, 2);
       await tester.tap(find.text('Abbrechen'));
       await tester.pumpAndSettle();
       service.shouldOfferUpdate = false;
-      await tester.tap(find.text('Nach Updates suchen'));
+      await tester.tap(find.text('Update suchen'));
       await tester.pumpAndSettle();
-      expect(service.checkCount, 2);
+      expect(service.checkCount, 3);
       expect(find.byType(AppUpdateDialog), findsNothing);
       expect(find.text('Mashin ist auf dem neuesten Stand.'), findsOneWidget);
+      final lastCheckedStatus = tester
+          .widget<Text>(find.textContaining('Zuletzt geprüft:'))
+          .data!;
+      tester
+          .state<ScaffoldMessengerState>(find.byType(ScaffoldMessenger))
+          .removeCurrentSnackBar();
+      await tester.pumpAndSettle();
       service.shouldFailCheck = true;
-      await tester.tap(find.text('Nach Updates suchen'));
+      await tester.tap(find.text('Update suchen'));
       await tester.pumpAndSettle();
       expect(
         find.textContaining('Update-Prüfung fehlgeschlagen'),
         findsOneWidget,
       );
+      expect(find.text(lastCheckedStatus), findsOneWidget);
       expect(tester.takeException(), isNull);
     });
   }
@@ -98,10 +124,10 @@ void main() {
         await tester.tap(find.text('Info'));
         await tester.pumpAndSettle();
         expect(find.byType(SettingsInfoView), findsOneWidget);
-        expect(find.text('Mashin'), findsOneWidget);
+        expect(find.text('Mashin'), findsNothing);
         expect(find.text('Version'), findsOneWidget);
         expect(find.text('github.com/joie96/mashin'), findsOneWidget);
-        expect(find.text('Nach Updates suchen'), findsOneWidget);
+        expect(find.text('Update suchen'), findsOneWidget);
         expect(tester.takeException(), isNull);
       },
     );
