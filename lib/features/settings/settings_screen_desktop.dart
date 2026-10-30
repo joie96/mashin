@@ -190,7 +190,7 @@ class _DesktopSettingsForm extends StatelessWidget {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     return ListView(
-      padding: const EdgeInsets.only(top: 12),
+      padding: const EdgeInsets.only(top: 12, bottom: 32),
       children: <Widget>[
         _DesktopSettingsSection(
           title: 'Verbindung',
@@ -282,10 +282,15 @@ class _DesktopSettingsForm extends StatelessWidget {
               width: _desktopSettingsControlWidth,
               child: Align(
                 alignment: Alignment.centerRight,
-                child: Switch(
-                  key: const Key('settings-multi-device-button'),
-                  value: shouldShowMultiDeviceButton,
-                  onChanged: onMultiDeviceButtonVisibilityChanged,
+                child: Transform.scale(
+                  scale: .7,
+                  alignment: Alignment.centerRight,
+                  child: Switch(
+                    key: const Key('settings-multi-device-button'),
+                    materialTapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                    value: shouldShowMultiDeviceButton,
+                    onChanged: onMultiDeviceButtonVisibilityChanged,
+                  ),
                 ),
               ),
             ),

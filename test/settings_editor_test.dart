@@ -185,6 +185,17 @@ void main() {
         );
         final toggle = find.byKey(const Key('settings-multi-device-button'));
         await tester.ensureVisible(toggle);
+        if (!isCompact) {
+          final transform = tester.widget<Transform>(
+            find.ancestor(of: toggle, matching: find.byType(Transform)).first,
+          );
+          expect(transform.transform.entry(0, 0), .7);
+          expect(transform.transform.entry(1, 1), .7);
+          final list = tester.widget<ListView>(
+            find.ancestor(of: toggle, matching: find.byType(ListView)).first,
+          );
+          expect(list.padding, const EdgeInsets.only(top: 12, bottom: 32));
+        }
         await tester.tap(toggle);
         await tester.pumpAndSettle();
         expect(saved.single.shouldShowMultiDeviceButton, isFalse);
