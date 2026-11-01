@@ -1336,7 +1336,7 @@ fn queue_command_request(
                 .collect::<Vec<_>>();
             (
                 "play_media",
-                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start,"sort_by":"original"}),
+                json!({"queue_id":queue_id,"media":media,"option":option,"start_item":start}),
             )
         }
         QueueCommand::PlayIndex(index) => {
@@ -1449,6 +1449,7 @@ mod command_tests {
         assert_eq!(arguments["media"][1]["item_id"], "track");
         assert_eq!(arguments["start_item"], arguments["media"][1]);
         assert!(arguments.get("shuffle").is_none());
+        assert!(arguments.get("sort_by").is_none());
         assert!(arguments.get("radio_mode").is_none());
         assert!(arguments.get("startDownload").is_none());
     }
@@ -1482,7 +1483,7 @@ mod command_tests {
             }
             assert_eq!(arguments["start_item"], original[1]);
             assert!(arguments.get("shuffle").is_none());
-            assert_eq!(arguments["sort_by"], "original");
+            assert!(arguments.get("sort_by").is_none());
             observed_reordering |= shuffled != &original;
         }
         assert!(observed_reordering);
