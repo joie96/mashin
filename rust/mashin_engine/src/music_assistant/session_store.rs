@@ -1,5 +1,5 @@
 //! Owns session persistence across a non-secret file and platform-protected credentials.
-//! Version-3 secure sessions migrate file-first; failures retain the original secure entry.
+//! Only the current credential format is accepted; unsupported entries remain untouched.
 
 use crate::configuration::{ConfigurationFile, SessionPreferences};
 use crate::core::models::SessionConfig;
@@ -50,53 +50,30 @@ impl From<&SessionConfig> for SessionCredentials {
     }
 }
 
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase", deny_unknown_fields)]
-struct LegacySecureSession {
-    format_version: u8,
-    session: SessionConfig,
-}
-
 struct SplitSessionStore {
     configuration: ConfigurationFile,
     credentials: Box<dyn CredentialStore + Send>,
 }
 
 impl SessionStore for SplitSessionStore {
-    // Restore only matching identities; corrupt files never fall back to stale secure preferences.
+    // Restore only credentials bound to the configured server and user.
     fn load_session(&self) -> Result<Option<SessionConfig>, String> {
         let Some(serialized) = self.credentials.read()? else {
             return Ok(None);
         };
-        if let Ok(credentials) = serde_json::from_str::<SessionCredentials>(&serialized) {
-            if credentials.format_version != 1 {
-                return Err("unsupported secure credential version".into());
-            }
-            let preferences = self
-                .configuration
-                .load()?
-                .ok_or("configuration is missing; secure credentials were preserved")?;
-            if !credentials.matches(&preferences) {
-                return Err("configuration identity does not match secure credentials".into());
-            }
-            return Ok(Some(preferences.into_session(credentials.access_token)));
+        let credentials = serde_json::from_str::<SessionCredentials>(&serialized)
+            .map_err(|_| "secure credentials are invalid; the entry was preserved".to_string())?;
+        if credentials.format_version != 1 {
+            return Err("unsupported secure credential version".into());
         }
-        let legacy = serde_json::from_str::<LegacySecureSession>(&serialized)
-            .map_err(|_| "secure session is invalid; the entry was preserved".to_string())?;
-        if legacy.format_version != 3 {
-            return Err("unsupported secure session version; the entry was preserved".into());
+        let preferences = self
+            .configuration
+            .load()?
+            .ok_or("configuration is missing; secure credentials were preserved")?;
+        if !credentials.matches(&preferences) {
+            return Err("configuration identity does not match secure credentials".into());
         }
-        let session = match self.configuration.load()? {
-            Some(preferences) => {
-                if !SessionCredentials::from(&legacy.session).matches(&preferences) {
-                    return Err("configuration identity does not match the legacy session".into());
-                }
-                preferences.into_session(legacy.session.access_token)
-            }
-            None => legacy.session,
-        };
-        self.save_session(session.clone())?;
-        Ok(Some(session))
+        Ok(Some(preferences.into_session(credentials.access_token)))
     }
 
     // A secure-store failure rolls back the file before the coordinator commits runtime state.
@@ -231,19 +208,6 @@ mod tests {
         }
     }
 
-    fn legacy_credentials(session: &SessionConfig) -> Arc<MemoryCredentials> {
-        Arc::new(MemoryCredentials {
-            value: Mutex::new(Some(
-                serde_json::to_string(&LegacySecureSession {
-                    format_version: 3,
-                    session: session.clone(),
-                })
-                .unwrap(),
-            )),
-            should_fail_write: Mutex::new(false),
-        })
-    }
-
     #[test]
     fn session_round_trips_with_token_only_in_secure_storage() {
         let directory = TestDirectory::new();
@@ -294,76 +258,56 @@ mod tests {
     }
 
     #[test]
-    fn version_three_session_migrates_once_without_changing_preferences() {
+    fn failed_secure_write_rolls_back_configuration_and_preserves_credentials() {
         let directory = TestDirectory::new();
         let session = session_config();
-        let credentials = legacy_credentials(&session);
-        let store = store(&directory, &credentials);
-        assert_eq!(store.load_session().unwrap(), Some(session.clone()));
-        assert!(!credentials.read().unwrap().unwrap().contains("theme"));
-        assert_eq!(store.load_session().unwrap(), Some(session));
-    }
-
-    #[test]
-    fn interrupted_migration_keeps_the_existing_configuration() {
-        let directory = TestDirectory::new();
-        let session = session_config();
-        let credentials = legacy_credentials(&session);
-        let store = store(&directory, &credentials);
-        let mut preferences = SessionPreferences::from(&session);
-        preferences.volume = 15;
-        store.configuration.save(&preferences).unwrap();
-        assert_eq!(store.load_session().unwrap().unwrap().volume, 15);
-        assert_eq!(store.configuration.load().unwrap(), Some(preferences));
-    }
-
-    #[test]
-    fn failed_secure_write_rolls_back_configuration_and_preserves_legacy_entry() {
-        let directory = TestDirectory::new();
-        let session = session_config();
-        let credentials = legacy_credentials(&session);
-        let legacy = credentials.read().unwrap();
+        let credentials = Arc::new(MemoryCredentials::default());
         *credentials.should_fail_write.lock().unwrap() = true;
         let store = store(&directory, &credentials);
-        assert!(store.load_session().is_err());
+        assert!(store.save_session(session.clone()).is_err());
         assert_eq!(store.configuration.load().unwrap(), None);
-        assert_eq!(credentials.read().unwrap(), legacy);
+        assert!(credentials.read().unwrap().is_none());
         *credentials.should_fail_write.lock().unwrap() = false;
         store.save_session(session.clone()).unwrap();
+        let original = credentials.read().unwrap();
         *credentials.should_fail_write.lock().unwrap() = true;
         let mut updated = session.clone();
         updated.volume = 10;
         assert!(store.save_session(updated).is_err());
+        assert_eq!(credentials.read().unwrap(), original);
         assert_eq!(store.load_session().unwrap(), Some(session));
     }
 
     #[test]
-    fn corrupt_configuration_does_not_destroy_legacy_credentials() {
+    fn corrupt_configuration_does_not_destroy_credentials() {
         let directory = TestDirectory::new();
-        std::fs::create_dir_all(&directory.0).unwrap();
+        let credentials = Arc::new(MemoryCredentials::default());
+        let store = store(&directory, &credentials);
+        store.save_session(session_config()).unwrap();
         let path = directory.0.join("config.json");
         std::fs::write(&path, "broken").unwrap();
-        let credentials = legacy_credentials(&session_config());
         let original = credentials.read().unwrap();
-        let store = store(&directory, &credentials);
         assert!(store.load_session().is_err());
         assert_eq!(credentials.read().unwrap(), original);
         assert_eq!(std::fs::read_to_string(path).unwrap(), "broken");
     }
 
     #[test]
-    fn failed_configuration_write_never_replaces_legacy_credentials() {
+    fn failed_configuration_write_never_replaces_credentials() {
         let directory = TestDirectory::new();
         std::fs::create_dir_all(&directory.0).unwrap();
         let blocked = directory.0.join("not-a-directory");
         std::fs::write(&blocked, "keep").unwrap();
-        let credentials = legacy_credentials(&session_config());
+        let credentials = Arc::new(MemoryCredentials::default());
+        credentials
+            .write(&serde_json::to_string(&SessionCredentials::from(&session_config())).unwrap())
+            .unwrap();
         let original = credentials.read().unwrap();
         let store = SplitSessionStore {
             configuration: ConfigurationFile::with_path(blocked.join("config.json")),
             credentials: Box::new(credentials.clone()),
         };
-        assert!(store.load_session().is_err());
+        assert!(store.save_session(session_config()).is_err());
         assert_eq!(credentials.read().unwrap(), original);
         assert_eq!(std::fs::read_to_string(blocked).unwrap(), "keep");
     }
@@ -375,11 +319,7 @@ mod tests {
         let store = store(&directory, &credentials);
         for value in [
             "not-json".to_string(),
-            serde_json::to_string(&LegacySecureSession {
-                format_version: 2,
-                session: session_config(),
-            })
-            .unwrap(),
+            serde_json::json!({"formatVersion": 3, "session": session_config()}).to_string(),
             serde_json::to_string(&SessionCredentials {
                 format_version: 255,
                 ..SessionCredentials::from(&session_config())
