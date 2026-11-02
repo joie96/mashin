@@ -32,11 +32,13 @@ class _LightThemeSession extends AppSessionController {
 }
 
 class _StartupBridge extends Fake implements MashinCoreBridge {
-  final libraryStarted = Completer<void>();
-  final library = Completer<Map<String, dynamic>>();
+  final sessionDataStarted = Completer<void>();
+  final sessionDataSnapshot = Completer<Map<String, dynamic>>();
   final manifests = Completer<List<ProviderManifest>>();
-  bool hasStartedLibrary = false;
-  int libraryCalls = 0;
+  bool hasStartedSessionData = false;
+  int sessionDataCalls = 0;
+  int userDataLoadCalls = 0;
+  Map<String, dynamic> cachedUserData = <String, dynamic>{};
   bool hasRefreshedQueue = false;
   int logoutCount = 0;
   Completer<void>? pendingLogout;
@@ -79,11 +81,20 @@ class _StartupBridge extends Fake implements MashinCoreBridge {
   }
 
   @override
-  Future<Map<String, dynamic>> loadUserData() {
-    hasStartedLibrary = true;
-    libraryCalls += 1;
-    if (!libraryStarted.isCompleted) libraryStarted.complete();
-    return library.future;
+  Future<void> loadSessionData() async {
+    hasStartedSessionData = true;
+    sessionDataCalls += 1;
+    if (!sessionDataStarted.isCompleted) sessionDataStarted.complete();
+    cachedUserData = await sessionDataSnapshot.future;
+  }
+
+  @override
+  Future<Map<String, dynamic>> getUserData() async => cachedUserData;
+
+  @override
+  Future<Map<String, dynamic>> loadUserData() async {
+    userDataLoadCalls += 1;
+    return cachedUserData;
   }
 
   @override
@@ -201,7 +212,7 @@ void main() {
       'logout waits for native confirmation and handles failure $shouldFail',
       () async {
         final bridge = _StartupBridge();
-        bridge.library.complete(<String, dynamic>{});
+        bridge.sessionDataSnapshot.complete(<String, dynamic>{});
         bridge.manifests.complete(<ProviderManifest>[]);
         final session = AppSessionController(coreBridge: bridge);
         addTearDown(session.dispose);
@@ -242,42 +253,65 @@ void main() {
   }
 
   test(
-    'startup releases home and delegates the one-shot data pipeline to Rust',
+    'startup releases home and delegates the session data pipeline to Rust',
     () async {
-      final bridge = _StartupBridge();
+      final bridge = _StartupBridge()
+        ..cachedUserData = <String, dynamic>{
+          'favorites': <String, dynamic>{
+            'tracks': <Map<String, dynamic>>[
+              <String, dynamic>{
+                'item_id': 'cached-favorite',
+                'provider': 'library',
+                'name': 'Cached favorite',
+                'media_type': 'track',
+                'duration': 120,
+                'artists': <Map<String, dynamic>>[],
+              },
+            ],
+          },
+        };
       final session = AppSessionController(coreBridge: bridge);
       addTearDown(session.dispose);
       final startup = session.initialize();
       expect(session.initialize(), same(startup));
-      await bridge.libraryStarted.future;
+      await bridge.sessionDataStarted.future;
 
       expect(session.isLoading, isFalse);
       expect(session.isAuthenticated, isTrue);
       expect(session.userDataController, isNotNull);
       expect(session.isDarkTheme, isFalse);
-      expect(bridge.hasStartedLibrary, isTrue);
+      expect(bridge.hasStartedSessionData, isTrue);
       expect(bridge.hasRefreshedQueue, isTrue);
 
-      bridge.library.complete(<String, dynamic>{});
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.sessionDataSnapshot.isCompleted, isFalse);
+      expect(
+        session.userDataController!.favoriteTracks.single.itemId,
+        'cached-favorite',
+      );
+      expect(bridge.userDataLoadCalls, 0);
+
+      bridge.sessionDataSnapshot.complete(<String, dynamic>{});
       bridge.manifests.complete(<ProviderManifest>[]);
       await startup;
-      expect(bridge.hasStartedLibrary, isTrue);
-      expect(bridge.libraryCalls, 1);
+      expect(bridge.hasStartedSessionData, isTrue);
+      expect(bridge.sessionDataCalls, 1);
+      expect(bridge.userDataLoadCalls, 0);
       expect(session.userDataController!.isLoadingLibraryData, isFalse);
     },
   );
 
   test(
-    'startup library failure does not stop playback initialization',
+    'startup session data failure does not stop playback initialization',
     () async {
       final bridge = _StartupBridge();
       final session = AppSessionController(coreBridge: bridge);
       addTearDown(session.dispose);
       final startup = session.initialize();
-      await bridge.libraryStarted.future;
+      await bridge.sessionDataStarted.future;
       bridge.manifests.complete(<ProviderManifest>[]);
       await Future<void>.delayed(Duration.zero);
-      bridge.library.completeError(StateError('Unavailable'));
+      bridge.sessionDataSnapshot.completeError(StateError('Unavailable'));
       await startup;
       expect(session.isLoading, isFalse);
       expect(session.isAuthenticated, isTrue);

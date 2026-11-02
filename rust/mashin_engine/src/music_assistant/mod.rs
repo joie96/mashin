@@ -9,5 +9,7 @@ pub(crate) mod playlist_collage;
 pub(crate) mod queue_controller;
 pub(crate) mod queue_projection;
 pub(crate) mod radio;
+pub(crate) mod recommendation_data;
+pub(crate) mod session_data;
 pub(crate) mod session_store;
 pub(crate) mod user_data;

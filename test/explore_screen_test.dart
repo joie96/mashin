@@ -20,6 +20,7 @@ import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 class _ExploreBridge implements MashinCoreBridgeApi {
   bool shouldFail = false;
   bool shouldReturnEmpty = false;
+  RecommendationSnapshot? snapshot;
   int recommendationCalls = 0;
   final List<(String, String)> playlistCalls = <(String, String)>[];
   Completer<RecommendationSnapshot>? pendingRecommendations;
@@ -40,6 +41,7 @@ class _ExploreBridge implements MashinCoreBridgeApi {
     expect(view, RecommendationView.explore);
     recommendationCalls += 1;
     if (shouldFail) throw StateError('Unavailable');
+    if (snapshot != null) return snapshot!;
     final Completer<RecommendationSnapshot>? pending = pendingRecommendations;
     if (pending != null) return pending.future;
     if (shouldReturnEmpty) return const RecommendationSnapshot();
@@ -292,6 +294,52 @@ void main() {
     expect(controller.isLoading, isFalse);
   });
 
+  test(
+    'explore adopts recovered rows without reshuffling successful rows',
+    () async {
+      final bridge = _ExploreBridge()
+        ..snapshot = const RecommendationSnapshot(hasLoadError: true);
+      final controller = ExploreController(
+        coreBridge: bridge,
+        random: math.Random(42),
+      );
+      addTearDown(controller.dispose);
+      addTearDown(bridge.eventController.close);
+      await controller.load();
+      expect(controller.hasLoadError, isTrue);
+      expect(controller.weeklyExploration, isEmpty);
+      bridge.snapshot = null;
+      final recovered = await bridge.getRecommendations(
+        view: RecommendationView.explore,
+      );
+      bridge.snapshot = RecommendationSnapshot(
+        hasLoadError: true,
+        folders: [
+          recovered.folders.first,
+          const RecommendationFolder(
+            itemId: 'similarusers_jam_weekly',
+            provider: 'lb',
+            title: 'Jam',
+            items: [],
+            hasLoadError: true,
+          ),
+        ],
+      );
+      bridge.eventController.add({'type': 'recommendations_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.weeklyExploration, hasLength(8));
+      expect(controller.similarUsersJam, isEmpty);
+      expect(controller.hasLoadError, isTrue);
+      final exploration = controller.weeklyExploration;
+      bridge.snapshot = recovered;
+      bridge.eventController.add({'type': 'recommendations_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.weeklyExploration, same(exploration));
+      expect(controller.similarUsersJam, hasLength(8));
+      expect(controller.hasLoadError, isFalse);
+    },
+  );
+
   test('empty weekly response produces empty sections', () async {
     final _ExploreBridge bridge = _ExploreBridge()..shouldReturnEmpty = true;
     final ExploreController controller = ExploreController(coreBridge: bridge);
@@ -332,6 +380,64 @@ void main() {
   });
 
   for (final bool isCompact in <bool>[true, false]) {
+    testWidgets(
+      'explore recovers on route return on ${isCompact ? 'mobile' : 'desktop'}',
+      (tester) async {
+        tester.view.physicalSize = Size(isCompact ? 412 : 1200, 850);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _ExploreBridge()
+          ..snapshot = const RecommendationSnapshot(hasLoadError: true);
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        addTearDown(bridge.eventController.close);
+        final navigator = GlobalKey<NavigatorState>();
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: navigator,
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: ExploreScreen(coreBridge: bridge, coreEvents: events),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bridge.recommendationCalls, 1);
+        expect(
+          find.text('Empfehlungen konnten nicht geladen werden.'),
+          findsOneWidget,
+        );
+        unawaited(
+          navigator.currentState!.push<void>(
+            MaterialPageRoute(builder: (_) => const Scaffold()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        bridge.snapshot = null;
+        navigator.currentState!.pop();
+        await tester.pumpAndSettle();
+        expect(bridge.recommendationCalls, 2);
+        expect(
+          find.text('Empfehlungen konnten nicht geladen werden.'),
+          findsNothing,
+        );
+        final items = isCompact
+            ? tester
+                  .widget<MediaSlideSectionMobile<Track>>(
+                    find.byType(MediaSlideSectionMobile<Track>),
+                  )
+                  .items
+            : tester
+                  .widget<MediaSlideSectionDesktop<Track>>(
+                    find.byType(MediaSlideSectionDesktop<Track>),
+                  )
+                  .items;
+        expect(items, hasLength(8));
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       'empty weekly data ends loading without an error on ${isCompact ? 'mobile' : 'desktop'}',
       (WidgetTester tester) async {

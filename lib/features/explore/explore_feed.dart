@@ -41,6 +41,7 @@ class ExploreFeed extends StatefulWidget {
 
 class _ExploreFeedState extends State<ExploreFeed> {
   late ExploreController _controller;
+  bool _isPageVisible = true;
 
   // Controller ownership and favorite updates.
   @override
@@ -61,6 +62,18 @@ class _ExploreFeedState extends State<ExploreFeed> {
         unawaited(controller.load());
       }
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isVisible = ModalRoute.isCurrentOf(context) ?? true;
+    if (isVisible && !_isPageVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isPageVisible) unawaited(_controller.load());
+      });
+    }
+    _isPageVisible = isVisible;
   }
 
   @override

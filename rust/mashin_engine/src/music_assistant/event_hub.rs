@@ -28,7 +28,7 @@ const EVENT_HUB_LOGGER: crate::logging::Logger = crate::logging::Logger::new("ev
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub(crate) enum EventHubLeaseReason {
     Playback,
-    UserData,
+    SessionData,
     AndroidAutoLiveState,
     ExplicitUserRefresh,
 }

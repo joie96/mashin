@@ -243,6 +243,7 @@ fn execute_async_operation(request: CoreOperationRequest) -> Result<Value, CoreE
         }
         "refreshQueue" => serialize_operation_result(core::read_queue()),
         "refreshPlayerState" => serialize_operation_result(core::read_player_state()),
+        "loadSessionData" => serialize_operation_result(core::read_or_load_session_data()),
         "loadUserData" => serialize_operation_result(core::read_or_load_user_data()),
         "getUserData" => serialize_operation_result(core::read_user_data()),
         _ => Err(CoreError::command_failed(format!(

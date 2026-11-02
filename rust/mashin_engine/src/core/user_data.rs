@@ -1,25 +1,8 @@
 //! Session-bound MA snapshots and volatile favorite workers. Network work never holds the core lock.
 
 use super::*;
-use crate::music_assistant::event_hub::{
-    EventHubLeaseReason, MusicAssistantEvent, MusicAssistantEventHub,
-};
-use crate::music_assistant::user_data::InitialSessionDataUpdate;
+use crate::music_assistant::user_data::InitialUserDataUpdate;
 use std::sync::Arc;
-
-pub(super) struct UserDataEvents {
-    hub: Arc<Mutex<MusicAssistantEventHub>>,
-    worker: tokio::task::JoinHandle<()>,
-}
-
-impl Drop for UserDataEvents {
-    fn drop(&mut self) {
-        self.worker.abort();
-        if let Ok(mut hub) = self.hub.lock() {
-            hub.release(EventHubLeaseReason::UserData);
-        }
-    }
-}
 
 // Initial loading and refresh preserve optimistic wishes received during network queries.
 pub(crate) fn read_user_data() -> Result<UserDataSnapshot, CoreError> {
@@ -44,50 +27,13 @@ pub(crate) fn read_or_load_user_data() -> Result<UserDataSnapshot, CoreError> {
         }
     }
     let (client, generation) = session_client()?;
-    publish_initial_user_data(generation, |data| {
-        data.snapshot.is_loading_favorites = true;
-        data.snapshot.is_loading_playlists = true;
-    })
-    .map_err(CoreError::command_failed)?;
-    let result = CORE_NETWORK_RUNTIME.block_on(client.load_initial_session_data(|update| {
-        match update {
-            InitialSessionDataUpdate::Recommendations => {
-                publish_background_event(MediaSessionEvent::RecommendationsChanged);
-                Ok(())
-            }
-            InitialSessionDataUpdate::UserIdentity(user_id) => CORE_COORDINATOR
-                .lock()
-                .map_err(|_| "core coordinator lock poisoned".to_owned())?
-                .remember_current_user_id(generation, user_id),
-            InitialSessionDataUpdate::Favorites(favorites) => {
-                publish_initial_user_data(generation, |data| {
-                    let mut snapshot = data.snapshot.clone();
-                    snapshot.favorites = favorites;
-                    snapshot.is_loading_favorites = false;
-                    data.replace_snapshot(snapshot);
-                })
-            }
-            InitialSessionDataUpdate::Playlists(playlists) => {
-                publish_initial_user_data(generation, |data| {
-                    data.snapshot.playlists = playlists;
-                    data.snapshot.is_loading_playlists = false;
-                })
-            }
-            InitialSessionDataUpdate::Playlist(playlist) => {
-                let playlist_id = playlist.playlist.media.item_id.as_str().to_owned();
-                publish_initial_user_data(generation, |data| {
-                    data.snapshot.replace_playlist(&playlist_id, Some(playlist));
-                })
-            }
-        }
-    }));
-    publish_initial_user_data(generation, |data| {
-        data.snapshot.is_loading_favorites = false;
-        data.snapshot.is_loading_playlists = false;
-        data.initial_load_result = Some(result.clone());
-    })
-    .map_err(CoreError::command_failed)?;
-    start_user_data_events()?;
+    begin_initial_user_data(generation).map_err(CoreError::command_failed)?;
+    let result =
+        CORE_NETWORK_RUNTIME.block_on(client.load_initial_user_data(|update| {
+            apply_initial_user_data_update(generation, update)
+        }));
+    complete_initial_user_data(generation, result.clone())
+        .map_err(CoreError::command_failed)?;
     result.map_err(CoreError::command_failed)?;
     read_user_data()
 }
@@ -96,7 +42,7 @@ pub(crate) fn refresh_user_data() -> Result<UserDataSnapshot, CoreError> {
     CORE_NETWORK_RUNTIME.block_on(refresh_user_data_for_session(None, UserDataRefresh::All))
 }
 
-enum UserDataRefresh {
+pub(super) enum UserDataRefresh {
     All,
     Favorites,
     Playlists,
@@ -104,7 +50,7 @@ enum UserDataRefresh {
     PlaylistCover(String),
 }
 
-async fn refresh_user_data_for_session(
+pub(super) async fn refresh_user_data_for_session(
     expected_generation: Option<u64>,
     refresh: UserDataRefresh,
 ) -> Result<UserDataSnapshot, CoreError> {
@@ -154,7 +100,7 @@ async fn refresh_user_data_for_session(
         let mut coordinator = CORE_COORDINATOR
             .lock()
             .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        if coordinator.user_data_session_generation != generation {
+        if coordinator.session_generation != generation {
             return Err(CoreError::command_failed(
                 "session changed while refreshing user data",
             ));
@@ -198,7 +144,7 @@ async fn refresh_user_data_for_session(
         let mut coordinator = CORE_COORDINATOR
             .lock()
             .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-        if coordinator.user_data_session_generation != generation {
+        if coordinator.session_generation != generation {
             return Err(CoreError::command_failed(
                 "session changed while updating playlist artwork",
             ));
@@ -234,7 +180,7 @@ pub(crate) fn set_user_data_favorites(
             .ok_or_else(|| CoreError::command_failed("a restored session is required"))?
             .client
             .clone();
-        let generation = coordinator.user_data_session_generation;
+        let generation = coordinator.session_generation;
         let data = coordinator
             .user_data
             .as_mut()
@@ -282,7 +228,7 @@ async fn run_favorite_worker(
             let Ok(coordinator) = CORE_COORDINATOR.lock() else {
                 return;
             };
-            if coordinator.user_data_session_generation != generation {
+            if coordinator.session_generation != generation {
                 return;
             }
             coordinator
@@ -304,7 +250,7 @@ async fn run_favorite_worker(
             let Ok(mut coordinator) = CORE_COORDINATOR.lock() else {
                 return;
             };
-            if coordinator.user_data_session_generation != generation {
+            if coordinator.session_generation != generation {
                 return;
             }
             let Some(data) = coordinator.user_data.as_mut() else {
@@ -442,6 +388,57 @@ pub(crate) fn remove_private_playlist_tracks(
     ))
 }
 
+// User-data startup state and updates never include recommendation results.
+pub(super) fn begin_initial_user_data(generation: u64) -> Result<(), String> {
+    publish_initial_user_data(generation, |data| {
+        data.snapshot.is_loading_favorites = true;
+        data.snapshot.is_loading_playlists = true;
+    })
+}
+
+pub(super) fn complete_initial_user_data(
+    generation: u64,
+    result: Result<(), String>,
+) -> Result<(), String> {
+    publish_initial_user_data(generation, |data| {
+        data.snapshot.is_loading_favorites = false;
+        data.snapshot.is_loading_playlists = false;
+        data.initial_load_result = Some(result);
+    })
+}
+
+pub(super) fn apply_initial_user_data_update(
+    generation: u64,
+    update: InitialUserDataUpdate,
+) -> Result<(), String> {
+    match update {
+        InitialUserDataUpdate::UserIdentity(user_id) => CORE_COORDINATOR
+            .lock()
+            .map_err(|_| "core coordinator lock poisoned".to_owned())?
+            .remember_current_user_id(generation, user_id),
+        InitialUserDataUpdate::Favorites(favorites) => {
+            publish_initial_user_data(generation, |data| {
+                let mut snapshot = data.snapshot.clone();
+                snapshot.favorites = favorites;
+                snapshot.is_loading_favorites = false;
+                data.replace_snapshot(snapshot);
+            })
+        }
+        InitialUserDataUpdate::Playlists(playlists) => {
+            publish_initial_user_data(generation, |data| {
+                data.snapshot.playlists = playlists;
+                data.snapshot.is_loading_playlists = false;
+            })
+        }
+        InitialUserDataUpdate::Playlist(playlist) => {
+            let playlist_id = playlist.playlist.media.item_id.as_str().to_owned();
+            publish_initial_user_data(generation, |data| {
+                data.snapshot.replace_playlist(&playlist_id, Some(playlist))
+            })
+        }
+    }
+}
+
 // Initial snapshots retain favorite workers and reject completions from replaced sessions.
 fn publish_initial_user_data(
     generation: u64,
@@ -469,67 +466,11 @@ async fn current_session_user_id(
     Ok(user_id)
 }
 
-fn session_client() -> Result<(Arc<MusicAssistantClient>, u64), CoreError> {
-    let coordinator = CORE_COORDINATOR
-        .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    let client = coordinator
-        .connection
-        .as_ref()
-        .ok_or_else(|| CoreError::command_failed("a restored session is required"))?
-        .client
-        .clone();
-    Ok((client, coordinator.user_data_session_generation))
-}
-
 fn refresh_for_session(generation: u64) -> Result<UserDataSnapshot, CoreError> {
     CORE_NETWORK_RUNTIME.block_on(refresh_user_data_for_session(
         Some(generation),
         UserDataRefresh::Playlists,
     ))
-}
-
-// The UserData lease stays active independently of playback and ends with its session.
-fn start_user_data_events() -> Result<(), CoreError> {
-    let mut coordinator = CORE_COORDINATOR
-        .lock()
-        .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    let connection = coordinator
-        .connection
-        .as_ref()
-        .ok_or_else(|| CoreError::command_failed("session ended while starting user data events"))?
-        .clone();
-    let generation = coordinator.user_data_session_generation;
-    let hub = connection.event_hub.clone();
-    let _runtime_guard = CORE_NETWORK_RUNTIME.enter();
-    let mut receiver = {
-        let mut hub = hub
-            .lock()
-            .map_err(|_| CoreError::internal("event hub lock poisoned"))?;
-        let receiver = hub.subscribe();
-        hub.acquire(EventHubLeaseReason::UserData);
-        receiver
-    };
-    let worker = CORE_NETWORK_RUNTIME.spawn(async move {
-        loop {
-            let refresh = match receiver.recv().await {
-                Ok(MusicAssistantEvent::Connected)
-                | Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => UserDataRefresh::All,
-                Ok(MusicAssistantEvent::PlaylistsChanged) => UserDataRefresh::Playlists,
-                Ok(MusicAssistantEvent::PlaylistChanged(playlist_id)) => {
-                    UserDataRefresh::Playlist(playlist_id.0)
-                }
-                Ok(MusicAssistantEvent::FavoritesChanged) => UserDataRefresh::Favorites,
-                Err(tokio::sync::broadcast::error::RecvError::Closed) => return,
-                _ => continue,
-            };
-            if let Err(error) = refresh_user_data_for_session(Some(generation), refresh).await {
-                crate::ffi::errors::record_and_publish_error(error);
-            }
-        }
-    });
-    coordinator.user_data_events = Some(UserDataEvents { hub, worker });
-    Ok(())
 }
 
 #[cfg(test)]

@@ -42,6 +42,7 @@ impl RecommendationView {
 pub(crate) struct RecommendationSnapshot {
     pub(crate) folders: Vec<MusicAssistantRecommendationFolder>,
     pub(crate) is_loading: bool,
+    pub(crate) has_load_error: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -57,6 +58,8 @@ pub(crate) struct MusicAssistantRecommendationFolder {
     #[serde(default)]
     pub(crate) is_loading: bool,
     #[serde(default)]
+    pub(crate) has_load_error: bool,
+    #[serde(default)]
     pub(crate) playlist_tracks: Vec<Track>,
 }
 
@@ -64,6 +67,25 @@ pub(crate) struct MusicAssistantRecommendationFolder {
 mod tests {
     use super::MusicAssistantRecommendationFolder;
     use crate::music_assistant::models::media::MediaItem;
+
+    #[test]
+    fn serializes_recommendation_loading_and_errors() {
+        let folder =
+            serde_json::from_value::<MusicAssistantRecommendationFolder>(serde_json::json!({
+                "item_id": "user_exploration_weekly", "provider": "lb", "has_load_error": true
+            }))
+            .unwrap();
+        let snapshot = super::RecommendationSnapshot {
+            folders: vec![folder],
+            is_loading: false,
+            has_load_error: true,
+        };
+        let serialized = serde_json::to_value(snapshot).unwrap();
+        assert_eq!(serialized["is_loading"], false);
+        assert_eq!(serialized["has_load_error"], true);
+        assert_eq!(serialized["folders"][0]["is_loading"], false);
+        assert_eq!(serialized["folders"][0]["has_load_error"], true);
+    }
 
     #[test]
     fn deserializes_folder_name_and_description_aliases() {

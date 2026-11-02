@@ -47,6 +47,8 @@ class HomeController extends ChangeNotifier {
   final ChangeNotifier _recentListensNotifier = ChangeNotifier();
 
   bool _isLoadingRecommendations = true;
+  bool _hasLoadedRecommendations = false;
+  bool _hasLoadError = false;
   bool _isLoadingGenrePlaylists = true;
   bool _isLoadingPlaylists = true;
   bool _isLoadingTopTracks = true;
@@ -63,6 +65,7 @@ class HomeController extends ChangeNotifier {
   List<Track> _recentListens = const <Track>[];
 
   bool get isLoadingRecommendations => _isLoadingRecommendations;
+  bool get hasLoadError => _hasLoadError;
   bool get isLoadingGenrePlaylists => _isLoadingGenrePlaylists;
   bool get isLoadingPlaylists => _isLoadingPlaylists;
   bool get isLoadingTopTracks => _isLoadingTopTracks;
@@ -202,6 +205,7 @@ class HomeController extends ChangeNotifier {
       if (_isDisposed) return;
       _applyRecommendationSnapshot(snapshot);
     } catch (_) {
+      _hasLoadError = true;
       _isLoadingRecommendations = false;
       _isLoadingGenrePlaylists = false;
       _isLoadingPlaylists = false;
@@ -215,6 +219,7 @@ class HomeController extends ChangeNotifier {
   }
 
   void _applyRecommendationSnapshot(RecommendationSnapshot snapshot) {
+    _hasLoadError = snapshot.hasLoadError;
     final List<RecommendationFolder> recommendationFolders = snapshot.folders
         .where((folder) => folder.itemId.trim().isNotEmpty)
         .toList(growable: false);
@@ -222,9 +227,12 @@ class HomeController extends ChangeNotifier {
     final List<Track> recommendations = List<Track>.of(
       _tracksFromFolder(recommendationFolders, 'user_recommendations'),
     );
-    if (_isLoadingRecommendations) {
+    if (!_hasLoadedRecommendations &&
+        !snapshot.isFolderLoading('user_recommendations') &&
+        !snapshot.hasFolderLoadError('user_recommendations')) {
       _shuffle(recommendations);
       _recommendationItems = _withFavoriteStatuses(recommendations);
+      _hasLoadedRecommendations = true;
     }
     _genrePlaylists = _withFavoriteStatuses(
       _playlistsFromFolder(
@@ -371,7 +379,7 @@ class HomeController extends ChangeNotifier {
       final folder = candidates.firstWhere(
         (folder) => (folder.provider, folder.itemId) == identity,
       );
-      if (folder.isLoading) continue;
+      if (folder.isLoading || folder.hasLoadError) continue;
       final section = _loadedArtistSections.putIfAbsent(identity, () {
         final artists = folder.items
             .whereType<Artist>()

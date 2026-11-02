@@ -25,6 +25,10 @@ use tokio::runtime::Runtime;
 
 #[path = "session.rs"]
 mod session;
+#[path = "session_data.rs"]
+mod session_data;
+pub(crate) use session_data::read_or_load_session_data;
+use session_data::session_client;
 #[path = "settings.rs"]
 mod settings;
 pub(crate) use settings::{get_update_channel, save_update_channel};
@@ -60,8 +64,9 @@ pub(crate) struct CoreCoordinator {
     playback: PlaybackEngine,
     session_configuration: Option<SessionConfig>,
     user_data: Option<LibraryUserData>,
-    user_data_events: Option<user_data::UserDataEvents>,
-    user_data_session_generation: u64,
+    session_data_events: Option<session_data::SessionDataEvents>,
+    initial_session_data_result: Option<Result<(), String>>,
+    session_generation: u64,
     connection:
         Option<std::sync::Arc<crate::music_assistant::connection::MusicAssistantConnection>>,
     pending_commands: Vec<crate::playback::backend::PlaybackCommand>,
@@ -79,8 +84,9 @@ impl CoreCoordinator {
             playback: PlaybackEngine::new(),
             session_configuration: None,
             user_data: None,
-            user_data_events: None,
-            user_data_session_generation: 0,
+            session_data_events: None,
+            initial_session_data_result: None,
+            session_generation: 0,
             connection: None,
             pending_commands: Vec::new(),
         }
@@ -92,7 +98,14 @@ impl CoreCoordinator {
         self.pending_commands.clear();
         self.connection = None;
         self.session_configuration = None;
-        self.invalidate_user_data();
+        self.invalidate_session_data();
+    }
+
+    fn invalidate_session_data(&mut self) {
+        self.session_data_events = None;
+        self.initial_session_data_result = None;
+        self.user_data = None;
+        self.session_generation = self.session_generation.wrapping_add(1);
     }
 
     // Platform state reads project the active engine without storing duplicate core state.
@@ -115,17 +128,11 @@ impl CoreCoordinator {
         session_generation: u64,
         update: impl FnOnce(&mut LibraryUserData),
     ) -> Result<(), String> {
-        if self.user_data_session_generation != session_generation {
+        if self.session_generation != session_generation {
             return Err("session changed while loading user data".to_string());
         }
         update(self.user_data.get_or_insert_with(LibraryUserData::default));
         Ok(())
-    }
-
-    fn invalidate_user_data(&mut self) {
-        self.user_data_events = None;
-        self.user_data = None;
-        self.user_data_session_generation = self.user_data_session_generation.wrapping_add(1);
     }
 
     fn user_data_snapshot(&self) -> Result<UserDataSnapshot, String> {
@@ -161,13 +168,13 @@ where
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
     let queue_before = coordinator.playback.queue();
     let player_state_before = coordinator.playback.player_state();
-    let session_generation = coordinator.user_data_session_generation;
+    let session_generation = coordinator.session_generation;
     let result = operation(&mut coordinator);
     let commands = coordinator
         .take_pending_commands()
         .map_err(CoreError::command_failed)?;
     result.map_err(CoreError::command_failed)?;
-    let should_load_user_data = coordinator.user_data_session_generation != session_generation
+    let should_load_session_data = coordinator.session_generation != session_generation
         && coordinator.session_configuration.is_some();
     drop(coordinator);
     drop(_command_guard);
@@ -181,7 +188,7 @@ where
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
     let events = collect_media_session_events(&coordinator, queue_before, player_state_before);
     drop(coordinator);
-    if should_load_user_data {
+    if should_load_session_data {
         start_session_data_load();
     }
     Ok(events)
@@ -213,11 +220,11 @@ pub(crate) fn restore_persisted_session_and_collect_events(
     let has_restored_session = coordinator
         .restore_persisted_session()
         .map_err(CoreError::command_failed)?;
-    let should_load_user_data = has_restored_session && coordinator.user_data.is_none();
+    let should_load_session_data = has_restored_session && coordinator.user_data.is_none();
     let events = collect_media_session_events(&coordinator, queue_before, player_state_before);
     drop(coordinator);
     drop(_command_guard);
-    if should_load_user_data {
+    if should_load_session_data {
         start_session_data_load();
     }
     Ok((has_restored_session, events))
@@ -225,8 +232,8 @@ pub(crate) fn restore_persisted_session_and_collect_events(
 
 fn start_session_data_load() {
     spawn_blocking_operation(move || {
-        if let Err(error) = read_or_load_user_data() {
-            LOGGER.warn(format!("load user data failed: {}", error.message));
+        if let Err(error) = read_or_load_session_data() {
+            LOGGER.warn(format!("load session data failed: {}", error.message));
         }
     });
 }
@@ -376,7 +383,7 @@ pub(crate) fn start_music_assistant_query(
                     Err(CoreError::internal("cancel query was not dispatched"))
                 }
                 MusicAssistantQuery::Recommendations { view } => {
-                    serialize_query!(client.get_recommendations(view))
+                    serialize_query!(client.get_recommendation_data(view))
                 }
                 MusicAssistantQuery::ProviderManifests => {
                     serialize_query!(client.get_provider_manifests())
@@ -474,7 +481,7 @@ pub(crate) fn read_music_assistant_recommendations(
 ) -> Result<RecommendationSnapshot, CoreError> {
     let client = music_assistant_client_for_query("read Music Assistant recommendations")?;
     CORE_NETWORK_RUNTIME
-        .block_on(client.get_recommendations(view))
+        .block_on(client.get_recommendation_data(view))
         .map_err(CoreError::command_failed)
 }
 
@@ -767,7 +774,6 @@ mod tests {
 
     struct TestSessionStore {
         session: Mutex<Option<SessionConfig>>,
-        update_channel: Mutex<Option<crate::core::models::UpdateChannel>>,
         should_fail_writes: std::sync::Arc<std::sync::atomic::AtomicBool>,
     }
 
@@ -775,23 +781,12 @@ mod tests {
         fn new() -> Self {
             Self {
                 session: Mutex::new(None),
-                update_channel: Mutex::new(None),
                 should_fail_writes: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             }
         }
     }
 
     impl SessionStore for TestSessionStore {
-        fn get_update_channel(&self, default_channel: crate::core::models::UpdateChannel) -> Result<crate::core::models::UpdateChannel, String> {
-            let mut channel = self.update_channel.lock().map_err(|_| "test settings lock poisoned")?;
-            Ok(*channel.get_or_insert(default_channel))
-        }
-
-        fn save_update_channel(&self, channel: crate::core::models::UpdateChannel) -> Result<(), String> {
-            *self.update_channel.lock().map_err(|_| "test settings lock poisoned")? = Some(channel);
-            Ok(())
-        }
-
         fn load_session(&self) -> Result<Option<SessionConfig>, String> {
             self.session
                 .lock()
@@ -862,7 +857,7 @@ mod tests {
         coordinator.session_store.save_session(session.clone()).unwrap();
         coordinator.session_configuration = Some(session);
         coordinator.user_data = Some(Default::default());
-        let generation = coordinator.user_data_session_generation;
+        let generation = coordinator.session_generation;
 
         coordinator.logout().unwrap();
 
@@ -870,7 +865,7 @@ mod tests {
         assert!(coordinator.session_configuration.is_none());
         assert!(coordinator.connection.is_none());
         assert!(coordinator.user_data.is_none());
-        assert_ne!(coordinator.user_data_session_generation, generation);
+        assert_ne!(coordinator.session_generation, generation);
         assert!(!coordinator.restore_persisted_session().unwrap());
         coordinator.logout().unwrap();
     }
@@ -899,7 +894,7 @@ mod tests {
             .save_session(session.clone())
             .unwrap();
         coordinator.session_configuration = Some(session.clone());
-        let generation = coordinator.user_data_session_generation;
+        let generation = coordinator.session_generation;
         coordinator
             .remember_current_user_id(generation, UserId("user-1".into()))
             .unwrap();
@@ -923,7 +918,7 @@ mod tests {
             .save_session(session.clone())
             .unwrap();
         coordinator.session_configuration = Some(session.clone());
-        let generation = coordinator.user_data_session_generation;
+        let generation = coordinator.session_generation;
         assert!(coordinator
             .remember_current_user_id(generation.wrapping_add(1), UserId("other".into()))
             .is_err());
@@ -1373,13 +1368,13 @@ mod tests {
             .configure_session(session_config())
             .expect("configure session");
         coordinator.user_data = Some(super::LibraryUserData::default());
-        let generation = coordinator.user_data_session_generation;
+        let generation = coordinator.session_generation;
 
         assert!(coordinator
             .restore_persisted_session()
             .expect("restore session"));
         assert!(coordinator.user_data.is_some());
-        assert_eq!(coordinator.user_data_session_generation, generation);
+        assert_eq!(coordinator.session_generation, generation);
     }
 
     #[test]
@@ -1388,7 +1383,7 @@ mod tests {
         coordinator
             .configure_session(session_config())
             .expect("configure session");
-        let old_generation = coordinator.user_data_session_generation;
+        let old_generation = coordinator.session_generation;
         coordinator
             .configure_session(session_config())
             .expect("replace session");
@@ -1403,14 +1398,14 @@ mod tests {
     #[test]
     fn initial_user_data_progress_preserves_session_generation_and_workers() {
         let mut coordinator = test_coordinator();
-        let generation = coordinator.user_data_session_generation;
+        let generation = coordinator.session_generation;
         coordinator
             .update_initial_user_data(generation, |data| data.revision = 42)
             .unwrap();
         coordinator
             .update_initial_user_data(generation, |data| data.initial_load_result = Some(Ok(())))
             .unwrap();
-        assert_eq!(coordinator.user_data_session_generation, generation);
+        assert_eq!(coordinator.session_generation, generation);
         let data = coordinator.user_data.as_ref().unwrap();
         assert_eq!(data.revision, 42);
         assert_eq!(data.initial_load_result, Some(Ok(())));

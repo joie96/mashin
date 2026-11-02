@@ -262,6 +262,46 @@ void main() {
     expect(controller.isLoadingGenrePlaylists, isFalse);
   });
 
+  test(
+    'home adopts recovered recommendations and artist sections once',
+    () async {
+      final bridge = _HomeCoreBridge()
+        ..snapshot = const RecommendationSnapshot(
+          hasLoadError: true,
+          folders: [
+            RecommendationFolder(
+              itemId: 'user_similar_artists_seed_monthly',
+              provider: 'listenbrainz_recommendations--test',
+              title: 'Artists',
+              items: [],
+              hasLoadError: true,
+            ),
+          ],
+        );
+      final controller = HomeController(
+        coreBridge: bridge,
+        random: math.Random(42),
+      );
+      addTearDown(controller.dispose);
+      addTearDown(bridge.eventController.close);
+      await controller.load();
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.hasLoadError, isTrue);
+      expect(controller.recommendationItems, isEmpty);
+      expect(controller.artistSections, isEmpty);
+      bridge.snapshot = null;
+      bridge.eventController.add({'type': 'recommendations_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.hasLoadError, isFalse);
+      expect(controller.recommendationItems, isNotEmpty);
+      expect(controller.artistSections, hasLength(1));
+      final recommendations = controller.recommendationItems;
+      bridge.eventController.add({'type': 'recommendations_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.recommendationItems, same(recommendations));
+    },
+  );
+
   test('home maps renamed ListenBrainz folders', () async {
     final HomeController controller = HomeController(
       coreBridge: _HomeCoreBridge(),
@@ -364,6 +404,67 @@ void main() {
   );
 
   for (final bool isCompact in <bool>[true, false]) {
+    testWidgets(
+      'home recovers on route return on ${isCompact ? 'mobile' : 'desktop'}',
+      (tester) async {
+        tester.view.physicalSize = Size(isCompact ? 412 : 1100, 850);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _HomeCoreBridge()
+          ..snapshot = const RecommendationSnapshot(hasLoadError: true);
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        addTearDown(bridge.eventController.close);
+        final navigator = GlobalKey<NavigatorState>();
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: navigator,
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: isCompact
+                  ? HomeScreenMobile(coreBridge: bridge, coreEvents: events)
+                  : HomeScreenDesktop(coreBridge: bridge, coreEvents: events),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bridge.recommendationCalls, 1);
+        expect(
+          find.text('Empfehlungen konnten nicht geladen werden.'),
+          findsOneWidget,
+        );
+        unawaited(
+          navigator.currentState!.push<void>(
+            MaterialPageRoute(builder: (_) => const Scaffold()),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bridge.recommendationCalls, 1);
+        bridge.snapshot = null;
+        navigator.currentState!.pop();
+        await tester.pumpAndSettle();
+        expect(bridge.recommendationCalls, 2);
+        expect(
+          find.text('Empfehlungen konnten nicht geladen werden.'),
+          findsNothing,
+        );
+        final items = isCompact
+            ? tester
+                  .widget<MediaSlideSectionMobile<Track>>(
+                    find.byType(MediaSlideSectionMobile<Track>),
+                  )
+                  .items
+            : tester
+                  .widget<MediaSlideSectionDesktop<Track>>(
+                    find.byType(MediaSlideSectionDesktop<Track>),
+                  )
+                  .items;
+        expect(items, isNotEmpty);
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       'home interleaves artist sections before recent tracks on ${isCompact ? 'mobile' : 'desktop'}',
       (WidgetTester tester) async {

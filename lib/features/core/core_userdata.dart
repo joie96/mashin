@@ -6,7 +6,7 @@ import '../shared/item_provider_selection.dart';
 import 'core_bridge.dart';
 import 'core_models.dart';
 
-/// Projects the Rust-owned MA cache for Flutter views.
+/// Projects native favorites and private playlists for Flutter views.
 class UserData extends ChangeNotifier {
   UserData({required MashinCoreBridgeApi coreBridge})
     : _coreBridge = coreBridge {

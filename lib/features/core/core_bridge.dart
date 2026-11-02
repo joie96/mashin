@@ -255,6 +255,7 @@ abstract class MashinCoreBridgeApi {
     String playlistId,
     List<int> positionsToRemove,
   );
+  Future<void> loadSessionData();
   Future<Map<String, dynamic>> loadUserData();
   Future<Map<String, dynamic>> getUserData();
   Future<void> setUserDataFavorites(List<MediaItem> items, bool favorite);
@@ -927,11 +928,9 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   @override
   Future<UpdateChannel> getUpdateChannel({
     required UpdateChannel defaultChannel,
-  }) => _submitOperation<UpdateChannel>(
-    'getUpdateChannel',
-    <String, Object?>{'defaultChannel': defaultChannel.name},
-    (Object? result) => UpdateChannel.values.byName(result as String),
-  );
+  }) => _submitOperation<UpdateChannel>('getUpdateChannel', <String, Object?>{
+    'defaultChannel': defaultChannel.name,
+  }, (Object? result) => UpdateChannel.values.byName(result as String));
 
   @override
   Future<void> saveUpdateChannel(UpdateChannel channel) => _submitVoidOperation(
@@ -976,6 +975,10 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     'playlistId': playlistId,
     'positions': positionsToRemove,
   });
+
+  @override
+  Future<void> loadSessionData() =>
+      _submitVoidOperation('loadSessionData', const <String, Object?>{});
 
   @override
   Future<Map<String, dynamic>> loadUserData() =>

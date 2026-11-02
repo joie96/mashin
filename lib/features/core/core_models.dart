@@ -1833,10 +1833,13 @@ class RecommendationSnapshot {
   const RecommendationSnapshot({
     this.folders = const [],
     this.isLoading = false,
+    this.hasLoadError = false,
   });
 
   final List<RecommendationFolder> folders;
   final bool isLoading;
+
+  final bool hasLoadError;
 
   factory RecommendationSnapshot.fromJson(Map<String, dynamic> json) =>
       RecommendationSnapshot(
@@ -1847,6 +1850,7 @@ class RecommendationSnapshot {
             )
             .toList(growable: false),
         isLoading: json['is_loading'] as bool,
+        hasLoadError: json['has_load_error'] as bool,
       );
 
   bool isFolderLoading(String itemId) {
@@ -1854,6 +1858,13 @@ class RecommendationSnapshot {
     return matches.isEmpty
         ? isLoading
         : matches.any((folder) => folder.isLoading);
+  }
+
+  bool hasFolderLoadError(String itemId) {
+    final matches = folders.where((folder) => folder.itemId == itemId);
+    return matches.isEmpty
+        ? hasLoadError
+        : matches.any((folder) => folder.hasLoadError);
   }
 }
 
@@ -1864,6 +1875,7 @@ class RecommendationFolder {
   final String? subtitle;
   final List<MediaItem> items;
   final bool isLoading;
+  final bool hasLoadError;
   final List<Track> playlistTracks;
 
   const RecommendationFolder({
@@ -1873,6 +1885,7 @@ class RecommendationFolder {
     this.subtitle,
     required this.items,
     this.isLoading = false,
+    this.hasLoadError = false,
     this.playlistTracks = const [],
   });
 
@@ -1894,6 +1907,7 @@ class RecommendationFolder {
               .toList() ??
           const <MediaItem>[],
       isLoading: json['is_loading'] == true,
+      hasLoadError: json['has_load_error'] == true,
       playlistTracks: (json['playlist_tracks'] as List? ?? const [])
           .map((value) => Track.fromJson(value as Map<String, dynamic>))
           .toList(growable: false),

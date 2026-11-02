@@ -5,27 +5,17 @@ use super::models::media::{
 };
 use super::models::player::MusicAssistantPlayer;
 use super::models::queue::{MusicAssistantQueue, QueueItem, QueueOption, RepeatMode};
-use super::models::recommendation::{
-    MusicAssistantRecommendationFolder, RecommendationSnapshot, RecommendationView,
-};
+use super::recommendation_data::RecommendationData;
 use super::models::session::{MusicAssistantUser, ProviderInstance, ProviderManifest, ServerInfo};
 use crate::logging::Logger;
 use rand::seq::SliceRandom;
 use serde::de::DeserializeOwned;
 use serde::Deserialize;
 use serde_json::{json, Value};
-use std::collections::{HashMap, HashSet};
-use std::sync::Arc;
+use std::collections::HashMap;
 use std::time::{Duration, Instant};
 
-type CachedPlaylistTracks = Arc<tokio::sync::Mutex<Option<Vec<Track>>>>;
 static LOGGER: Logger = Logger::new(module_path!());
-
-#[derive(Default)]
-struct RecommendationCache {
-    folders: Vec<MusicAssistantRecommendationFolder>,
-    completed_views: HashSet<RecommendationView>,
-}
 
 struct ArtworkCacheEntry {
     expires_at: Instant,
@@ -154,10 +144,7 @@ pub(crate) struct MusicAssistantClient {
     http_client: reqwest::Client,
     current_user_id: tokio::sync::OnceCell<UserId>,
     artwork_cache: tokio::sync::Mutex<HashMap<(String, String, String), ArtworkCacheEntry>>,
-    recommendations: tokio::sync::Mutex<RecommendationCache>,
-    recommendations_load: tokio::sync::OnceCell<Result<(), String>>,
-    recommendation_playlist_tracks:
-        tokio::sync::Mutex<HashMap<(String, String), CachedPlaylistTracks>>,
+    pub(super) recommendation_data: RecommendationData,
 }
 
 impl MusicAssistantClient {
@@ -169,9 +156,7 @@ impl MusicAssistantClient {
             access_token,
             current_user_id: tokio::sync::OnceCell::new(),
             artwork_cache: tokio::sync::Mutex::new(HashMap::new()),
-            recommendations: tokio::sync::Mutex::new(RecommendationCache::default()),
-            recommendations_load: tokio::sync::OnceCell::new(),
-            recommendation_playlist_tracks: tokio::sync::Mutex::new(HashMap::new()),
+            recommendation_data: RecommendationData::default(),
             http_client: reqwest::Client::builder()
                 .connect_timeout(std::time::Duration::from_secs(5))
                 .timeout(std::time::Duration::from_secs(30))
@@ -393,24 +378,8 @@ impl MusicAssistantClient {
         force_refresh: bool,
         allow_dynamic_tracks: bool,
     ) -> Result<Vec<Track>, String> {
-        let cached_tracks = if force_refresh || allow_dynamic_tracks {
-            None
-        } else {
-            self.recommendation_playlist_tracks
-                .lock()
-                .await
-                .get(&(provider.to_owned(), item_id.as_str().to_owned()))
-                .cloned()
-        };
-        let mut snapshot = match cached_tracks.as_ref() {
-            Some(tracks) => Some(tracks.lock().await),
-            None => None,
-        };
-        if let Some(Some(tracks)) = snapshot.as_deref() {
-            return Ok(tracks.clone());
-        }
-        let tracks: Vec<Track> = self
-            .execute_command(
+        let load = || {
+            self.execute_command(
                 "music/playlists/playlist_tracks",
                 json!({
                     "item_id": item_id,
@@ -419,11 +388,17 @@ impl MusicAssistantClient {
                     "allow_dynamic_tracks": allow_dynamic_tracks,
                 }),
             )
-            .await?;
-        if let Some(snapshot) = snapshot.as_deref_mut() {
-            *snapshot = Some(tracks.clone());
+        };
+        if !force_refresh && !allow_dynamic_tracks {
+            if let Some(result) = self
+                .recommendation_data
+                .load_registered_playlist_tracks(item_id, provider, load)
+                .await
+            {
+                return result;
+            }
         }
-        Ok(tracks)
+        load().await
     }
 
     pub(crate) async fn get_album_tracks(
@@ -471,158 +446,6 @@ impl MusicAssistantClient {
             json!({ "limit": limit, "media_types": ["track"] }),
         )
         .await
-    }
-
-    pub(crate) async fn get_recommendations(
-        &self,
-        view: RecommendationView,
-    ) -> Result<RecommendationSnapshot, String> {
-        let cache = self.recommendations.lock().await;
-        Ok(RecommendationSnapshot {
-            folders: cache
-                .folders
-                .iter()
-                .filter(|folder| view.includes(folder.item_id.as_str()))
-                .cloned()
-                .collect(),
-            is_loading: !cache.completed_views.contains(&view),
-        })
-    }
-
-    // The session owns this one-shot load; readers never perform network work.
-    pub(crate) async fn load_recommendations(
-        &self,
-        mut on_update: impl FnMut(),
-    ) -> Result<(), String> {
-        self.recommendations_load
-            .get_or_init(|| async {
-                let started = Instant::now();
-                LOGGER.debug("Initial recommendations load started");
-                let result = self.load_recommendation_folders(&mut on_update).await;
-                LOGGER.info(format_args!(
-                    "Initial recommendations load finished: elapsed_ms={} success={}",
-                    started.elapsed().as_millis(),
-                    result.is_ok()
-                ));
-                if result.is_err() {
-                    let mut cache = self.recommendations.lock().await;
-                    cache
-                        .completed_views
-                        .extend([RecommendationView::Home, RecommendationView::Explore]);
-                }
-                on_update();
-                result
-            })
-            .await
-            .clone()
-    }
-
-    async fn load_recommendation_folders(
-        &self,
-        on_update: &mut impl FnMut(),
-    ) -> Result<(), String> {
-        let started = Instant::now();
-        LOGGER.trace("Initial recommendation folders load started");
-        let result = self
-            .execute_command::<Vec<MusicAssistantRecommendationFolder>>(
-                "music/recommendations",
-                json!({}),
-            )
-            .await;
-        LOGGER.trace(format_args!(
-            "Initial recommendation folders load finished: elapsed_ms={} success={}",
-            started.elapsed().as_millis(),
-            result.is_ok()
-        ));
-        let mut folders = result?;
-        for folder in &mut folders {
-            folder.is_loading = folder.items.is_empty()
-                || !recommendation_playlists(std::slice::from_ref(folder)).is_empty();
-        }
-        self.recommendations.lock().await.folders = folders.clone();
-        on_update();
-        for view in [RecommendationView::Home, RecommendationView::Explore] {
-            for (index, folder) in folders
-                .iter_mut()
-                .enumerate()
-                .filter(|(_, folder)| view.includes(folder.item_id.as_str()))
-            {
-                if folder.items.is_empty() {
-                    let started = Instant::now();
-                    LOGGER.trace(format_args!(
-                        "Initial recommendation items load started: provider={} folder={}",
-                        folder.provider.as_str(),
-                        folder.item_id.as_str()
-                    ));
-                    let result = self
-                        .execute_command(
-                            "music/recommendations/items",
-                            json!({"provider": folder.provider, "item_id": folder.item_id}),
-                        )
-                        .await;
-                    LOGGER.trace(format_args!(
-                        "Initial recommendation items load finished: provider={} folder={} elapsed_ms={} success={}",
-                        folder.provider.as_str(),
-                        folder.item_id.as_str(),
-                        started.elapsed().as_millis(),
-                        result.is_ok()
-                    ));
-                    match result {
-                        Ok(items) => folder.items = items,
-                        Err(error) => {
-                            LOGGER.warn(format!("load recommendation folder failed: {error}"))
-                        }
-                    }
-                }
-                for playlist in recommendation_playlists(std::slice::from_ref(folder)) {
-                    self.recommendation_playlist_tracks
-                        .lock()
-                        .await
-                        .entry((
-                            playlist.media.provider.as_str().to_owned(),
-                            playlist.media.item_id.as_str().to_owned(),
-                        ))
-                        .or_insert_with(|| Arc::new(tokio::sync::Mutex::new(None)));
-                    let started = Instant::now();
-                    LOGGER.trace(format_args!(
-                        "Initial recommendation playlist tracks load started: provider={} playlist={}",
-                        playlist.media.provider.as_str(),
-                        playlist.media.item_id.as_str()
-                    ));
-                    let result = self
-                        .get_playlist_tracks(
-                            &playlist.media.item_id,
-                            playlist.media.provider.as_str(),
-                            false,
-                            false,
-                        )
-                        .await;
-                    LOGGER.trace(format_args!(
-                        "Initial recommendation playlist tracks load finished: provider={} playlist={} elapsed_ms={} success={}",
-                        playlist.media.provider.as_str(),
-                        playlist.media.item_id.as_str(),
-                        started.elapsed().as_millis(),
-                        result.is_ok()
-                    ));
-                    match result {
-                        Ok(tracks) => folder.playlist_tracks.extend(tracks),
-                        Err(error) => {
-                            LOGGER.warn(format!("load recommendation playlist failed: {error}"))
-                        }
-                    }
-                }
-                folder.is_loading = false;
-                self.recommendations.lock().await.folders[index] = folder.clone();
-                on_update();
-            }
-            self.recommendations
-                .lock()
-                .await
-                .completed_views
-                .insert(view);
-            on_update();
-        }
-        Ok(())
     }
 
     pub(crate) async fn search_media(
@@ -1000,7 +823,7 @@ impl MusicAssistantClient {
         providers
     }
 
-    async fn execute_command<Response>(
+    pub(super) async fn execute_command<Response>(
         &self,
         command: &str,
         arguments: Value,
@@ -1202,24 +1025,6 @@ fn usable_artwork(image: &MediaItemImage) -> bool {
             .proxy_id
             .as_ref()
             .is_some_and(|proxy| !proxy.trim().is_empty())
-}
-
-// Only recommendation-owned playlists are frozen; normal library playlists stay live.
-fn recommendation_playlists(folders: &[MusicAssistantRecommendationFolder]) -> Vec<Playlist> {
-    folders
-        .iter()
-        .filter(|folder| {
-            matches!(
-                folder.item_id.as_str(),
-                "user_exploration_weekly" | "similarusers_jam_weekly"
-            )
-        })
-        .flat_map(|folder| &folder.items)
-        .filter_map(|item| match item {
-            MediaItem::Playlist(playlist) => Some(playlist.clone()),
-            _ => None,
-        })
-        .collect()
 }
 
 // Transport always sends modeled media objects, including nested media type tags.
@@ -1635,282 +1440,6 @@ pub(crate) mod tests {
             "user-1"
         );
         assert_eq!(worker.join().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn recommendations_are_isolated_between_sessions() {
-        let (first, first_worker) = server(vec![("music/recommendations", json!([]))]);
-        let (second, second_worker) = server(vec![(
-            "music/recommendations",
-            json!([{
-                "item_id":"user_recommendations", "provider":"listenbrainz",
-                "items":[{"media_type":"track", "item_id":"other", "provider":"library", "name":"Other"}]
-            }]),
-        )]);
-        first.load_recommendations(|| {}).await.unwrap();
-        second.load_recommendations(|| {}).await.unwrap();
-        assert!(first
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap()
-            .folders
-            .is_empty());
-        assert_eq!(
-            second
-                .get_recommendations(RecommendationView::Home)
-                .await
-                .unwrap()
-                .folders
-                .len(),
-            1
-        );
-        assert!(first
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap()
-            .folders
-            .is_empty());
-        assert_eq!(first_worker.join().unwrap().len(), 1);
-        assert_eq!(second_worker.join().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn recommendations_load_explore_playlist_tracks_once_without_a_page() {
-        let (client, worker) = server(vec![
-            (
-                "music/recommendations",
-                json!([{
-                    "item_id":"user_exploration_weekly", "provider":"listenbrainz",
-                    "items":[{"media_type":"playlist", "item_id":"weekly", "provider":"listenbrainz", "name":"Weekly"}]
-                }]),
-            ),
-            (
-                "music/playlists/playlist_tracks",
-                json!([{
-                    "item_id":"track", "provider":"library", "name":"Track"
-                }]),
-            ),
-        ]);
-        client.load_recommendations(|| {}).await.unwrap();
-        let snapshot = client
-            .get_recommendations(RecommendationView::Explore)
-            .await
-            .unwrap();
-        assert_eq!(snapshot.folders[0].playlist_tracks.len(), 1);
-        assert!(!snapshot.is_loading);
-        let weekly = MediaId("weekly".into());
-        let (first, second) = tokio::join!(
-            client.get_playlist_tracks(&weekly, "listenbrainz", false, false),
-            client.get_playlist_tracks(&weekly, "listenbrainz", false, false),
-        );
-        assert_eq!(first.unwrap().len(), 1);
-        assert_eq!(second.unwrap().len(), 1);
-        client
-            .get_recommendations(RecommendationView::Explore)
-            .await
-            .unwrap();
-        assert_eq!(worker.join().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn recommendations_share_inflight_and_completed_requests() {
-        let (client, worker) = server(vec![("music/recommendations", json!([]))]);
-        assert!(
-            client
-                .get_recommendations(RecommendationView::Home)
-                .await
-                .unwrap()
-                .is_loading
-        );
-        let (first, second) = tokio::join!(
-            client.load_recommendations(|| {}),
-            client.load_recommendations(|| {})
-        );
-        first.unwrap();
-        second.unwrap();
-        let (home, explore) = tokio::join!(
-            client.get_recommendations(RecommendationView::Home),
-            client.get_recommendations(RecommendationView::Explore)
-        );
-        assert!(home.unwrap().folders.is_empty());
-        assert!(explore.unwrap().folders.is_empty());
-        assert!(client
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap()
-            .folders
-            .is_empty());
-        assert_eq!(worker.join().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn recommendations_do_not_retry_failed_startup_requests_on_read() {
-        let (client, worker) = server(vec![(
-            "music/recommendations",
-            json!({"test_http_status":500}),
-        )]);
-        assert!(client.load_recommendations(|| {}).await.is_err());
-        assert!(client.load_recommendations(|| {}).await.is_err());
-        let snapshot = client
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap();
-        assert!(snapshot.folders.is_empty());
-        assert!(!snapshot.is_loading);
-        assert_eq!(worker.join().unwrap().len(), 1);
-    }
-
-    #[tokio::test]
-    async fn recommendations_skip_rows_not_used_by_home() {
-        let (client, worker) = server(vec![
-            (
-                "music/recommendations",
-                json!([
-                    {"item_id":"user_recommendations", "provider":"listenbrainz", "items":[]},
-                    {"item_id":"unused_row", "provider":"other", "items":[]}
-                ]),
-            ),
-            ("music/recommendations/items", json!([])),
-            ("test/finish", json!(null)),
-        ]);
-        client.load_recommendations(|| {}).await.unwrap();
-        client
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap();
-        client
-            .execute_http_command::<Value>("test/finish", json!({}))
-            .await
-            .unwrap();
-        let requests = worker.join().unwrap();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(requests[1]["args"]["item_id"], "user_recommendations");
-    }
-
-    #[tokio::test]
-    async fn recommendations_publish_home_before_explore_and_cache_empty_rows() {
-        let (client, worker) = server(vec![
-            (
-                "music/recommendations",
-                json!([
-                    {"item_id":"user_exploration_weekly", "provider":"listenbrainz"},
-                    {"item_id":"user_recommendations", "provider":"listenbrainz"},
-                    {"item_id":"unused_row", "provider":"other"}
-                ]),
-            ),
-            ("music/recommendations/items", json!([])),
-            ("music/recommendations/items", json!([])),
-            ("test/finish", json!(null)),
-        ]);
-        let mut updates = Vec::new();
-        client
-            .load_recommendations(|| {
-                updates.push(client.recommendations.try_lock().unwrap().folders.clone());
-            })
-            .await
-            .unwrap();
-        assert!(updates[0][0].is_loading);
-        assert!(updates[0][1].is_loading);
-        assert!(updates[1][0].is_loading);
-        assert!(!updates[1][1].is_loading);
-        client
-            .load_recommendations(|| panic!("startup was repeated"))
-            .await
-            .unwrap();
-        for view in [
-            RecommendationView::Home,
-            RecommendationView::Explore,
-            RecommendationView::Home,
-            RecommendationView::Explore,
-        ] {
-            let snapshot = client.get_recommendations(view).await.unwrap();
-            assert!(!snapshot.is_loading);
-            assert_eq!(snapshot.folders.len(), 1);
-            assert!(view.includes(snapshot.folders[0].item_id.as_str()));
-        }
-        client
-            .execute_http_command::<Value>("test/finish", json!({}))
-            .await
-            .unwrap();
-        let requests = worker.join().unwrap();
-        assert_eq!(requests.len(), 4);
-        assert_eq!(requests[1]["args"]["item_id"], "user_recommendations");
-        assert_eq!(requests[2]["args"]["item_id"], "user_exploration_weekly");
-    }
-
-    #[tokio::test]
-    async fn recommendations_keep_failed_rows_terminal_until_the_session_ends() {
-        let (client, worker) = server(vec![
-            (
-                "music/recommendations",
-                json!([
-                    {"item_id":"user_recommendations", "provider":"listenbrainz"}
-                ]),
-            ),
-            (
-                "music/recommendations/items",
-                json!({"test_http_status":500}),
-            ),
-        ]);
-        client.load_recommendations(|| {}).await.unwrap();
-        assert!(client
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap()
-            .folders[0]
-            .items
-            .is_empty());
-        assert_eq!(
-            client
-                .get_recommendations(RecommendationView::Home)
-                .await
-                .unwrap()
-                .folders[0]
-                .items
-                .len(),
-            0
-        );
-        assert_eq!(worker.join().unwrap().len(), 2);
-    }
-
-    #[tokio::test]
-    async fn recommendations_hydrate_empty_rows_and_preserve_embedded_items() {
-        let track =
-            json!({"media_type":"track", "item_id":"track", "provider":"library", "name":"Track"});
-        let (client, worker) = server(vec![
-            (
-                "music/recommendations",
-                json!([
-                    {"item_id":"user_recommendations", "provider":"listenbrainz", "items":[track.clone()]},
-                    {"item_id":"user_top_tracks_monthly", "provider":"listenbrainz"},
-                    {"item_id":"user_top_artists_monthly", "provider":"listenbrainz"}
-                ]),
-            ),
-            (
-                "music/recommendations/items",
-                json!({"test_http_status":500}),
-            ),
-            ("music/recommendations/items", json!([track])),
-        ]);
-        client.load_recommendations(|| {}).await.unwrap();
-        let folders = client
-            .get_recommendations(RecommendationView::Home)
-            .await
-            .unwrap()
-            .folders;
-        assert_eq!(folders[0].items.len(), 1);
-        assert!(folders[1].items.is_empty());
-        assert_eq!(folders[2].items.len(), 1);
-        let requests = worker.join().unwrap();
-        assert_eq!(requests.len(), 3);
-        assert_eq!(
-            requests[1]["args"],
-            json!({"provider":"listenbrainz", "item_id":"user_top_tracks_monthly"})
-        );
-        assert_eq!(
-            requests[2]["args"],
-            json!({"provider":"listenbrainz", "item_id":"user_top_artists_monthly"})
-        );
     }
 
     #[tokio::test]

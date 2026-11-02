@@ -10,7 +10,7 @@ import 'preferred_provider_controller.dart';
 class AppSessionController extends ChangeNotifier {
   static const Duration _startupTimeout = Duration(seconds: 5);
   static const Duration _sessionStartupTimeout = Duration(seconds: 20);
-  static const Duration _userDataLoadTimeout = Duration(minutes: 2);
+  static const Duration _sessionDataLoadTimeout = Duration(minutes: 2);
 
   AppSessionController({MashinCoreBridge? coreBridge})
     : coreBridge = coreBridge ?? MashinCoreBridge() {
@@ -199,13 +199,19 @@ class AppSessionController extends ChangeNotifier {
   Future<void> _loadSessionData() async {
     final controller = _userDataController;
     if (controller == null || _isDisposed) return;
-    final library = _runStartupTask(
-      'library',
-      controller.loadLibraryData,
-      _userDataLoadTimeout,
-    );
+    final sessionData = _runStartupTask('session data', () async {
+      await coreBridge.loadSessionData();
+      if (!_isDisposed && identical(controller, _userDataController)) {
+        await controller.refreshLibrarySnapshot();
+      }
+    }, _sessionDataLoadTimeout);
     await Future.wait(<Future<void>>[
-      library.then(
+      _runStartupTask(
+        'user data snapshot',
+        controller.refreshLibrarySnapshot,
+        _startupTimeout,
+      ),
+      sessionData.then(
         (_) => _runStartupTask(
           'provider icons',
           _loadProviderIcons,

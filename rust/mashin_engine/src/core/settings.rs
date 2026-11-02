@@ -1,22 +1,25 @@
 //! Application settings persistence; native playback operations retain their own lifecycle.
 
 use super::{CoreCoordinator, CORE_COORDINATOR};
+use crate::configuration::ConfigurationFile;
 use crate::core::models::{CoreError, UpdateChannel};
 
 // App preferences share the coordinator lock with session configuration writes.
 pub(crate) fn get_update_channel(default_channel: UpdateChannel) -> Result<UpdateChannel, CoreError> {
-    let coordinator = CORE_COORDINATOR
+    let _coordinator = CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    coordinator.session_store.get_update_channel(default_channel)
+    ConfigurationFile::default()
+        .get_update_channel(default_channel)
         .map_err(CoreError::command_failed)
 }
 
 pub(crate) fn save_update_channel(channel: UpdateChannel) -> Result<(), CoreError> {
-    let coordinator = CORE_COORDINATOR
+    let _coordinator = CORE_COORDINATOR
         .lock()
         .map_err(|_| CoreError::internal("core coordinator lock poisoned"))?;
-    coordinator.session_store.save_update_channel(channel)
+    ConfigurationFile::default()
+        .save_update_channel(channel)
         .map_err(CoreError::command_failed)
 }
 

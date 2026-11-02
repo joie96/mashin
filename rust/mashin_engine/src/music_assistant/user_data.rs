@@ -86,8 +86,7 @@ impl UserDataSnapshot {
     }
 }
 
-pub(crate) enum InitialSessionDataUpdate {
-    Recommendations,
+pub(crate) enum InitialUserDataUpdate {
     UserIdentity(UserId),
     Favorites(Favorites),
     Playlists(Vec<PrivatePlaylist>),
@@ -95,24 +94,13 @@ pub(crate) enum InitialSessionDataUpdate {
 }
 
 impl MusicAssistantClient {
-    // Session startup is ordered independently of page subscriptions.
-    pub(crate) async fn load_initial_session_data(
+    // User data publishes metadata before playlist tracks, independently of recommendations.
+    pub(crate) async fn load_initial_user_data(
         &self,
-        mut publish: impl FnMut(InitialSessionDataUpdate) -> Result<(), String>,
+        mut publish: impl FnMut(InitialUserDataUpdate) -> Result<(), String>,
     ) -> Result<(), String> {
-        let mut publication_error = None;
-        let recommendations = self
-            .load_recommendations(|| {
-                if let Err(error) = publish(InitialSessionDataUpdate::Recommendations) {
-                    publication_error = Some(error);
-                }
-            })
-            .await;
-        if let Some(error) = publication_error {
-            return Err(error);
-        }
         let user_id = self.get_current_user_id().await?;
-        publish(InitialSessionDataUpdate::UserIdentity(user_id.clone()))?;
+        publish(InitialUserDataUpdate::UserIdentity(user_id.clone()))?;
         let started = Instant::now();
         LOGGER.debug("Initial favorites load started");
         let result = self.load_favorites().await;
@@ -122,7 +110,7 @@ impl MusicAssistantClient {
             result.is_ok()
         ));
         let favorites = result?;
-        publish(InitialSessionDataUpdate::Favorites(favorites))?;
+        publish(InitialUserDataUpdate::Favorites(favorites))?;
         let started = Instant::now();
         LOGGER.debug("Initial private playlist metadata load started");
         let result = self.load_private_playlist_metadata(user_id.as_str()).await;
@@ -132,7 +120,7 @@ impl MusicAssistantClient {
             result.is_ok()
         ));
         let playlists = result?;
-        publish(InitialSessionDataUpdate::Playlists(playlists.clone()))?;
+        publish(InitialUserDataUpdate::Playlists(playlists.clone()))?;
         let started = Instant::now();
         LOGGER.debug(format_args!(
             "Initial private playlist tracks load started: playlists={}",
@@ -164,10 +152,10 @@ impl MusicAssistantClient {
             (playlist, error)
         }))
         .buffer_unordered(3);
-        let mut load_error = recommendations.err();
+        let mut load_error = None;
         let mut has_playlist_error = false;
         while let Some((playlist, error)) = pending.next().await {
-            publish(InitialSessionDataUpdate::Playlist(playlist))?;
+            publish(InitialUserDataUpdate::Playlist(playlist))?;
             if let Some(error) = error {
                 has_playlist_error = true;
                 load_error = Some(error);
@@ -518,68 +506,8 @@ mod tests {
     use serde_json::json;
 
     #[tokio::test]
-    async fn initial_session_data_loads_home_then_explore_then_favorites_then_playlists() {
+    async fn initial_user_data_finishes_failed_playlist_tracks_without_loading_recommendations() {
         let (client, worker) = server(vec![
-            (
-                "music/recommendations",
-                json!([
-                    {"item_id":"user_exploration_weekly", "provider":"lb"},
-                    {"item_id":"user_recommendations", "provider":"lb"}
-                ]),
-            ),
-            ("music/recommendations/items", json!([])),
-            ("music/recommendations/items", json!([])),
-            (
-                "auth/me",
-                json!({"user_id":"user-one", "username":"test", "role":"user"}),
-            ),
-            ("music/tracks/library_items", json!([])),
-            ("music/albums/library_items", json!([])),
-            ("music/artists/library_items", json!([])),
-            ("music/playlists/library_items", json!([])),
-            (
-                "music/playlists/library_items",
-                json!([
-                    {"item_id":"42", "provider":"library", "name":"Private",
-                     "access":{"owner":"user-one", "sharing":"private"}}
-                ]),
-            ),
-            ("music/playlists/playlist_tracks", json!([])),
-        ]);
-        let mut phases = Vec::new();
-        client
-            .load_initial_session_data(|update| {
-                match update {
-                    InitialSessionDataUpdate::Recommendations => {}
-                    InitialSessionDataUpdate::UserIdentity(_) => phases.push("identity"),
-                    InitialSessionDataUpdate::Favorites(_) => phases.push("favorites"),
-                    InitialSessionDataUpdate::Playlists(playlists) => {
-                        assert!(playlists[0].is_loading_tracks);
-                        phases.push("metadata");
-                    }
-                    InitialSessionDataUpdate::Playlist(playlist) => {
-                        assert!(!playlist.is_loading_tracks);
-                        phases.push("tracks");
-                    }
-                }
-                Ok(())
-            })
-            .await
-            .unwrap();
-        assert_eq!(phases, ["identity", "favorites", "metadata", "tracks"]);
-        let requests = worker.join().unwrap();
-        assert_eq!(requests[1]["args"]["item_id"], "user_recommendations");
-        assert_eq!(requests[2]["args"]["item_id"], "user_exploration_weekly");
-        assert_eq!(requests[7]["args"]["favorite"], true);
-        assert_eq!(requests[8]["args"]["summary"], true);
-        assert!(requests[8]["args"].get("provider").is_none());
-    }
-
-    #[tokio::test]
-    async fn initial_session_data_finishes_failed_playlist_tracks_without_reloading_recommendations(
-    ) {
-        let (client, worker) = server(vec![
-            ("music/recommendations", json!([])),
             ("music/tracks/library_items", json!([])),
             ("music/albums/library_items", json!([])),
             ("music/artists/library_items", json!([])),
@@ -601,8 +529,8 @@ mod tests {
             .unwrap();
         let mut finished_tracks = false;
         assert!(client
-            .load_initial_session_data(|update| {
-                if let InitialSessionDataUpdate::Playlist(playlist) = update {
+            .load_initial_user_data(|update| {
+                if let InitialUserDataUpdate::Playlist(playlist) = update {
                     assert!(!playlist.is_loading_tracks);
                     finished_tracks = true;
                 }
@@ -611,14 +539,7 @@ mod tests {
             .await
             .is_err());
         assert!(finished_tracks);
-        assert!(
-            !client
-                .get_recommendations(super::super::models::recommendation::RecommendationView::Home)
-                .await
-                .unwrap()
-                .is_loading
-        );
-        assert_eq!(worker.join().unwrap().len(), 7);
+        assert_eq!(worker.join().unwrap().len(), 6);
     }
 
     #[tokio::test]

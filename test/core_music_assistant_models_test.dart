@@ -74,6 +74,7 @@ void main() {
     () {
       final snapshot = RecommendationSnapshot.fromJson({
         'is_loading': true,
+        'has_load_error': true,
         'folders': [
           {
             'item_id': 'ready',
@@ -87,10 +88,15 @@ void main() {
             'provider': 'lb',
             'items': [],
             'is_loading': true,
+            'has_load_error': true,
           },
         ],
       });
       expect(snapshot.isLoading, isTrue);
+      expect(snapshot.hasLoadError, isTrue);
+      expect(snapshot.hasFolderLoadError('ready'), isFalse);
+      expect(snapshot.hasFolderLoadError('pending'), isTrue);
+      expect(snapshot.hasFolderLoadError('not-discovered'), isTrue);
       expect(snapshot.isFolderLoading('ready'), isFalse);
       expect(snapshot.isFolderLoading('pending'), isTrue);
       expect(snapshot.isFolderLoading('not-discovered'), isTrue);

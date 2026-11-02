@@ -37,7 +37,9 @@ class HomeScreenDesktop extends StatefulWidget {
 
 class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
   late final HomeController _controller;
+  bool _isPageVisible = true;
 
+  // Session data keeps loading while the route is covered.
   @override
   void initState() {
     super.initState();
@@ -49,6 +51,18 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.load());
     });
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final isVisible = ModalRoute.isCurrentOf(context) ?? true;
+    if (isVisible && !_isPageVisible) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted && _isPageVisible) unawaited(_controller.load());
+      });
+    }
+    _isPageVisible = isVisible;
   }
 
   @override
@@ -180,6 +194,17 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
               style: Theme.of(
                 context,
               ).textTheme.headlineSmall?.copyWith(fontWeight: FontWeight.w800),
+            ),
+          ),
+          _sectionSliver(
+            ListenableBuilder(
+              listenable: _controller,
+              builder: (context, child) => _controller.hasLoadError
+                  ? const Padding(
+                      padding: EdgeInsets.only(top: 12),
+                      child: Text('Empfehlungen konnten nicht geladen werden.'),
+                    )
+                  : const SizedBox.shrink(),
             ),
           ),
           const SliverPadding(padding: EdgeInsets.only(top: 18)),

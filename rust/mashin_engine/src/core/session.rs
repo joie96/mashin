@@ -28,7 +28,7 @@ impl CoreCoordinator {
         refresh_local_client_name(&mut session.local);
         self.configure_and_persist_session(&session)?;
         crate::logging::set_minimum_level(session.log_level.as_str())?;
-        self.invalidate_user_data();
+        self.invalidate_session_data();
         self.session_configuration = Some(session);
         Ok(())
     }
@@ -43,7 +43,7 @@ impl CoreCoordinator {
         refresh_local_client_name(&mut session.local);
         self.configure_selected_output(&session)?;
         crate::logging::set_minimum_level(session.log_level.as_str())?;
-        self.invalidate_user_data();
+        self.invalidate_session_data();
         self.session_configuration = Some(session);
         Ok(true)
     }
@@ -187,7 +187,7 @@ impl CoreCoordinator {
         generation: u64,
         user_id: UserId,
     ) -> Result<(), String> {
-        if self.user_data_session_generation != generation {
+        if self.session_generation != generation {
             return Err("session changed while resolving the current user".into());
         }
         let mut session = self

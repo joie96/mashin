@@ -2,7 +2,7 @@
 //! Version-3 secure sessions migrate file-first; failures retain the original secure entry.
 
 use crate::configuration::{ConfigurationFile, SessionPreferences};
-use crate::core::models::{SessionConfig, UpdateChannel};
+use crate::core::models::SessionConfig;
 use crate::music_assistant::models::identifiers::{AccessToken, UserId};
 use crate::music_assistant::models::session::MusicAssistantServerUrl;
 use serde::{Deserialize, Serialize};
@@ -11,8 +11,6 @@ pub(crate) trait SessionStore {
     fn load_session(&self) -> Result<Option<SessionConfig>, String>;
     fn save_session(&self, session: SessionConfig) -> Result<(), String>;
     fn clear_session(&self) -> Result<(), String>;
-    fn get_update_channel(&self, default_channel: UpdateChannel) -> Result<UpdateChannel, String>;
-    fn save_update_channel(&self, channel: UpdateChannel) -> Result<(), String>;
 }
 
 trait CredentialStore {
@@ -123,15 +121,6 @@ impl SessionStore for SplitSessionStore {
     fn clear_session(&self) -> Result<(), String> {
         self.credentials.clear()
     }
-
-    // App preferences do not require credentials or an active session.
-    fn get_update_channel(&self, default_channel: UpdateChannel) -> Result<UpdateChannel, String> {
-        self.configuration.get_update_channel(default_channel)
-    }
-
-    fn save_update_channel(&self, channel: UpdateChannel) -> Result<(), String> {
-        self.configuration.save_update_channel(channel)
-    }
 }
 
 // Platform construction retains the existing secure-store service and account identifiers.
@@ -207,6 +196,7 @@ impl CredentialStore for PlatformCredentialStore {
 mod tests {
     use super::*;
     use crate::configuration::tests::{session_config, TestDirectory};
+    use crate::core::models::UpdateChannel;
     use std::sync::{Arc, Mutex};
 
     #[derive(Default)]
@@ -280,14 +270,26 @@ mod tests {
         let directory = TestDirectory::new();
         let credentials = Arc::new(MemoryCredentials::default());
         let store = store(&directory, &credentials);
-        assert_eq!(store.get_update_channel(UpdateChannel::Dev).unwrap(), UpdateChannel::Dev);
-        store.save_update_channel(UpdateChannel::Beta).unwrap();
+        assert_eq!(
+            store.configuration.get_update_channel(UpdateChannel::Dev).unwrap(),
+            UpdateChannel::Dev
+        );
+        store
+            .configuration
+            .save_update_channel(UpdateChannel::Beta)
+            .unwrap();
         store.save_session(session_config()).unwrap();
         store.clear_session().unwrap();
-        assert_eq!(store.get_update_channel(UpdateChannel::Stable).unwrap(), UpdateChannel::Beta);
+        assert_eq!(
+            store.configuration.get_update_channel(UpdateChannel::Stable).unwrap(),
+            UpdateChannel::Beta
+        );
         *credentials.should_fail_write.lock().unwrap() = true;
         assert!(store.save_session(session_config()).is_err());
-        assert_eq!(store.get_update_channel(UpdateChannel::Stable).unwrap(), UpdateChannel::Beta);
+        assert_eq!(
+            store.configuration.get_update_channel(UpdateChannel::Stable).unwrap(),
+            UpdateChannel::Beta
+        );
         assert!(credentials.read().unwrap().is_none());
     }
 

@@ -102,28 +102,29 @@ class ExploreController extends ChangeNotifier {
   void _applySnapshot(RecommendationSnapshot snapshot) {
     _snapshot = snapshot;
     _isLoading = snapshot.isLoading;
+    _hasLoadError = snapshot.hasLoadError;
     final folders = snapshot.folders;
-    if (!_hasLoadedExploration) {
+    if (!_hasLoadedExploration &&
+        !snapshot.isFolderLoading('user_exploration_weekly') &&
+        !snapshot.hasFolderLoadError('user_exploration_weekly')) {
       _weeklyExploration = _tracksFromPlaylistFolders(
         folders,
         'user_exploration_weekly',
       )..shuffle(_random);
-      _hasLoadedExploration = !snapshot.isFolderLoading(
-        'user_exploration_weekly',
-      );
+      _hasLoadedExploration = true;
     }
     _weeklyAlbums = _itemsFromFolders<Album>(
       folders,
       'sitewide_top_albums_weekly',
     );
-    if (!_hasLoadedSimilarUsersJam) {
+    if (!_hasLoadedSimilarUsersJam &&
+        !snapshot.isFolderLoading('similarusers_jam_weekly') &&
+        !snapshot.hasFolderLoadError('similarusers_jam_weekly')) {
       _similarUsersJam = _tracksFromPlaylistFolders(
         folders,
         'similarusers_jam_weekly',
       )..shuffle(_random);
-      _hasLoadedSimilarUsersJam = !snapshot.isFolderLoading(
-        'similarusers_jam_weekly',
-      );
+      _hasLoadedSimilarUsersJam = true;
     }
     _weeklyTracks = _itemsFromFolders<Track>(
       folders,
