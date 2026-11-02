@@ -4,6 +4,7 @@ pub(crate) mod config;
 pub(crate) mod core;
 pub(crate) mod event_channel;
 pub(crate) mod models;
+mod query_tasks;
 
 pub(crate) use core::{
     get_update_channel, save_update_channel,

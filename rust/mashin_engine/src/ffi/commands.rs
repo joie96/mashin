@@ -77,7 +77,8 @@ pub extern "C" fn mashin_core_start_operation(request_json: *const c_char) -> i3
 fn is_music_assistant_query(kind: &str) -> bool {
     matches!(
         kind,
-        "recommendations"
+        "cancelQuery"
+            | "recommendations"
             | "providerManifests"
             | "providerIconData"
             | "recentlyPlayedTracks"
@@ -962,6 +963,16 @@ fn parse_tracks(tracks_json: *const c_char) -> Result<Vec<Track>, String> {
 mod tests {
     use super::*;
     use crate::core::models::UpdateChannel;
+
+    #[test]
+    fn query_cancellation_accepts_the_flutter_contract_without_a_session() {
+        assert!(is_music_assistant_query("cancelQuery"));
+        let request = std::ffi::CString::new(json!({
+            "requestId": u64::MAX,
+            "kind": "cancelQuery",
+        }).to_string()).unwrap();
+        assert_eq!(mashin_core_start_operation(request.as_ptr()), 0);
+    }
 
     #[test]
     fn update_channel_operations_validate_the_flutter_contract() {

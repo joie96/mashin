@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/theme/app_theme.dart';
@@ -7,6 +9,8 @@ import 'package:mashin/features/album/album_detail_page_mobile.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_query_scope.dart';
+import 'package:mashin/features/shared/detail_page_lifecycle.dart';
 import 'package:mashin/app/session/preferred_provider_controller.dart';
 
 void main() {
@@ -18,6 +22,53 @@ void main() {
     ),
   );
   tearDown(PreferredProviderController.instance.reset);
+
+  test('hidden album cancels tracks and reloads on return', () async {
+    final bridge = _DelayedAlbumCoreBridge();
+    final controller = AlbumDetailController(
+      coreBridge: bridge,
+      itemId: 'album-1',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(controller.dispose);
+    final loading = controller.loadAlbum();
+    await bridge.started.future;
+    await controller.setPageVisible(false);
+    await loading.timeout(const Duration(seconds: 1));
+    expect(bridge.canceledRequests, 1);
+    expect(controller.tracks, isEmpty);
+    await controller.setPageVisible(true);
+    expect(controller.isLoadingSections, isFalse);
+    expect(controller.tracks.single.itemId, 'track-1');
+    bridge.tracks.complete(const []);
+    await Future<void>.value();
+    expect(controller.tracks.single.itemId, 'track-1');
+  });
+
+  test(
+    'late tracks do not publish or start related queries after disposal',
+    () async {
+      final bridge = _DelayedAlbumCoreBridge();
+      final controller = AlbumDetailController(
+        coreBridge: bridge,
+        itemId: 'album-1',
+        providerInstanceIdOrDomain: 'library',
+      );
+      final loading = controller.loadAlbum();
+      await bridge.started.future;
+      var notifications = 0;
+      controller.tracksListenable.addListener(() => notifications++);
+      controller.dispose();
+      bridge.tracks.complete(<Track>[_track('track-1', 'library')]);
+      await loading;
+      expect(notifications, 0);
+      expect(controller.tracks, isEmpty);
+      expect(
+        bridge.queries.where((query) => query.startsWith('getSimilarTracks')),
+        isEmpty,
+      );
+    },
+  );
 
   test('album play and shuffle send the loaded provider tracks', () async {
     final bridge = _FakeAlbumCoreBridge(hasMappings: true);
@@ -43,6 +94,65 @@ void main() {
   });
 
   for (final isDesktop in <bool>[true, false]) {
+    testWidgets(
+      '${isDesktop ? 'desktop' : 'mobile'} album push cancels and pop reloads',
+      (tester) async {
+        tester.view.physicalSize = Size(isDesktop ? 1280 : 420, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _DelayedAlbumCoreBridge();
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        final navigator = GlobalKey<NavigatorState>();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            navigatorKey: navigator,
+            navigatorObservers: [detailPageRouteObserver],
+            home: Scaffold(
+              body: isDesktop
+                  ? AlbumDetailPageDesktop(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'album-1',
+                      providerInstanceIdOrDomain: 'library',
+                    )
+                  : AlbumDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'album-1',
+                      providerInstanceIdOrDomain: 'library',
+                    ),
+            ),
+          ),
+        );
+        for (var frame = 0; frame < 5 && !bridge.started.isCompleted; frame++) {
+          await tester.pump();
+        }
+        expect(bridge.started.isCompleted, isTrue);
+        unawaited(
+          navigator.currentState!.push(
+            MaterialPageRoute<void>(
+              builder: (_) => const Scaffold(body: Text('next page')),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bridge.canceledRequests, 1);
+        navigator.currentState!.pop();
+        await tester.pumpAndSettle();
+        expect(
+          bridge.queries.where((query) => query == 'getAlbum:album-1:library'),
+          hasLength(2),
+        );
+        expect(find.text('Track'), findsWidgets);
+        bridge.tracks.complete(const []);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} album header switches only sections',
       (tester) async {
@@ -171,6 +281,9 @@ void main() {
 }
 
 class _FakeAlbumCoreBridge extends Fake implements MashinCoreBridgeApi {
+  @override
+  void log(LogLevelPreference level, String category, String message) {}
+
   _FakeAlbumCoreBridge({this.hasMappings = false});
 
   final bool hasMappings;
@@ -249,6 +362,22 @@ class _FakeAlbumCoreBridge extends Fake implements MashinCoreBridgeApi {
       providerMappings: hasMappings
           ? _providerMappings('artist')
           : const <ProviderMapping>[],
+    );
+  }
+}
+
+class _DelayedAlbumCoreBridge extends _FakeAlbumCoreBridge {
+  final started = Completer<void>();
+  final tracks = Completer<List<Track>>();
+  int canceledRequests = 0;
+
+  @override
+  Future<List<Track>> getAlbumTracks(String itemId, String provider) {
+    if (started.isCompleted) return super.getAlbumTracks(itemId, provider);
+    started.complete();
+    return CoreQueryScope.current!.execute(
+      () => tracks.future,
+      onCancel: () => canceledRequests++,
     );
   }
 }

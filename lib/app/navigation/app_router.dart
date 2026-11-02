@@ -3,6 +3,7 @@ import 'package:go_router/go_router.dart';
 
 import '../../features/core/core_models.dart';
 import '../../features/shared/item_provider_selection.dart';
+import '../../features/shared/detail_page_lifecycle.dart';
 import '../../features/album/album_detail_page.dart';
 import '../../features/artist/artist_detail_page.dart';
 import '../../features/auth/login_screen.dart';
@@ -25,24 +26,56 @@ final ShellNavigationObserver _shellNavigationObserver =
 enum AppSection { home, explore, favorites, playlists, search, settings }
 
 class ShellNavigationObserver extends NavigatorObserver with ChangeNotifier {
+  void Function(LogLevelPreference, String, String)? log;
+
+  // Navigation records routes only, never arguments or query parameters.
   @override
   void didPush(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _logNavigation('push', previousRoute, route);
     notifyListeners();
   }
 
   @override
   void didPop(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _logNavigation('pop', route, previousRoute);
     notifyListeners();
   }
 
   @override
   void didRemove(Route<dynamic> route, Route<dynamic>? previousRoute) {
+    _logNavigation(
+      'remove',
+      route,
+      previousRoute,
+      level: LogLevelPreference.debug,
+    );
     notifyListeners();
   }
 
   @override
   void didReplace({Route<dynamic>? newRoute, Route<dynamic>? oldRoute}) {
+    _logNavigation('replace', oldRoute, newRoute);
     notifyListeners();
+  }
+
+  void _logNavigation(
+    String action,
+    Route<dynamic>? from,
+    Route<dynamic>? to, {
+    LogLevelPreference level = LogLevelPreference.info,
+  }) {
+    String routeName(Route<dynamic>? route) {
+      final name = route?.settings.name;
+      return name == null
+          ? (route == null ? 'none' : 'unnamed')
+          : name.split('?').first;
+    }
+
+    log?.call(
+      level,
+      'navigation',
+      'action=$action from=${routeName(from)} to=${routeName(to)}',
+    );
   }
 }
 
@@ -134,7 +167,10 @@ class AppRouter {
           ),
           ShellRoute(
             navigatorKey: _shellNavigatorKey,
-            observers: <NavigatorObserver>[_shellNavigationObserver],
+            observers: <NavigatorObserver>[
+              _shellNavigationObserver..log = session.coreBridge.log,
+              detailPageRouteObserver,
+            ],
             builder:
                 (BuildContext context, GoRouterState state, Widget child) =>
                     AppShell(

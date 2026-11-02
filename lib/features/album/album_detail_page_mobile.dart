@@ -14,6 +14,7 @@ import '../shared/widgets/media_image.dart';
 import 'album_detail_controller.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
 import '../shared/widgets/detail_title_mobile.dart';
+import '../shared/detail_page_lifecycle.dart';
 
 class AlbumDetailPageMobile extends StatefulWidget {
   const AlbumDetailPageMobile({
@@ -39,7 +40,8 @@ class AlbumDetailPageMobile extends StatefulWidget {
   State<AlbumDetailPageMobile> createState() => _AlbumDetailPageMobileState();
 }
 
-class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
+class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile>
+    with DetailPageLifecycle<AlbumDetailPageMobile> {
   late final AlbumDetailController _controller;
 
   @override
@@ -54,6 +56,11 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.loadAlbum());
     });
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    unawaited(_controller.setPageVisible(isVisible));
   }
 
   @override

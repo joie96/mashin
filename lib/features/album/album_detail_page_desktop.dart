@@ -15,6 +15,7 @@ import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'album_detail_controller.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
+import '../shared/detail_page_lifecycle.dart';
 
 class AlbumDetailPageDesktop extends StatefulWidget {
   const AlbumDetailPageDesktop({
@@ -40,7 +41,8 @@ class AlbumDetailPageDesktop extends StatefulWidget {
   State<AlbumDetailPageDesktop> createState() => _AlbumDetailPageDesktopState();
 }
 
-class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
+class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop>
+    with DetailPageLifecycle<AlbumDetailPageDesktop> {
   static const double _coverSize = 200;
 
   late final AlbumDetailController _controller;
@@ -58,6 +60,11 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.loadAlbum());
     });
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    unawaited(_controller.setPageVisible(isVisible));
   }
 
   @override

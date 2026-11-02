@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:ui' as ui;
 
@@ -6,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
+import '../core/core_query_scope.dart';
 import '../core/core_userdata.dart';
 import '../shared/detail_provider_selection.dart';
 
@@ -14,7 +16,7 @@ import '../shared/detail_provider_selection.dart';
 /// used by the desktop and mobile artist detail pages.
 class ArtistDetailController extends ChangeNotifier {
   static const int descriptionCollapsedMaxLines = 4;
-  static final http.Client _deezerHttpClient = http.Client();
+  http.Client _deezerHttpClient = http.Client();
 
   final MashinCoreBridgeApi coreBridge;
   final String itemId;
@@ -51,18 +53,61 @@ class ArtistDetailController extends ChangeNotifier {
   bool _isArtistFavorite = false;
   final Map<String, bool> _favoriteOverrides = <String, bool>{};
   bool _isDescriptionExpanded = false;
-  bool _isDisposed = false;
+  bool _isControllerDisposed = false;
+  bool _isPageVisible = true;
+  bool _requiresReload = false;
+  int _visibilityGeneration = 0;
+  CoreQueryScope _queryScope = CoreQueryScope();
+  Future<void>? _loadingFuture;
+
+  bool get _isLoadCanceled =>
+      _isControllerDisposed ||
+      (CoreQueryScope.current ?? _queryScope).isCanceled;
+
+  // Visibility owns read requests; returning waits for the canceled load before restarting.
+  Future<void> setPageVisible(bool isVisible) async {
+    if (_isControllerDisposed || _isPageVisible == isVisible) return;
+    _isPageVisible = isVisible;
+    final generation = ++_visibilityGeneration;
+    if (!isVisible) {
+      _requiresReload =
+          _loadingFuture != null || _isLoadingMetadata || isLoadingSections;
+      _queryScope.cancel();
+      _deezerHttpClient.close();
+      _logSection('page', 'hidden; read requests canceled');
+      return;
+    }
+    await _loadingFuture;
+    if (_isControllerDisposed ||
+        !_isPageVisible ||
+        generation != _visibilityGeneration) {
+      return;
+    }
+    _queryScope = CoreQueryScope();
+    _deezerHttpClient = http.Client();
+    final requiresReload = _requiresReload;
+    _requiresReload = false;
+    _logSection('page', 'visible reload=$requiresReload');
+    if (requiresReload) await loadArtist();
+  }
 
   @override
   void notifyListeners() {
-    if (!_isDisposed) {
+    if (!_isLoadCanceled) {
       super.notifyListeners();
     }
   }
 
   @override
   void dispose() {
-    _isDisposed = true;
+    _isControllerDisposed = true;
+    _queryScope.cancel();
+    _deezerHttpClient.close();
+    _logSection('page', 'disposed; pending results will be ignored');
+    _metadataNotifier.dispose();
+    _albumsNotifier.dispose();
+    _similarArtistsNotifier.dispose();
+    _topTracksNotifier.dispose();
     super.dispose();
   }
 
@@ -106,7 +151,11 @@ class ArtistDetailController extends ChangeNotifier {
   Listenable get topTracksListenable => _topTracksNotifier;
 
   // Data Loading
-  Future<void> loadArtist() async {
+  Future<void> loadArtist() => _runLoad(_loadArtist);
+
+  Future<void> _loadArtist() async {
+    if (_isLoadCanceled) return;
+    _logSection('page', 'load started');
     _isLoadingMetadata = true;
     _isLoadingAlbums = true;
     _isLoadingTopTracks = true;
@@ -114,22 +163,26 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
 
     await _loadArtistMetadata();
-    if (_isDisposed) return;
+    if (_isLoadCanceled) return;
     final Artist? originalArtist = _artist;
     if (originalArtist != null) {
       await sectionProvider.initialize(originalArtist);
     }
+    if (_isLoadCanceled) return;
     await _loadSections();
   }
 
   // Switching only reloads section data; metadata and library identity stay intact.
-  Future<void> selectProvider(ProviderMapping mapping) async {
-    if (_isDisposed || isLoadingSections) return;
+  Future<void> selectProvider(ProviderMapping mapping) =>
+      _runLoad(() => _selectProvider(mapping));
+
+  Future<void> _selectProvider(ProviderMapping mapping) async {
+    if (_isLoadCanceled || isLoadingSections) return;
     _isSelectingProvider = true;
     notifyListeners();
     try {
       await sectionProvider.select(mapping);
-      if (_isDisposed) return;
+      if (_isLoadCanceled) return;
       await _loadSections();
     } finally {
       _isSelectingProvider = false;
@@ -149,13 +202,15 @@ class ArtistDetailController extends ChangeNotifier {
     _similarArtistsNotifier.notifyListeners();
     notifyListeners();
     await _loadAlbums();
-    if (_isDisposed) return;
+    if (_isLoadCanceled) return;
     await _loadTopTracks();
-    if (_isDisposed) return;
+    if (_isLoadCanceled) return;
     await _loadSimilarArtists();
   }
 
   Future<void> _loadArtistMetadata() async {
+    final timer = Stopwatch()..start();
+    _logSection('metadata', 'started');
     _isLoadingMetadata = true;
     notifyListeners();
     try {
@@ -163,20 +218,34 @@ class ArtistDetailController extends ChangeNotifier {
         itemId,
         providerInstanceIdOrDomain,
       );
+      if (_isLoadCanceled) return;
       _artist = userDataController?.withFavoriteStatus(loaded) ?? loaded;
       final Artist? artist = _artist;
       _isArtistFavorite = artist != null && isItemFavorite(artist);
-      await _loadDeezerBiographyIfNeeded();
-    } catch (_) {
+      await _queryScope.execute(
+        _loadDeezerBiographyIfNeeded,
+        onCancel: _deezerHttpClient.close,
+      );
+      if (_isLoadCanceled) return;
+      _logSection('metadata', 'loaded elapsed_ms=${timer.elapsedMilliseconds}');
+    } catch (error) {
+      if (_isLoadCanceled) return;
+      _logSection(
+        'metadata',
+        'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
+        level: LogLevelPreference.warn,
+      );
       _artist = null;
     } finally {
       _isLoadingMetadata = false;
-      _metadataNotifier.notifyListeners();
+      if (!_isLoadCanceled) _metadataNotifier.notifyListeners();
       notifyListeners();
     }
   }
 
   Future<void> _loadAlbums() async {
+    final timer = Stopwatch()..start();
+    _logSection('albums', 'started');
     _isLoadingAlbums = true;
     notifyListeners();
     try {
@@ -184,6 +253,7 @@ class ArtistDetailController extends ChangeNotifier {
         sectionProvider.selectedItemId,
         sectionProvider.selectedProvider,
       );
+      if (_isLoadCanceled) return;
       _albums = List<Album>.unmodifiable(
         albums
             .map(
@@ -195,16 +265,28 @@ class ArtistDetailController extends ChangeNotifier {
             return (right.year ?? 0).compareTo(left.year ?? 0);
           }),
       );
-    } catch (_) {
+      _logSection(
+        'albums',
+        'loaded count=${_albums.length} elapsed_ms=${timer.elapsedMilliseconds}',
+      );
+    } catch (error) {
+      if (_isLoadCanceled) return;
+      _logSection(
+        'albums',
+        'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
+        level: LogLevelPreference.warn,
+      );
       _albums = const <Album>[];
     } finally {
       _isLoadingAlbums = false;
-      _albumsNotifier.notifyListeners();
+      if (!_isLoadCanceled) _albumsNotifier.notifyListeners();
       notifyListeners();
     }
   }
 
   Future<void> _loadSimilarArtists() async {
+    final timer = Stopwatch()..start();
+    _logSection('similar_artists', 'started');
     _isLoadingSimilarArtists = true;
     notifyListeners();
     try {
@@ -213,9 +295,11 @@ class ArtistDetailController extends ChangeNotifier {
         sectionProvider.selectedProvider,
         limit: 25,
       );
+      if (_isLoadCanceled) return;
       if (artists.isEmpty) {
         artists = await _loadSimilarArtistsFromTracks();
       }
+      if (_isLoadCanceled) return;
       _similarArtists = List<Artist>.unmodifiable(
         artists
             .map(
@@ -224,16 +308,28 @@ class ArtistDetailController extends ChangeNotifier {
             )
             .toList(growable: false),
       );
-    } catch (_) {
+      _logSection(
+        'similar_artists',
+        'loaded count=${_similarArtists.length} elapsed_ms=${timer.elapsedMilliseconds}',
+      );
+    } catch (error) {
+      if (_isLoadCanceled) return;
+      _logSection(
+        'similar_artists',
+        'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
+        level: LogLevelPreference.warn,
+      );
       _similarArtists = const <Artist>[];
     } finally {
       _isLoadingSimilarArtists = false;
-      _similarArtistsNotifier.notifyListeners();
+      if (!_isLoadCanceled) _similarArtistsNotifier.notifyListeners();
       notifyListeners();
     }
   }
 
   Future<void> _loadTopTracks() async {
+    final timer = Stopwatch()..start();
+    _logSection('top_tracks', 'started');
     _isLoadingTopTracks = true;
     notifyListeners();
     try {
@@ -241,6 +337,7 @@ class ArtistDetailController extends ChangeNotifier {
         sectionProvider.selectedItemId,
         sectionProvider.selectedProvider,
       );
+      if (_isLoadCanceled) return;
       _topTracks = List<Track>.unmodifiable(
         tracks
             .map(_withAlbumYear)
@@ -250,11 +347,21 @@ class ArtistDetailController extends ChangeNotifier {
             )
             .toList(growable: false),
       );
-    } catch (_) {
+      _logSection(
+        'top_tracks',
+        'loaded count=${_topTracks.length} elapsed_ms=${timer.elapsedMilliseconds}',
+      );
+    } catch (error) {
+      if (_isLoadCanceled) return;
+      _logSection(
+        'top_tracks',
+        'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
+        level: LogLevelPreference.warn,
+      );
       _topTracks = const <Track>[];
     } finally {
       _isLoadingTopTracks = false;
-      _topTracksNotifier.notifyListeners();
+      if (!_isLoadCanceled) _topTracksNotifier.notifyListeners();
       notifyListeners();
     }
   }
@@ -273,7 +380,7 @@ class ArtistDetailController extends ChangeNotifier {
       itemId,
       language.isEmpty ? 'de' : language,
     );
-    if (biography == null || biography.isEmpty) {
+    if (_isLoadCanceled || biography == null || biography.isEmpty) {
       return;
     }
 
@@ -310,6 +417,27 @@ class ArtistDetailController extends ChangeNotifier {
     );
   }
 
+  // A single load generation owns all sequential and parallel section requests.
+  Future<void> _runLoad(Future<void> Function() load) {
+    if (_isLoadCanceled) return Future<void>.value();
+    return _loadingFuture ??= _queryScope.run(load).whenComplete(() {
+      _loadingFuture = null;
+    });
+  }
+
+  // Diagnostics identify concurrent page instances without logging response payloads.
+  void _logSection(
+    String section,
+    String message, {
+    LogLevelPreference level = LogLevelPreference.debug,
+  }) {
+    coreBridge.log(
+      level,
+      'detail.artist',
+      'page=${identityHashCode(this)} item=$itemId provider=$providerInstanceIdOrDomain selected_provider=${sectionProvider.selectedProvider} section=$section $message',
+    );
+  }
+
   Future<String?> _getDeezerArtistBio(String artistId, String language) async {
     try {
       final http.Response loginResponse = await _deezerHttpClient.get(
@@ -321,7 +449,9 @@ class ArtistDetailController extends ChangeNotifier {
           'user-agent': 'Mozilla/5.0',
         },
       );
-      if (loginResponse.statusCode < 200 || loginResponse.statusCode >= 300) {
+      if (_isLoadCanceled ||
+          loginResponse.statusCode < 200 ||
+          loginResponse.statusCode >= 300) {
         return null;
       }
 
@@ -470,11 +600,13 @@ class ArtistDetailController extends ChangeNotifier {
       limit: 50,
       allowLookup: true,
     );
+    if (_isLoadCanceled) return const <Artist>[];
     if (similarTracks.isEmpty) {
       final List<Track> versions = await coreBridge.getTrackVersions(
         topTrack.itemId,
         topTrack.provider,
       );
+      if (_isLoadCanceled) return const <Artist>[];
       if (versions.isNotEmpty) {
         final Track fallbackVersion = versions.firstWhere(
           (Track version) => version.provider != topTrack.provider,
@@ -486,6 +618,7 @@ class ArtistDetailController extends ChangeNotifier {
           limit: 50,
           allowLookup: true,
         );
+        if (_isLoadCanceled) return const <Artist>[];
       }
     }
 

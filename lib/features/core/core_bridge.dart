@@ -10,6 +10,7 @@ import '../../app/updates/update_channel.dart';
 import '../shared/item_provider_selection.dart';
 import 'android_bridge.dart';
 import 'core_models.dart';
+import 'core_query_scope.dart';
 
 /// Resolves the selected source for actions without changing the original item.
 Future<Map<String, dynamic>> createSelectedProviderMediaItemPayload(
@@ -330,7 +331,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       StreamController<Map<String, dynamic>>.broadcast();
   final Map<int, Completer<Object?>> _pendingMusicAssistantQueries =
       <int, Completer<Object?>>{};
-  int _nextMusicAssistantQueryId = 0;
+  static int _nextMusicAssistantQueryId = 0;
   bool _disposed = false;
 
   @override
@@ -629,13 +630,21 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     String kind,
     Map<String, Object?> arguments,
     T Function(Object? decoded) decoder,
-  ) => _submitOperation<T>(kind, arguments, decoder);
+  ) => _submitOperation<T>(
+    kind,
+    arguments,
+    decoder,
+    queryScope: CoreQueryScope.current ?? CoreQueryScope(),
+  );
 
   Future<T> _submitOperation<T>(
     String kind,
     Map<String, Object?> arguments,
-    T Function(Object? result) decoder,
-  ) async {
+    T Function(Object? result) decoder, {
+    CoreQueryScope? queryScope,
+  }) async {
+    if (_disposed) throw StateError('Mashin core bridge was disposed.');
+    if (queryScope?.isCanceled ?? false) throw const CoreQueryCanceled();
     final androidBridge = _androidBridge;
     if (androidBridge != null) {
       final commands = AndroidCoreCommand.values.where(
@@ -648,6 +657,12 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     final int requestId = ++_nextMusicAssistantQueryId;
     final Completer<Object?> completer = Completer<Object?>();
     _pendingMusicAssistantQueries[requestId] = completer;
+    final timer = Stopwatch()..start();
+    log(
+      LogLevelPreference.trace,
+      'core.operation',
+      'started request_id=$requestId kind=$kind pending=${_pendingMusicAssistantQueries.length}',
+    );
     final String request = jsonEncode(<String, Object?>{
       'requestId': requestId,
       'kind': kind,
@@ -659,13 +674,68 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
         _bindings.startMusicAssistantQuery(pointer),
         'startOperation',
       );
-    } catch (_) {
+    } catch (error) {
       _pendingMusicAssistantQueries.remove(requestId);
+      log(
+        LogLevelPreference.debug,
+        'core.operation',
+        'rejected request_id=$requestId kind=$kind elapsed_ms=${timer.elapsedMilliseconds} error=$error',
+      );
       rethrow;
     } finally {
       calloc.free(pointer);
     }
-    return decoder(await completer.future);
+    try {
+      final response = queryScope == null
+          ? await completer.future
+          : await queryScope.execute(
+              () => completer.future,
+              onCancel: () {
+                final pending = _pendingMusicAssistantQueries.remove(requestId);
+                if (pending == null) return;
+                _cancelNativeQuery(requestId);
+                pending.completeError(const CoreQueryCanceled());
+              },
+            );
+      final result = decoder(response);
+      log(
+        LogLevelPreference.trace,
+        'core.operation',
+        'completed request_id=$requestId kind=$kind elapsed_ms=${timer.elapsedMilliseconds} pending=${_pendingMusicAssistantQueries.length}',
+      );
+      return result;
+    } catch (error) {
+      log(
+        LogLevelPreference.debug,
+        'core.operation',
+        'failed request_id=$requestId kind=$kind elapsed_ms=${timer.elapsedMilliseconds} error=$error',
+      );
+      rethrow;
+    }
+  }
+
+  // Cancellation uses the same FFI boundary but has no asynchronous reply.
+  void _cancelNativeQuery(int requestId) {
+    final pointer = jsonEncode({
+      'kind': 'cancelQuery',
+      'requestId': requestId,
+    }).toNativeUtf8();
+    try {
+      _throwIfError(_bindings.startMusicAssistantQuery(pointer), 'cancelQuery');
+      log(
+        LogLevelPreference.debug,
+        'core.operation',
+        'canceled request_id=$requestId',
+      );
+    } catch (error) {
+      log(
+        LogLevelPreference.warn,
+        'core.operation',
+        'cancel failed request_id=$requestId error=$error',
+      );
+    } finally {
+      calloc.free(pointer);
+    }
   }
 
   List<Artist> _decodeArtists(Object? decoded) {
@@ -996,9 +1066,11 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       await _androidBridge?.dispose();
     } finally {
       if (identical(_instance, this)) _instance = null;
-      for (final Completer<Object?> request
-          in _pendingMusicAssistantQueries.values) {
-        request.completeError(StateError('Mashin core bridge was disposed.'));
+      for (final entry in _pendingMusicAssistantQueries.entries.toList()) {
+        _cancelNativeQuery(entry.key);
+        entry.value.completeError(
+          StateError('Mashin core bridge was disposed.'),
+        );
       }
       _pendingMusicAssistantQueries.clear();
       _bindings.setEventCallback(ffi.nullptr);

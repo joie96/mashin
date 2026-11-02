@@ -103,6 +103,7 @@ pub(crate) struct CoreOperationRequest {
     rename_all_fields = "camelCase"
 )]
 pub(crate) enum MusicAssistantQuery {
+    CancelQuery,
     Recommendations {
         view: crate::music_assistant::models::recommendation::RecommendationView,
     },

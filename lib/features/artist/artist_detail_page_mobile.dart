@@ -14,6 +14,7 @@ import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
 import '../shared/widgets/detail_title_mobile.dart';
+import '../shared/detail_page_lifecycle.dart';
 
 /// Mobile artist detail page: image banner header, centered actions, description and stacked album/similar-artist/top-track sections
 class ArtistDetailPageMobile extends StatefulWidget {
@@ -41,7 +42,7 @@ class ArtistDetailPageMobile extends StatefulWidget {
 }
 
 class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
-    with TickerProviderStateMixin {
+    with TickerProviderStateMixin, DetailPageLifecycle<ArtistDetailPageMobile> {
   static const double _bannerHeight = 220;
   static const int _descriptionCollapsedMaxLines = 3;
 
@@ -65,6 +66,11 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
     if (mounted) {
       setState(() {});
     }
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    unawaited(_controller.setPageVisible(isVisible));
   }
 
   @override

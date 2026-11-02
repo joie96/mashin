@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/theme/app_theme.dart';
@@ -7,6 +9,8 @@ import 'package:mashin/features/artist/artist_detail_page_mobile.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_query_scope.dart';
+import 'package:mashin/features/shared/detail_page_lifecycle.dart';
 import 'package:mashin/app/session/preferred_provider_controller.dart';
 
 void main() {
@@ -18,6 +22,108 @@ void main() {
     ),
   );
   tearDown(PreferredProviderController.instance.reset);
+
+  test(
+    'hidden artist cancels slow requests and restarts when visible',
+    () async {
+      final bridge = _DelayedArtistCoreBridge();
+      final controller = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: 'artist-1',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(controller.dispose);
+      final loading = controller.loadArtist();
+      await bridge.started.future;
+      await controller.setPageVisible(false);
+      await loading.timeout(const Duration(seconds: 1));
+      expect(bridge.canceledRequests, 1);
+      expect(controller.topTracks, isEmpty);
+
+      final nextController = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: 'artist-2',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(nextController.dispose);
+      await nextController.loadArtist();
+      expect(nextController.isLoadingSections, isFalse);
+
+      final firstReturn = controller.setPageVisible(true);
+      await controller.setPageVisible(false);
+      final secondReturn = controller.setPageVisible(true);
+      await Future.wait([firstReturn, secondReturn]);
+      expect(controller.isLoadingSections, isFalse);
+      expect(controller.topTracks.single.itemId, 'track-1');
+      bridge.tracks.complete(const []);
+      await Future<void>.value();
+      expect(controller.topTracks.single.itemId, 'track-1');
+      expect(
+        bridge.logs.where((entry) => entry.$1 == LogLevelPreference.warn),
+        isEmpty,
+      );
+    },
+  );
+
+  test('artist hidden before initial loading loads when shown', () async {
+    final bridge = _FakeArtistCoreBridge();
+    final controller = ArtistDetailController(
+      coreBridge: bridge,
+      itemId: 'artist-1',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(controller.dispose);
+    await controller.setPageVisible(false);
+    await controller.loadArtist();
+    expect(bridge.queries, isEmpty);
+    await controller.setPageVisible(true);
+    expect(controller.isLoadingMetadata, isFalse);
+    expect(controller.isLoadingSections, isFalse);
+  });
+
+  test('late top tracks do not publish after the page is disposed', () async {
+    final bridge = _DelayedArtistCoreBridge();
+    final controller = ArtistDetailController(
+      coreBridge: bridge,
+      itemId: 'artist-1',
+      providerInstanceIdOrDomain: 'library',
+    );
+    final loading = controller.loadArtist();
+    await bridge.started.future;
+    final nextController = ArtistDetailController(
+      coreBridge: bridge,
+      itemId: 'artist-2',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(nextController.dispose);
+    await nextController.loadArtist();
+    expect(nextController.artist?.name, 'Similar Artist');
+    expect(nextController.isLoadingSections, isFalse);
+    bridge.queries.clear();
+    var notifications = 0;
+    controller.topTracksListenable.addListener(() => notifications++);
+    controller.dispose();
+    bridge.tracks.complete(<Track>[_track('track-1', 'library')]);
+    await loading;
+    expect(notifications, 0);
+    expect(controller.topTracks, isEmpty);
+    expect(
+      bridge.queries.where((query) => query.startsWith('getSimilarArtists')),
+      isEmpty,
+    );
+    expect(
+      bridge.logs.where((entry) => entry.$1 == LogLevelPreference.warn),
+      isEmpty,
+    );
+    expect(
+      bridge.logs.any(
+        (entry) =>
+            entry.$1 == LogLevelPreference.debug &&
+            entry.$3.contains('section=metadata loaded'),
+      ),
+      isTrue,
+    );
+  });
 
   test(
     'artist play and shuffle retain the selected provider for top tracks',
@@ -45,6 +151,72 @@ void main() {
   );
 
   for (final isDesktop in <bool>[true, false]) {
+    testWidgets(
+      '${isDesktop ? 'desktop' : 'mobile'} artist push cancels and pop reloads',
+      (tester) async {
+        tester.view.physicalSize = Size(isDesktop ? 1280 : 420, 900);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final bridge = _DelayedArtistCoreBridge();
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        final navigator = GlobalKey<NavigatorState>();
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: AppTheme.dark(),
+            navigatorKey: navigator,
+            navigatorObservers: [detailPageRouteObserver],
+            home: Scaffold(
+              body: isDesktop
+                  ? ArtistDetailPageDesktop(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'artist-1',
+                      providerInstanceIdOrDomain: 'library',
+                    )
+                  : ArtistDetailPageMobile(
+                      coreBridge: bridge,
+                      coreEvents: events,
+                      itemId: 'artist-1',
+                      providerInstanceIdOrDomain: 'library',
+                    ),
+            ),
+          ),
+        );
+        for (var frame = 0; frame < 5 && !bridge.started.isCompleted; frame++) {
+          await tester.pump();
+        }
+        expect(bridge.started.isCompleted, isTrue);
+        unawaited(
+          navigator.currentState!.push(
+            MaterialPageRoute<void>(
+              builder: (_) => const Scaffold(body: Text('next page')),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(bridge.canceledRequests, 1);
+        navigator.currentState!.pop();
+        await tester.pumpAndSettle();
+        expect(
+          bridge.queries.where(
+            (query) => query == 'getArtist:artist-1:library',
+          ),
+          hasLength(2),
+        );
+        expect(
+          bridge.logs.any(
+            (entry) => entry.$3.contains('section=top_tracks loaded count=1'),
+          ),
+          isTrue,
+        );
+        bridge.tracks.complete(const []);
+        await tester.pump();
+        expect(tester.takeException(), isNull);
+      },
+    );
+
     testWidgets(
       '${isDesktop ? 'desktop' : 'mobile'} header switches sections in both directions',
       (tester) async {
@@ -227,9 +399,15 @@ class _FakeArtistCoreBridge extends Fake implements MashinCoreBridgeApi {
 
   final bool hasMappings;
   final List<String> queries = <String>[];
+  final List<(LogLevelPreference, String, String)> logs = [];
   List<MediaItem> playedItems = <MediaItem>[];
   bool playedShuffle = false;
   String? playedProvider;
+
+  @override
+  void log(LogLevelPreference level, String category, String message) {
+    logs.add((level, category, message));
+  }
 
   @override
   Future<void> queuePlayMedia(
@@ -322,6 +500,23 @@ class _FakeArtistCoreBridge extends Fake implements MashinCoreBridgeApi {
   Future<List<Track>> getTrackVersions(String itemId, String provider) async {
     queries.add('getTrackVersions:$itemId:$provider');
     return <Track>[_track('track-1-alt', 'alt')];
+  }
+}
+
+class _DelayedArtistCoreBridge extends _FakeArtistCoreBridge {
+  final started = Completer<void>();
+  final tracks = Completer<List<Track>>();
+  int canceledRequests = 0;
+
+  @override
+  Future<List<Track>> getArtistTopTracks(String itemId, String provider) {
+    if (itemId != 'artist-1') return Future.value(const <Track>[]);
+    if (started.isCompleted) return super.getArtistTopTracks(itemId, provider);
+    started.complete();
+    return CoreQueryScope.current!.execute(
+      () => tracks.future,
+      onCancel: () => canceledRequests++,
+    );
   }
 }
 

@@ -14,6 +14,7 @@ import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
+import '../shared/detail_page_lifecycle.dart';
 
 /// Desktop artist detail page: header with cover/name/actions, description and
 /// paginated album/similar-artist rows plus a top-tracks table
@@ -43,7 +44,9 @@ class ArtistDetailPageDesktop extends StatefulWidget {
 }
 
 class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
-    with TickerProviderStateMixin {
+    with
+        TickerProviderStateMixin,
+        DetailPageLifecycle<ArtistDetailPageDesktop> {
   static const double _coverSize = 200;
 
   late final ArtistDetailController _controller;
@@ -61,6 +64,11 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.loadArtist());
     });
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    unawaited(_controller.setPageVisible(isVisible));
   }
 
   @override

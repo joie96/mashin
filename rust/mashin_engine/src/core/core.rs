@@ -35,6 +35,8 @@ pub(crate) use user_data::*;
 pub(crate) static CORE_COORDINATOR: Lazy<Mutex<CoreCoordinator>> =
     Lazy::new(|| Mutex::new(CoreCoordinator::new()));
 static CORE_COMMAND_SERIALIZER: Lazy<Mutex<()>> = Lazy::new(|| Mutex::new(()));
+static CORE_QUERY_TASKS: Lazy<super::query_tasks::QueryTasks> =
+    Lazy::new(super::query_tasks::QueryTasks::default);
 static CORE_USER_DATA_LOAD: Lazy<tokio::sync::Mutex<()>> =
     Lazy::new(|| tokio::sync::Mutex::new(()));
 static LOGGER: Logger = Logger::new(module_path!());
@@ -344,114 +346,126 @@ fn music_assistant_client_for_query(
 pub(crate) fn start_music_assistant_query(
     request: MusicAssistantQueryRequest,
 ) -> Result<(), CoreError> {
+    if matches!(&request.query, MusicAssistantQuery::CancelQuery) {
+        return CORE_QUERY_TASKS.cancel(request.request_id);
+    }
     let client = music_assistant_client_for_query("execute a Music Assistant query")?;
-    CORE_NETWORK_RUNTIME.spawn(async move {
-        macro_rules! serialize_query {
-            ($future:expr) => {
-                $future
-                    .await
-                    .map_err(CoreError::command_failed)
-                    .and_then(|response| {
-                        serde_json::to_value(response).map_err(|error| {
-                            CoreError::internal(format!("serialize query response failed: {error}"))
+    let request_id = request.request_id;
+    CORE_QUERY_TASKS.start(
+        CORE_NETWORK_RUNTIME.handle(),
+        request_id,
+        std::time::Duration::from_secs(45),
+        async move {
+            macro_rules! serialize_query {
+                ($future:expr) => {
+                    $future
+                        .await
+                        .map_err(CoreError::command_failed)
+                        .and_then(|response| {
+                            serde_json::to_value(response).map_err(|error| {
+                                CoreError::internal(format!(
+                                    "serialize query response failed: {error}"
+                                ))
+                            })
                         })
-                    })
-            };
-        }
+                };
+            }
 
-        let result = match request.query {
-            MusicAssistantQuery::Recommendations { view } => {
-                serialize_query!(client.get_recommendations(view))
-            }
-            MusicAssistantQuery::ProviderManifests => {
-                serialize_query!(client.get_provider_manifests())
-            }
-            MusicAssistantQuery::ProviderIconData { provider } => {
-                serialize_query!(client.get_provider_icon_data(&provider))
-            }
-            MusicAssistantQuery::RecentlyPlayedTracks { limit } => serialize_query!(async {
-                client
-                    .get_recently_played_tracks(limit.clamp(1, 100))
-                    .await
-                    .map(|tracks| tracks.into_iter().map(MediaItem::Track).collect::<Vec<_>>())
-            }),
-            MusicAssistantQuery::SearchMedia {
-                query,
-                media_type,
-                limit,
-            } => {
-                serialize_query!(client.search_media(&query, &[media_type], limit.clamp(1, 100)))
-            }
-            MusicAssistantQuery::Artist { item_id, provider } => {
-                serialize_query!(client.get_artist(&MediaId(item_id), &provider))
-            }
-            MusicAssistantQuery::Album { item_id, provider } => {
-                serialize_query!(client.get_album(&MediaId(item_id), &provider))
-            }
-            MusicAssistantQuery::AlbumTracks { item_id, provider } => {
-                serialize_query!(client.get_album_tracks(&MediaId(item_id), &provider))
-            }
-            MusicAssistantQuery::Playlist { item_id, provider } => {
-                serialize_query!(client.get_playlist(&MediaId(item_id), &provider))
-            }
-            MusicAssistantQuery::PlaylistTracks {
-                item_id,
-                provider,
-                force_refresh,
-                allow_dynamic_tracks,
-            } => serialize_query!(client.get_playlist_tracks(
-                &MediaId(item_id),
-                &provider,
-                force_refresh,
-                allow_dynamic_tracks,
-            )),
-            MusicAssistantQuery::ArtistAlbums { item_id, provider } => {
-                serialize_query!(client.get_artist_albums(&MediaId(item_id), &provider))
-            }
-            MusicAssistantQuery::ArtistTopTracks { item_id, provider } => {
-                serialize_query!(client.get_artist_top_tracks(&MediaId(item_id), &provider))
-            }
-            MusicAssistantQuery::SimilarArtists {
-                item_id,
-                provider,
-                limit,
-            } => serialize_query!(client.get_similar_artists(
-                &MediaId(item_id),
-                &provider,
-                serde_json::json!({ "limit": limit.clamp(1, 100) }),
-            )),
-            MusicAssistantQuery::SimilarTracks {
-                item_id,
-                provider,
-                limit,
-                allow_lookup,
-            } => serialize_query!(client.get_similar_tracks(
-                &MediaId(item_id),
-                &provider,
-                serde_json::json!({
-                    "limit": limit.clamp(1, 100),
-                    "allow_lookup": allow_lookup,
+            match request.query {
+                MusicAssistantQuery::CancelQuery => {
+                    Err(CoreError::internal("cancel query was not dispatched"))
+                }
+                MusicAssistantQuery::Recommendations { view } => {
+                    serialize_query!(client.get_recommendations(view))
+                }
+                MusicAssistantQuery::ProviderManifests => {
+                    serialize_query!(client.get_provider_manifests())
+                }
+                MusicAssistantQuery::ProviderIconData { provider } => {
+                    serialize_query!(client.get_provider_icon_data(&provider))
+                }
+                MusicAssistantQuery::RecentlyPlayedTracks { limit } => serialize_query!(async {
+                    client
+                        .get_recently_played_tracks(limit.clamp(1, 100))
+                        .await
+                        .map(|tracks| tracks.into_iter().map(MediaItem::Track).collect::<Vec<_>>())
                 }),
-            )),
-            MusicAssistantQuery::TrackVersions { item_id, provider } => {
-                serialize_query!(client.get_track_versions(&MediaId(item_id), &provider))
+                MusicAssistantQuery::SearchMedia {
+                    query,
+                    media_type,
+                    limit,
+                } => {
+                    serialize_query!(client.search_media(&query, &[media_type], limit.clamp(1, 100)))
+                }
+                MusicAssistantQuery::Artist { item_id, provider } => {
+                    serialize_query!(client.get_artist(&MediaId(item_id), &provider))
+                }
+                MusicAssistantQuery::Album { item_id, provider } => {
+                    serialize_query!(client.get_album(&MediaId(item_id), &provider))
+                }
+                MusicAssistantQuery::AlbumTracks { item_id, provider } => {
+                    serialize_query!(client.get_album_tracks(&MediaId(item_id), &provider))
+                }
+                MusicAssistantQuery::Playlist { item_id, provider } => {
+                    serialize_query!(client.get_playlist(&MediaId(item_id), &provider))
+                }
+                MusicAssistantQuery::PlaylistTracks {
+                    item_id,
+                    provider,
+                    force_refresh,
+                    allow_dynamic_tracks,
+                } => serialize_query!(client.get_playlist_tracks(
+                    &MediaId(item_id),
+                    &provider,
+                    force_refresh,
+                    allow_dynamic_tracks,
+                )),
+                MusicAssistantQuery::ArtistAlbums { item_id, provider } => {
+                    serialize_query!(client.get_artist_albums(&MediaId(item_id), &provider))
+                }
+                MusicAssistantQuery::ArtistTopTracks { item_id, provider } => {
+                    serialize_query!(client.get_artist_top_tracks(&MediaId(item_id), &provider))
+                }
+                MusicAssistantQuery::SimilarArtists {
+                    item_id,
+                    provider,
+                    limit,
+                } => serialize_query!(client.get_similar_artists(
+                    &MediaId(item_id),
+                    &provider,
+                    serde_json::json!({ "limit": limit.clamp(1, 100) }),
+                )),
+                MusicAssistantQuery::SimilarTracks {
+                    item_id,
+                    provider,
+                    limit,
+                    allow_lookup,
+                } => serialize_query!(client.get_similar_tracks(
+                    &MediaId(item_id),
+                    &provider,
+                    serde_json::json!({
+                        "limit": limit.clamp(1, 100),
+                        "allow_lookup": allow_lookup,
+                    }),
+                )),
+                MusicAssistantQuery::TrackVersions { item_id, provider } => {
+                    serialize_query!(client.get_track_versions(&MediaId(item_id), &provider))
+                }
             }
-        };
-
-        match result {
+        },
+        move |result| match result {
             Ok(result) => crate::ffi::event_channel::publish_json_value(serde_json::json!({
                 "type": "query_completed",
-                "requestId": request.request_id,
+                "requestId": request_id,
                 "result": result,
             })),
             Err(error) => crate::ffi::event_channel::publish_json_value(serde_json::json!({
                 "type": "query_failed",
-                "requestId": request.request_id,
+                "requestId": request_id,
                 "error": error,
             })),
-        }
-    });
-    Ok(())
+        },
+    )
 }
 
 // Synchronous Music Assistant reads for Android MediaLibrary browse callbacks.
