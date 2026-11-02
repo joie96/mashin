@@ -28,7 +28,7 @@ impl MusicAssistantClient {
         mut publish: impl FnMut(InitialSessionDataUpdate) -> Result<(), String>,
     ) -> InitialSessionDataResult {
         let mut publication_error = None;
-        let recommendation_data = self
+        let mut recommendation_data = self
             .load_recommendation_data(|| {
                 if let Err(error) = publish(InitialSessionDataUpdate::RecommendationData) {
                     publication_error = Some(error);
@@ -44,6 +44,9 @@ impl MusicAssistantClient {
         let user_data = self
             .load_initial_user_data(|update| publish(InitialSessionDataUpdate::UserData(update)))
             .await;
+        if recommendation_data.is_err() && self.has_loaded_recommendation_data().await {
+            recommendation_data = Ok(());
+        }
         InitialSessionDataResult {
             recommendation_data,
             user_data,
@@ -166,6 +169,44 @@ mod tests {
         assert_eq!(phases, ["favorites", "metadata", "tracks"]);
         client.load_recommendation_data(|| {}).await.unwrap();
         assert_eq!(worker.join().unwrap().len(), 8);
+    }
+
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn initial_session_data_uses_recommendation_recovery_during_user_data_loading() {
+        let (client, worker) = server(vec![
+            ("music/recommendations", json!({"test_http_status":500})),
+            ("music/tracks/library_items", json!([])),
+            ("music/albums/library_items", json!([])),
+            ("music/artists/library_items", json!([])),
+            ("music/playlists/library_items", json!([])),
+            ("music/recommendations", json!([])),
+            ("music/playlists/library_items", json!([])),
+        ]);
+        client
+            .initialize_current_user_id(UserId("user-one".into()))
+            .unwrap();
+        let mut has_recovered = false;
+        let result = client
+            .load_initial_session_data(|update| {
+                if matches!(
+                    update,
+                    InitialSessionDataUpdate::UserData(InitialUserDataUpdate::Favorites(_))
+                ) {
+                    tokio::task::block_in_place(|| {
+                        tokio::runtime::Handle::current()
+                            .block_on(client.load_recommendation_data(|| {}))
+                            .unwrap();
+                    });
+                    has_recovered = true;
+                }
+                Ok(())
+            })
+            .await;
+        assert!(has_recovered);
+        assert!(result.recommendation_data.is_ok());
+        assert!(result.user_data.is_ok());
+        result.into_result().unwrap();
+        assert_eq!(worker.join().unwrap().len(), 7);
     }
 
     #[tokio::test]

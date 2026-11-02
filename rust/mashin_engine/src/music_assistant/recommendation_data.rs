@@ -124,6 +124,14 @@ impl MusicAssistantClient {
         self.recommendation_data.retry.notify_one();
     }
 
+    pub(crate) async fn has_loaded_recommendation_data(&self) -> bool {
+        self.recommendation_data
+            .cache
+            .lock()
+            .await
+            .has_loaded_successfully
+    }
+
     // Cache reads wake the session worker without bypassing its retry backoff.
     pub(crate) async fn get_recommendation_data(
         &self,
