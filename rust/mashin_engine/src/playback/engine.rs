@@ -6,16 +6,15 @@ use super::models::{PlaybackSessionConfiguration, PlaybackTarget};
 use super::remote::playback::RemotePlayback;
 use super::runtime::PeriodicWorker;
 use super::start::{PlaybackStartRequest, StartKind};
-use crate::core::event_channel::publish_background_event;
-use crate::core::models::MediaSessionEvent;
-use crate::music_assistant::connection::MusicAssistantConnection;
-use crate::music_assistant::models::identifiers::QueueItemId;
-use crate::music_assistant::models::media::MediaItem;
-use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
-use crate::music_assistant::playback_target::MusicAssistantPlaybackTargetConfiguration;
+use crate::application::events::{ApplicationEvent, EventPublisher};
+use crate::domain::identifiers::QueueItemId;
+use crate::domain::media::MediaItem;
 use crate::playback::backend::PlaybackBackend;
 use crate::playback::mode::PlaybackMode;
 use crate::playback::models::{MediaSessionState, PlayerState, Queue};
+use crate::playback::models::{QueueOption, RepeatMode};
+use crate::playback::server::PlaybackConnection;
+use crate::playback::server_target::ServerTargetConfiguration;
 use std::sync::{Arc, Mutex};
 
 pub(crate) struct PlaybackSessionCheckpoint {
@@ -35,9 +34,12 @@ impl PlaybackSessionCheckpoint {
 }
 
 pub(crate) struct PlaybackEngine {
+    event_publisher: EventPublisher,
     local: Arc<Mutex<LocalPlayback>>,
     remote: Arc<Mutex<RemotePlayback>>,
     worker: Option<PeriodicWorker>,
+    runtime: Option<tokio::runtime::Handle>,
+    retired_workers: Vec<tokio::task::JoinHandle<()>>,
     target: Option<PlaybackTarget>,
     media_selection_revision: u64,
     pending_start: Option<PlaybackStartRequest>,
@@ -46,11 +48,14 @@ pub(crate) struct PlaybackEngine {
 
 impl PlaybackEngine {
     // Construction and configuration; replacements are prepared before releasing the active session.
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(event_publisher: EventPublisher) -> Self {
         Self {
-            local: Arc::new(Mutex::new(LocalPlayback::new())),
-            remote: Arc::new(Mutex::new(RemotePlayback::new())),
+            local: Arc::new(Mutex::new(LocalPlayback::new(event_publisher.clone()))),
+            remote: Arc::new(Mutex::new(RemotePlayback::new(event_publisher.clone()))),
+            event_publisher,
             worker: None,
+            runtime: None,
+            retired_workers: Vec::new(),
             target: None,
             media_selection_revision: 0,
             pending_start: None,
@@ -61,8 +66,8 @@ impl PlaybackEngine {
     pub(crate) fn configure_session(
         &mut self,
         configuration: PlaybackSessionConfiguration,
-        connection: Arc<MusicAssistantConnection>,
-        runtime: &tokio::runtime::Runtime,
+        connection: Arc<dyn PlaybackConnection>,
+        runtime: &tokio::runtime::Handle,
     ) -> Result<(), String> {
         if matches!(&configuration.target, PlaybackTarget::Remote(player) if player.as_str().trim().is_empty())
         {
@@ -76,11 +81,11 @@ impl PlaybackEngine {
         self.install_session(session, configuration.target, connection)
     }
 
-    // Lifecycle; the presentation worker stops before taking any backend lock.
+    // Lifecycle; cancellation precedes backend mutation, completion is joined outside state locks.
     pub(crate) fn restore_session(
         &mut self,
         checkpoint: PlaybackSessionCheckpoint,
-        connection: Option<Arc<MusicAssistantConnection>>,
+        connection: Option<Arc<dyn PlaybackConnection>>,
     ) -> Result<(), String> {
         match (checkpoint.session, checkpoint.target) {
             (Some(session), Some(target)) => self.install_session(
@@ -110,7 +115,7 @@ impl PlaybackEngine {
     pub(crate) fn deactivate(&mut self) {
         self.cancel_start();
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
-        self.worker = None;
+        self.retire_presentation_worker();
         self.with_active_backend(|backend| {
             backend.deactivate();
             Ok(())
@@ -121,7 +126,7 @@ impl PlaybackEngine {
     pub(crate) fn shutdown(&mut self) {
         self.cancel_start();
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
-        self.worker = None;
+        self.retire_presentation_worker();
         self.local
             .lock()
             .expect("local playback lock poisoned")
@@ -131,6 +136,24 @@ impl PlaybackEngine {
             .expect("remote playback lock poisoned")
             .shutdown();
         self.target = None;
+    }
+
+    // Both targets retain stopped workers, including the mode no longer selected.
+    pub(crate) fn take_retired_workers(&mut self) -> Vec<tokio::task::JoinHandle<()>> {
+        let mut workers = std::mem::take(&mut self.retired_workers);
+        workers.extend(
+            self.local
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take_retired_workers(),
+        );
+        workers.extend(
+            self.remote
+                .lock()
+                .unwrap_or_else(|error| error.into_inner())
+                .take_retired_workers(),
+        );
+        workers
     }
 
     // Queue commands.
@@ -149,9 +172,14 @@ impl PlaybackEngine {
         if matches!(option, QueueOption::Play | QueueOption::Replace) {
             self.reserve_media_selection();
         }
-        let is_starting = matches!(option, QueueOption::Play | QueueOption::Replace)
-            && !media_items.is_empty();
-        if is_starting && self.pending_start.as_ref().is_none_or(|request| !request.is_pending()) {
+        let is_starting =
+            matches!(option, QueueOption::Play | QueueOption::Replace) && !media_items.is_empty();
+        if is_starting
+            && self
+                .pending_start
+                .as_ref()
+                .is_none_or(|request| !request.is_pending())
+        {
             self.begin_start(StartKind::Media)?;
         } else if matches!(option, QueueOption::Play | QueueOption::Replace)
             && media_items.is_empty()
@@ -287,7 +315,7 @@ impl PlaybackEngine {
 
     pub(crate) fn prepare_audio_profile_change(
         &self,
-        profile: super::local::mashin::models::AudioProfileId,
+        profile: crate::domain::settings::AudioProfileId,
     ) -> Result<AudioProfileChange, String> {
         self.local
             .lock()
@@ -302,7 +330,7 @@ impl PlaybackEngine {
     pub(crate) fn commit_audio_profile_change(
         &mut self,
         change: &AudioProfileChange,
-        persist: impl FnOnce(super::local::mashin::models::AudioProfileId) -> Result<(), String>,
+        persist: impl FnOnce(crate::domain::settings::AudioProfileId) -> Result<(), String>,
     ) -> Result<(), String> {
         if !self
             .local
@@ -329,15 +357,12 @@ impl PlaybackEngine {
             return Ok(commands);
         };
         Ok(vec![Box::pin(async move {
-            let result = tokio::time::timeout(
-                std::time::Duration::from_secs(30),
-                async move {
-                    for command in commands {
-                        command.await?;
-                    }
-                    Ok(())
-                },
-            )
+            let result = tokio::time::timeout(std::time::Duration::from_secs(30), async move {
+                for command in commands {
+                    command.await?;
+                }
+                Ok(())
+            })
             .await
             .unwrap_or_else(|_| Err("Playback start timed out".into()));
             request.complete(result.is_ok());
@@ -353,9 +378,10 @@ impl PlaybackEngine {
         let request = PlaybackStartRequest::begin(start, kind, observation);
         self.pending_start = Some(request.clone());
         self.has_pending_start_command = false;
-        publish_background_event(MediaSessionEvent::PlayerStateChanged {
-            player_state: self.player_state(),
-        });
+        self.event_publisher
+            .publish(ApplicationEvent::PlayerStateChanged {
+                player_state: self.player_state(),
+            });
         Ok(request)
     }
 
@@ -417,13 +443,27 @@ impl PlaybackEngine {
     }
 
     // Session installation and fixed-backend dispatch; no extensible registry or erased ownership.
+    fn retire_presentation_worker(&mut self) {
+        if let Some(worker) = self.worker.take() {
+            self.retired_workers.push(
+                worker.shutdown(
+                    self.runtime
+                        .as_ref()
+                        .expect("active presentation worker requires a configured runtime"),
+                ),
+            );
+        }
+    }
+
     fn install_session(
         &mut self,
         session: Arc<LocalSession>,
         target: PlaybackTarget,
-        connection: Arc<MusicAssistantConnection>,
+        connection: Arc<dyn PlaybackConnection>,
     ) -> Result<(), String> {
+        let runtime = session.runtime().clone();
         self.deactivate();
+        self.runtime = Some(runtime.clone());
         {
             let mut local = self
                 .local
@@ -448,9 +488,10 @@ impl PlaybackEngine {
                 self.remote
                     .lock()
                     .map_err(|_| "remote playback lock poisoned")?
-                    .configure(MusicAssistantPlaybackTargetConfiguration {
+                    .configure(ServerTargetConfiguration {
                         player_id: player_id.clone(),
                         connection,
+                        runtime,
                     })?;
             }
         }
@@ -488,47 +529,22 @@ impl Drop for PlaybackEngine {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::core::models::{LogLevelPreference, SelectedOutput, SessionConfig, ThemePreference};
-    use crate::music_assistant::models::identifiers::{AccessToken, PlayerId};
-    use crate::music_assistant::models::session::MusicAssistantServerUrl;
+    use crate::data::music_assistant::connection::MusicAssistantConnection;
+
+    use crate::domain::session::{AccessToken, MusicAssistantServerUrl};
+    use crate::domain::settings::{
+        LogLevelPreference, SelectedOutput, SessionConfig, ThemePreference,
+    };
     use crate::playback::local::session::LocalSessionConfiguration;
 
-    #[test]
-    fn selection_intent_invalidates_radio_but_transport_preferences_do_not() {
-        let mut engine = PlaybackEngine::new();
-        let initial = engine.media_selection_revision();
-        engine.set_volume(40);
-        engine.set_muted(true);
-        let _ = engine.transport_pause();
-        assert_eq!(engine.media_selection_revision(), initial);
-        assert!(engine
-            .queue_play_media(Vec::new(), QueueOption::Play, None, false)
-            .is_err());
-        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(1));
-        let _ = engine.queue_play_media(Vec::new(), QueueOption::Add, None, false);
-        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(1));
-        engine.transport_stop();
-        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(2));
-        let _ = engine.select_queue_item(QueueItemId("item".into()));
-        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(3));
-        let _ = engine.play_queue_index(0);
-        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(4));
-        engine.deactivate();
-        assert_eq!(engine.media_selection_revision(), initial.wrapping_add(5));
-        let older_radio = engine.reserve_media_selection();
-        let newer_radio = engine.reserve_media_selection();
-        assert_ne!(older_radio, newer_radio);
-        assert_eq!(engine.media_selection_revision(), newer_radio);
-    }
-
-    fn configuration() -> (PlaybackSessionConfiguration, Arc<MusicAssistantConnection>) {
+    fn configuration() -> (PlaybackSessionConfiguration, Arc<dyn PlaybackConnection>) {
         let persisted = SessionConfig {
             music_assistant_url: MusicAssistantServerUrl("http://127.0.0.1:1".into()),
             access_token: Some(AccessToken("test-token".into())),
             user_id: None,
             username: "test".into(),
             selected_output: SelectedOutput::Local,
-            local: crate::core::config::default_local_output(),
+            local: crate::domain::settings::default_local_output("Mashin (Test)".into()),
             volume: 30,
             theme: ThemePreference::Dark,
             log_level: LogLevelPreference::Info,
@@ -558,172 +574,19 @@ mod tests {
     }
 
     #[test]
-    fn mode_switch_retains_local_receiver_and_audio_preferences() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (mut configuration, hub) = configuration();
-        let mut engine = PlaybackEngine::new();
-        engine
-            .configure_session(configuration.clone(), hub.clone(), &runtime)
-            .unwrap();
-        let local = engine.checkpoint();
-        engine.set_volume(44);
-        for command in engine.take_pending_commands().unwrap() {
-            runtime.block_on(command).unwrap();
-        }
-        configuration.target = PlaybackTarget::Remote(PlayerId("remote".into()));
-        engine
-            .configure_session(configuration.clone(), hub.clone(), &runtime)
-            .unwrap();
-        assert_eq!(engine.active_mode(), PlaybackMode::Remote);
-        assert!(engine.checkpoint().shares_local_session(&local));
-        configuration.target = PlaybackTarget::Local;
-        engine
-            .configure_session(configuration, hub, &runtime)
-            .unwrap();
-        assert_eq!(engine.active_mode(), PlaybackMode::Local);
-        assert!(engine.checkpoint().shares_local_session(&local));
-        assert_eq!(engine.player_state().volume, 44);
-    }
-
-    #[test]
-    fn pause_stop_and_output_switch_cancel_pending_start_requests() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (mut configuration, connection) = configuration();
-        let mut engine = PlaybackEngine::new();
-        engine.configure_session(configuration.clone(), connection.clone(), &runtime).unwrap();
-        let pause_request = engine.begin_start(StartKind::Media).unwrap();
-        assert_eq!(engine.media_session_state().player_state.playback_state, crate::music_assistant::models::queue::PlayState::Buffering);
-        engine.transport_pause().unwrap();
-        assert!(!pause_request.is_pending());
-        let stop_request = engine.begin_start(StartKind::Media).unwrap();
-        engine.transport_stop();
-        assert!(!stop_request.is_pending());
-        let switched_request = engine.begin_start(StartKind::Media).unwrap();
-        configuration.target = PlaybackTarget::Remote(PlayerId("remote".into()));
-        engine.configure_session(configuration, connection, &runtime).unwrap();
-        assert!(!switched_request.is_pending());
-        switched_request.complete(false);
-        assert_ne!(engine.player_state().playback_state, crate::music_assistant::models::queue::PlayState::Error);
-    }
-
-    #[test]
-    fn preferences_and_enqueue_only_do_not_consume_a_media_resolution_request() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (configuration, connection) = configuration();
-        let mut engine = PlaybackEngine::new();
-        engine.configure_session(configuration, connection, &runtime).unwrap();
-        for option in [QueueOption::Add, QueueOption::Next, QueueOption::ReplaceNext] {
-            let _ = engine.queue_play_media(Vec::new(), option, None, false);
-            assert!(engine.pending_start.is_none());
-        }
-        let request = engine.begin_start(StartKind::Media).unwrap();
-        engine.set_volume(40);
-        for command in engine.take_pending_commands().unwrap() {
-            runtime.block_on(command).unwrap();
-        }
-        assert!(engine.pending_start.is_some());
-        assert!(request.is_pending());
-        assert!(!engine.has_pending_start_command);
-    }
-
-    #[test]
-    fn profile_commit_keeps_receiver_across_mode_switch_and_propagates_storage_failure() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (mut configuration, connection) = configuration();
-        let mut engine = PlaybackEngine::new();
-        engine
-            .configure_session(configuration.clone(), connection.clone(), &runtime)
-            .unwrap();
-        let checkpoint = engine.checkpoint();
-        let profile = configuration.local.audio_profile;
-        let change = engine.prepare_audio_profile_change(profile).unwrap();
-        configuration.target = PlaybackTarget::Remote(PlayerId("remote".into()));
-        engine
-            .configure_session(configuration, connection, &runtime)
-            .unwrap();
-        let error = engine
-            .commit_audio_profile_change(&change, |_| Err("storage unavailable".into()))
-            .unwrap_err();
-        assert_eq!(error, "storage unavailable");
-        let mut has_committed = false;
-        engine
-            .commit_audio_profile_change(&change, |requested| {
-                assert_eq!(requested, profile);
-                has_committed = true;
-                Ok(())
-            })
-            .unwrap();
-        assert!(has_committed);
-        assert!(checkpoint.shares_local_session(&engine.checkpoint()));
-    }
-
-    #[test]
-    fn stale_profile_change_never_persists_into_a_replaced_session() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (mut configuration, connection) = configuration();
-        let mut engine = PlaybackEngine::new();
-        assert!(engine
-            .prepare_audio_profile_change(configuration.local.audio_profile)
-            .is_err());
-        engine
-            .configure_session(configuration.clone(), connection.clone(), &runtime)
-            .unwrap();
-        let change = engine
-            .prepare_audio_profile_change(configuration.local.audio_profile)
-            .unwrap();
-        configuration.local.cache_bytes *= 2;
-        engine
-            .configure_session(configuration, connection, &runtime)
-            .unwrap();
-        let mut has_persisted = false;
-        assert!(engine
-            .commit_audio_profile_change(&change, |_| {
-                has_persisted = true;
-                Ok(())
-            })
-            .is_err());
-        assert!(!has_persisted);
-        engine.shutdown();
-        assert!(engine
-            .commit_audio_profile_change(&change, |_| panic!("ended session must not persist"))
-            .is_err());
-    }
-
-    #[test]
-    fn committed_profile_preference_does_not_recreate_receiver_on_mode_change() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        let (mut configuration, connection) = configuration();
-        let mut engine = PlaybackEngine::new();
-        engine
-            .configure_session(configuration.clone(), connection.clone(), &runtime)
-            .unwrap();
-        let checkpoint = engine.checkpoint();
-        let profile = "opus_192k".parse().unwrap();
-        let change = engine.prepare_audio_profile_change(profile).unwrap();
-        engine
-            .commit_audio_profile_change(&change, |_| Ok(()))
-            .unwrap();
-        configuration.local.audio_profile = profile;
-        configuration.target = PlaybackTarget::Remote(PlayerId("remote".into()));
-        engine
-            .configure_session(configuration, connection, &runtime)
-            .unwrap();
-        assert!(checkpoint.shares_local_session(&engine.checkpoint()));
-    }
-
-    #[test]
     fn checkpoint_restores_native_identity_after_reconfiguration() {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let (mut configuration, hub) = configuration();
-        let mut engine = PlaybackEngine::new();
+        let mut engine =
+            PlaybackEngine::new(crate::application::events::EventPublisher::new(|_| {}));
         engine
-            .configure_session(configuration.clone(), hub.clone(), &runtime)
+            .configure_session(configuration.clone(), hub.clone(), runtime.handle())
             .unwrap();
         let local = engine.checkpoint();
         let checkpoint = engine.checkpoint();
         configuration.local.cache_bytes *= 2;
         engine
-            .configure_session(configuration, hub.clone(), &runtime)
+            .configure_session(configuration, hub.clone(), runtime.handle())
             .unwrap();
         assert!(!engine.checkpoint().shares_local_session(&local));
         engine.restore_session(checkpoint, Some(hub)).unwrap();

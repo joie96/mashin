@@ -1,10 +1,9 @@
 //! Engine-neutral queue and player-state contracts for platform adapters.
 
-use crate::music_assistant::models::identifiers::{PlayerId, QueueId, QueueItemId};
-use crate::music_assistant::models::queue::QueueItem;
-use crate::music_assistant::models::queue::{PlayState, RepeatMode};
-use serde::Serialize;
+use crate::domain::identifiers::{PlayerId, QueueId, QueueItemId};
+use serde::{Deserialize, Serialize};
 
+use crate::domain::media::{MediaItem, MediaItemImage};
 use crate::playback::mode::PlaybackMode;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -116,4 +115,73 @@ impl PlayerState {
 pub(crate) struct MediaSessionState {
     pub(crate) queue: Queue,
     pub(crate) player_state: PlayerState,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum RepeatMode {
+    #[default]
+    Off,
+    One,
+    All,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum PlayState {
+    Uninitialized,
+    #[default]
+    Idle,
+    Buffering,
+    Paused,
+    Playing,
+    Seeking,
+    Error,
+    #[serde(other)]
+    Unknown,
+}
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum QueueOption {
+    Play,
+    Replace,
+    Next,
+    ReplaceNext,
+    Add,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct StreamDetails {
+    pub(crate) provider: String,
+    pub(crate) item_id: String,
+    #[serde(default)]
+    pub(crate) duration: Option<u32>,
+}
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) struct QueueItem {
+    pub(crate) queue_id: QueueId,
+    pub(crate) queue_item_id: QueueItemId,
+    pub(crate) name: String,
+    #[serde(default)]
+    pub(crate) duration: Option<u32>,
+    #[serde(default)]
+    pub(crate) sort_index: u32,
+    #[serde(default)]
+    pub(crate) streamdetails: Option<StreamDetails>,
+    #[serde(default)]
+    pub(crate) media_item: Option<MediaItem>,
+    #[serde(default)]
+    pub(crate) image: Option<MediaItemImage>,
+    #[serde(default)]
+    pub(crate) index: u32,
+    #[serde(default = "default_true")]
+    pub(crate) available: bool,
+}
+
+fn default_true() -> bool {
+    true
 }

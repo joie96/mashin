@@ -499,7 +499,7 @@ Widget _buildMobileMediaRowAlbum({
     tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     onItemTap: onItemTap,
   );
@@ -527,7 +527,7 @@ Widget _buildMobileMediaRowPlaylist({
     tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     onItemTap: onItemTap,
   );
@@ -552,7 +552,7 @@ Widget _buildMobileMediaRowArtist({
     tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     onItemTap: onItemTap,
   );
@@ -576,7 +576,7 @@ Widget _buildMobileMediaRowTrack({
     tertiaryText: rowText.tertiary,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     onItemTap: onItemTap,
     coreEvents: coreEvents,
@@ -600,7 +600,7 @@ Widget _buildMobileMediaRowUnknown({
     tertiaryText: rowText.tertiary,
     coverUrl: '',
     providerLabel: '-',
-    providerIconSvg: null,
+    providerId: null,
     onPlayTap: onPlayTap,
     onItemTap: onItemTap,
   );
@@ -616,7 +616,7 @@ Widget _buildMobileMediaRowItemBase({
   required String? tertiaryText,
   required String? coverUrl,
   required String providerLabel,
-  required String? providerIconSvg,
+  required String? providerId,
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
   bool showPlayOverlay = true,
@@ -702,7 +702,7 @@ Widget _buildMobileMediaRowItemBase({
                     child: playbackItem == null
                         ? MediaProviderIcon(
                             providerLabel: providerLabel,
-                            iconSvg: providerIconSvg,
+                            providerId: providerId,
                             size: 18,
                           )
                         : MediaItemProviderIcon(

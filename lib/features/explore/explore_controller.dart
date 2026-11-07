@@ -15,7 +15,7 @@ class ExploreController extends ChangeNotifier {
   }) : _random = random ?? math.Random() {
     _eventSubscription = coreBridge.events.listen((event) {
       if (_hasStartedLoading && event['type'] == 'recommendations_changed') {
-        unawaited(load());
+        unawaited(load(refresh: false));
       }
     });
   }
@@ -26,6 +26,7 @@ class ExploreController extends ChangeNotifier {
   StreamSubscription<Map<String, dynamic>>? _eventSubscription;
   Future<void>? _snapshotRefresh;
   bool _needsSnapshotRefresh = false;
+  bool _shouldRefreshRecommendations = false;
   RecommendationSnapshot _snapshot = const RecommendationSnapshot(
     isLoading: true,
   );
@@ -60,15 +61,18 @@ class ExploreController extends ChangeNotifier {
   List<Artist> get weeklyArtists => _weeklyArtists;
   bool isFolderLoading(String itemId) => _snapshot.isFolderLoading(itemId);
 
-  Future<void> load() {
+  Future<void> load({bool refresh = true}) {
     if (_isDisposed) return Future.value();
     _hasStartedLoading = true;
     _needsSnapshotRefresh = true;
+    _shouldRefreshRecommendations |= refresh;
     return _snapshotRefresh ??= Future<void>.microtask(() async {
       try {
         while (_needsSnapshotRefresh && !_isDisposed) {
           _needsSnapshotRefresh = false;
-          await _loadSnapshot();
+          final shouldRefresh = _shouldRefreshRecommendations;
+          _shouldRefreshRecommendations = false;
+          await _loadSnapshot(refresh: shouldRefresh);
         }
       } finally {
         _snapshotRefresh = null;
@@ -76,13 +80,14 @@ class ExploreController extends ChangeNotifier {
     });
   }
 
-  Future<void> _loadSnapshot() async {
+  Future<void> _loadSnapshot({required bool refresh}) async {
     _isLoading = _snapshot.isLoading;
     _hasLoadError = false;
     notifyListeners();
     try {
       final snapshot = await coreBridge.getRecommendations(
         view: RecommendationView.explore,
+        refresh: refresh,
       );
       if (_isDisposed) return;
       _applySnapshot(snapshot);
@@ -104,26 +109,26 @@ class ExploreController extends ChangeNotifier {
     _isLoading = snapshot.isLoading;
     _hasLoadError = snapshot.hasLoadError;
     final folders = snapshot.folders;
-    if (!_hasLoadedExploration &&
-        !snapshot.isFolderLoading('user_exploration_weekly') &&
+    if (!snapshot.isFolderLoading('user_exploration_weekly') &&
         !snapshot.hasFolderLoadError('user_exploration_weekly')) {
       _weeklyExploration = _tracksFromPlaylistFolders(
         folders,
         'user_exploration_weekly',
-      )..shuffle(_random);
+      );
+      if (!_hasLoadedExploration) _weeklyExploration.shuffle(_random);
       _hasLoadedExploration = true;
     }
     _weeklyAlbums = _itemsFromFolders<Album>(
       folders,
       'sitewide_top_albums_weekly',
     );
-    if (!_hasLoadedSimilarUsersJam &&
-        !snapshot.isFolderLoading('similarusers_jam_weekly') &&
+    if (!snapshot.isFolderLoading('similarusers_jam_weekly') &&
         !snapshot.hasFolderLoadError('similarusers_jam_weekly')) {
       _similarUsersJam = _tracksFromPlaylistFolders(
         folders,
         'similarusers_jam_weekly',
-      )..shuffle(_random);
+      );
+      if (!_hasLoadedSimilarUsersJam) _similarUsersJam.shuffle(_random);
       _hasLoadedSimilarUsersJam = true;
     }
     _weeklyTracks = _itemsFromFolders<Track>(

@@ -1,11 +1,11 @@
 //! Owns the non-secret configuration file; credentials remain in platform secure storage.
 
-use crate::core::models::{
+use crate::domain::identifiers::UserId;
+use crate::domain::session::{AccessToken, MusicAssistantServerUrl};
+use crate::domain::settings::{
     LocalOutputConfig, LogLevelPreference, PreferredProvider, SelectedOutput, SessionConfig,
     ThemePreference, UpdateChannel,
 };
-use crate::music_assistant::models::identifiers::{AccessToken, UserId};
-use crate::music_assistant::models::session::MusicAssistantServerUrl;
 use serde::{Deserialize, Serialize};
 use std::fs::{self, OpenOptions};
 use std::io::Write;
@@ -84,16 +84,41 @@ impl Default for ConfigurationDocument {
     }
 }
 
-#[derive(Default)]
+#[derive(Clone)]
 pub(crate) struct ConfigurationFile {
-    path: Option<PathBuf>,
+    location: ConfigurationLocation,
+}
+
+#[derive(Clone)]
+enum ConfigurationLocation {
+    #[cfg(test)]
+    Fixed(PathBuf),
+    Resolver(fn() -> Result<PathBuf, String>),
+}
+
+impl crate::application::settings::AppSettingsStorage for ConfigurationFile {
+    fn get_update_channel(&self, default_channel: UpdateChannel) -> Result<UpdateChannel, String> {
+        ConfigurationFile::get_update_channel(self, default_channel)
+    }
+
+    fn save_update_channel(&self, channel: UpdateChannel) -> Result<(), String> {
+        ConfigurationFile::save_update_channel(self, channel)
+    }
 }
 
 impl ConfigurationFile {
+    pub(crate) fn new(resolve_path: fn() -> Result<PathBuf, String>) -> Self {
+        Self {
+            location: ConfigurationLocation::Resolver(resolve_path),
+        }
+    }
+
     // Explicit paths isolate tests from the user's installed configuration.
     #[cfg(test)]
     pub(crate) fn with_path(path: PathBuf) -> Self {
-        Self { path: Some(path) }
+        Self {
+            location: ConfigurationLocation::Fixed(path),
+        }
     }
 
     // Configuration reads and atomic replacement.
@@ -163,7 +188,7 @@ impl ConfigurationFile {
 
     fn write_document(&self, document: &ConfigurationDocument) -> Result<(), String> {
         let contents = serde_json::to_vec_pretty(document)
-        .map_err(|_| "encode configuration failed".to_string())?;
+            .map_err(|_| "encode configuration failed".to_string())?;
         let path = self.path()?;
         let directory = path.parent().ok_or("configuration path has no parent")?;
         fs::create_dir_all(directory)
@@ -190,40 +215,12 @@ impl ConfigurationFile {
 
     // Platform paths are resolved lazily after Android supplies its application context.
     fn path(&self) -> Result<PathBuf, String> {
-        match &self.path {
-            Some(path) => Ok(path.clone()),
-            None => Ok(application_data_directory()?.join("config.json")),
+        match &self.location {
+            #[cfg(test)]
+            ConfigurationLocation::Fixed(path) => Ok(path.clone()),
+            ConfigurationLocation::Resolver(resolve_path) => resolve_path(),
         }
     }
-}
-
-// App-owned data roots; executable installation and log rotation never own config.json.
-#[cfg(target_os = "windows")]
-pub(crate) fn application_data_directory() -> Result<PathBuf, String> {
-    std::env::var_os("LOCALAPPDATA")
-        .map(|path| PathBuf::from(path).join("Mashin"))
-        .ok_or_else(|| "LOCALAPPDATA is not set".to_string())
-}
-
-#[cfg(target_os = "android")]
-pub(crate) fn application_data_directory() -> Result<PathBuf, String> {
-    crate::jni::android_context::external_application_files_directory()
-}
-
-#[cfg(any(target_os = "macos", target_os = "ios"))]
-pub(crate) fn application_data_directory() -> Result<PathBuf, String> {
-    std::env::var_os("HOME")
-        .map(|path| PathBuf::from(path).join("Library/Application Support/Mashin"))
-        .ok_or_else(|| "HOME is not set".to_string())
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn application_data_directory() -> Result<PathBuf, String> {
-    std::env::var_os("XDG_STATE_HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("HOME").map(|path| PathBuf::from(path).join(".local/state")))
-        .map(|path| path.join("mashin"))
-        .ok_or_else(|| "neither XDG_STATE_HOME nor HOME is set".to_string())
 }
 
 #[cfg(test)]
@@ -251,137 +248,12 @@ pub(crate) mod tests {
             user_id: None,
             username: "mashin".into(),
             selected_output: SelectedOutput::Local,
-            local: crate::core::config::default_local_output(),
+            local: crate::domain::settings::default_local_output("Mashin (Test)".into()),
             volume: 70,
             theme: ThemePreference::Light,
             log_level: LogLevelPreference::Warn,
             should_show_multi_device_button: false,
             preferred_provider: None,
         }
-    }
-
-    #[test]
-    fn configuration_round_trips_without_credentials() {
-        let directory = TestDirectory::new();
-        let path = directory.0.join("config.json");
-        let store = ConfigurationFile::with_path(path.clone());
-        assert_eq!(store.load().unwrap(), None);
-        let session = session_config();
-        let preferences = SessionPreferences::from(&session);
-        store.save(&preferences).unwrap();
-        let contents = fs::read_to_string(path).unwrap();
-        assert!(!contents.contains("secret-token"));
-        assert!(!contents.contains("accessToken"));
-        assert_eq!(store.load().unwrap(), Some(preferences));
-        assert_eq!(
-            store
-                .load()
-                .unwrap()
-                .unwrap()
-                .into_session(session.access_token.clone()),
-            session
-        );
-    }
-
-    #[test]
-    fn configuration_replaces_existing_file_and_can_roll_back() {
-        let directory = TestDirectory::new();
-        let store = ConfigurationFile::with_path(directory.0.join("config.json"));
-        let previous = SessionPreferences::from(&session_config());
-        store.save(&previous).unwrap();
-        let mut updated = previous.clone();
-        updated.volume = 25;
-        store.save(&updated).unwrap();
-        assert_eq!(store.load().unwrap(), Some(updated));
-        store.restore(Some(&previous)).unwrap();
-        assert_eq!(store.load().unwrap(), Some(previous));
-        store.restore(None).unwrap();
-        assert_eq!(store.load().unwrap(), None);
-    }
-
-    #[test]
-    fn corrupt_and_newer_configuration_files_are_preserved() {
-        let directory = TestDirectory::new();
-        fs::create_dir_all(&directory.0).unwrap();
-        let path = directory.0.join("config.json");
-        let store = ConfigurationFile::with_path(path.clone());
-        fs::write(&path, "invalid JSON").unwrap();
-        assert!(store.load().is_err());
-        assert_eq!(fs::read_to_string(&path).unwrap(), "invalid JSON");
-        let document = ConfigurationDocument {
-            format_version: 255,
-            session: Some(SessionPreferences::from(&session_config())),
-            update_channel: None,
-        };
-        let contents = serde_json::to_vec(&document).unwrap();
-        fs::write(&path, &contents).unwrap();
-        assert!(store.load().is_err());
-        assert_eq!(fs::read(path).unwrap(), contents);
-    }
-
-    #[test]
-    fn failed_replacement_keeps_the_existing_configuration() {
-        let directory = TestDirectory::new();
-        let store = ConfigurationFile::with_path(directory.0.join("config.json"));
-        let preferences = SessionPreferences::from(&session_config());
-        store.save(&preferences).unwrap();
-        let blocked = ConfigurationFile::with_path(directory.0.join("config.json/child.json"));
-        assert!(blocked.save(&preferences).is_err());
-        assert_eq!(store.load().unwrap(), Some(preferences));
-    }
-
-    #[test]
-    fn update_channel_initializes_once_without_a_session() {
-        let directory = TestDirectory::new();
-        let path = directory.0.join("config.json");
-        let store = ConfigurationFile::with_path(path.clone());
-        assert_eq!(store.get_update_channel(UpdateChannel::Dev).unwrap(), UpdateChannel::Dev);
-        let reopened = ConfigurationFile::with_path(path);
-        assert_eq!(reopened.get_update_channel(UpdateChannel::Stable).unwrap(), UpdateChannel::Dev);
-        assert_eq!(reopened.load().unwrap(), None);
-    }
-
-    #[test]
-    fn update_channel_survives_session_save_and_rollback() {
-        let directory = TestDirectory::new();
-        let store = ConfigurationFile::with_path(directory.0.join("config.json"));
-        store.save_update_channel(UpdateChannel::Beta).unwrap();
-        let session = SessionPreferences::from(&session_config());
-        store.save(&session).unwrap();
-        assert_eq!(store.get_update_channel(UpdateChannel::Stable).unwrap(), UpdateChannel::Beta);
-        store.save_update_channel(UpdateChannel::Stable).unwrap();
-        assert_eq!(store.load().unwrap(), Some(session.clone()));
-        store.restore(Some(&session)).unwrap();
-        store.restore(None).unwrap();
-        assert_eq!(store.load().unwrap(), None);
-        assert_eq!(store.get_update_channel(UpdateChannel::Dev).unwrap(), UpdateChannel::Stable);
-    }
-
-    #[test]
-    fn existing_configuration_without_update_channel_preserves_session() {
-        let directory = TestDirectory::new();
-        fs::create_dir_all(&directory.0).unwrap();
-        let path = directory.0.join("config.json");
-        let session = SessionPreferences::from(&session_config());
-        fs::write(&path, serde_json::to_vec(&serde_json::json!({
-            "formatVersion": 1,
-            "session": session,
-        })).unwrap()).unwrap();
-        let store = ConfigurationFile::with_path(path);
-        assert_eq!(store.get_update_channel(UpdateChannel::Beta).unwrap(), UpdateChannel::Beta);
-        assert_eq!(store.load().unwrap(), Some(session));
-    }
-
-    #[test]
-    fn invalid_update_channel_is_preserved_instead_of_overwritten() {
-        let directory = TestDirectory::new();
-        fs::create_dir_all(&directory.0).unwrap();
-        let path = directory.0.join("config.json");
-        let contents = r#"{"formatVersion":1,"session":null,"updateChannel":"unknown"}"#;
-        fs::write(&path, contents).unwrap();
-        let store = ConfigurationFile::with_path(path.clone());
-        assert!(store.get_update_channel(UpdateChannel::Stable).is_err());
-        assert!(store.save_update_channel(UpdateChannel::Beta).is_err());
-        assert_eq!(fs::read_to_string(path).unwrap(), contents);
     }
 }

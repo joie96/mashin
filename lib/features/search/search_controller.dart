@@ -11,7 +11,36 @@ class SearchController extends ChangeNotifier {
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
 
-  SearchController({required this.coreBridge, this.userDataController});
+  SearchController({required this.coreBridge, this.userDataController}) {
+    _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+  }
+
+  StreamSubscription<CatalogUpdate>? _catalogSubscription;
+  String? _activeQuery;
+
+  // Server updates cannot replace results from another query.
+  void _onCatalogUpdate(CatalogUpdate update) {
+    if (_isDisposed ||
+        update.kind != CatalogQueryKind.search ||
+        update.searchQuery != _activeQuery) {
+      return;
+    }
+    final results = update.searchResults;
+    if (results == null) return;
+    switch (update.mediaType) {
+      case MediaType.track:
+        _tracks = _withFavoriteStatuses(results.tracks);
+      case MediaType.album:
+        _albums = _withFavoriteStatuses(results.albums);
+      case MediaType.playlist:
+        _playlists = _withFavoriteStatuses(results.playlists);
+      case MediaType.artist:
+        _artists = _withFavoriteStatuses(results.artists);
+      default:
+        return;
+    }
+    _notifyListenersIfAlive();
+  }
 
   int _requestId = 0;
   bool _isDisposed = false;
@@ -53,6 +82,7 @@ class SearchController extends ChangeNotifier {
     }
 
     final int requestId = ++_requestId;
+    _activeQuery = query;
 
     _hasSearchRequest = true;
     _isLoadingTracks = true;
@@ -167,8 +197,8 @@ class SearchController extends ChangeNotifier {
     bool hasChanges = false;
     final List<Track> enriched = _tracks
         .map((Track track) {
-            final Album? reference = track.album;
-            if (reference == null || reference.year != null) {
+          final Album? reference = track.album;
+          if (reference == null || reference.year != null) {
             return track;
           }
           final Album? album =
@@ -211,6 +241,7 @@ class SearchController extends ChangeNotifier {
   }
 
   void resetResults() {
+    _activeQuery = null;
     _requestId++;
     _hasSearchRequest = false;
     _isLoadingTracks = false;
@@ -244,6 +275,7 @@ class SearchController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_catalogSubscription?.cancel());
     _requestId++;
     super.dispose();
   }

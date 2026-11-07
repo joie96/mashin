@@ -7,6 +7,7 @@ import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/detail_page_lifecycle.dart';
 import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
@@ -44,7 +45,8 @@ class PlaylistDetailPageMobile extends StatefulWidget {
       _PlaylistDetailPageMobileState();
 }
 
-class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
+class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile>
+    with DetailPageLifecycle<PlaylistDetailPageMobile> {
   static const double _bannerHeight = 220;
 
   late final PlaylistDetailController _controller;
@@ -62,6 +64,11 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.loadPlaylist());
     });
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    unawaited(_controller.setPageVisible(isVisible));
   }
 
   @override

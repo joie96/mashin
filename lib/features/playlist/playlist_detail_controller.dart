@@ -4,6 +4,7 @@ import 'package:flutter/foundation.dart';
 
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
+import '../core/core_query_scope.dart';
 import '../core/core_userdata.dart';
 import '../shared/detail_provider_selection.dart';
 import '../shared/item_provider_selection.dart';
@@ -21,6 +22,7 @@ class PlaylistDetailController extends ChangeNotifier {
          provider: providerInstanceIdOrDomain,
        ) {
     userDataController?.addListener(_onUserDataChanged);
+    _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
   }
 
   final MashinCoreBridgeApi coreBridge;
@@ -28,6 +30,7 @@ class PlaylistDetailController extends ChangeNotifier {
   final String providerInstanceIdOrDomain;
   final UserData? userDataController;
   final DetailProviderSelection sectionProvider;
+  StreamSubscription<CatalogUpdate>? _catalogSubscription;
   bool _isSelectingProvider = false;
 
   Playlist? _playlist;
@@ -36,16 +39,47 @@ class PlaylistDetailController extends ChangeNotifier {
 
   bool _isLoadingMetadata = true;
   bool _isLoadingTracks = true;
+  bool _isLoadingTrackAlbums = false;
   bool _isPlaylistFavorite = false;
   bool _hasLoadedPrivatePlaylist = false;
   bool _isPlaylistDeleted = false;
   bool _isDisposed = false;
   bool _isReadingSnapshot = false;
   int _loadGeneration = 0;
+  bool _isPageVisible = true;
+  bool _requiresReload = false;
+  CoreQueryScope _queryScope = CoreQueryScope();
+  Future<void>? _loadingFuture;
+
+  CoreQueryScope get _activeQueryScope => CoreQueryScope.current ?? _queryScope;
+  bool get _isLoadCanceled => _isDisposed || _activeQueryScope.isCanceled;
+
+  // Route state survives navigation, but hidden pages do not retain read subscriptions.
+  Future<void> setPageVisible(bool isVisible) async {
+    if (_isDisposed || _isPageVisible == isVisible) return;
+    _isPageVisible = isVisible;
+    if (!isVisible) {
+      _requiresReload =
+          _loadingFuture != null ||
+          isLoadingMetadata ||
+          isLoadingTracks ||
+          _isLoadingTrackAlbums;
+      _isLoadingTrackAlbums = false;
+      _loadGeneration++;
+      _queryScope.cancel();
+      _loadingFuture = null;
+      return;
+    }
+    _queryScope = CoreQueryScope();
+    if (_requiresReload) {
+      _requiresReload = false;
+      await loadPlaylist();
+    }
+  }
 
   @override
   void notifyListeners() {
-    if (!_isDisposed) {
+    if (!_isLoadCanceled) {
       super.notifyListeners();
     }
   }
@@ -53,6 +87,8 @@ class PlaylistDetailController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_catalogSubscription?.cancel());
+    _queryScope.cancel();
     _loadGeneration++;
     userDataController?.removeListener(_onUserDataChanged);
     super.dispose();
@@ -104,9 +140,48 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   // Data loading
-  Future<void> loadPlaylist() async {
-    if (_isDisposed) return;
+  void _onCatalogUpdate(CatalogUpdate update) {
+    if (update.allowDynamicTracks == true) return;
+    if (_isLoadCanceled || !_isPageVisible) return;
+    if (update.matches(
+          CatalogQueryKind.playlist,
+          itemId,
+          providerInstanceIdOrDomain,
+        ) &&
+        update.item is Playlist) {
+      final playlist = update.item! as Playlist;
+      _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
+      _isPlaylistFavorite = isItemFavorite(_playlist!);
+    } else if (update.matches(
+      CatalogQueryKind.playlistTracks,
+      sectionProvider.selectedItemId,
+      sectionProvider.selectedProvider,
+    )) {
+      _tracks = update.tracks
+          .map(
+            (track) => userDataController?.withFavoriteStatus(track) ?? track,
+          )
+          .toList(growable: false);
+    } else {
+      return;
+    }
+    notifyListeners();
+  }
+
+  Future<void> loadPlaylist() {
+    if (_isLoadCanceled) return Future<void>.value();
+    if (_loadingFuture case final pending?) return pending;
+    late final Future<void> loading;
+    loading = _queryScope.run(_loadPlaylist).whenComplete(() {
+      if (identical(_loadingFuture, loading)) _loadingFuture = null;
+    });
+    return _loadingFuture = loading;
+  }
+
+  Future<void> _loadPlaylist() async {
+    if (_isLoadCanceled) return;
     final int loadGeneration = ++_loadGeneration;
+    bool hasLoadedPrivateTracks = false;
     _isLoadingMetadata = true;
     _isLoadingTracks = true;
     notifyListeners();
@@ -116,7 +191,10 @@ class PlaylistDetailController extends ChangeNotifier {
       if (userData != null) {
         _isReadingSnapshot = true;
         try {
-          await userData.refreshLibrarySnapshot();
+          await _activeQueryScope.execute(
+            userData.refreshLibrarySnapshot,
+            onCancel: () {},
+          );
         } catch (_) {
           if (!_isDisposed && loadGeneration == _loadGeneration) {
             _playlist = null;
@@ -145,6 +223,34 @@ class PlaylistDetailController extends ChangeNotifier {
         // Private MA playlists use the Rust-owned snapshot, refreshed by MA events.
         if (isUserPlaylist || storedTracks.isNotEmpty) {
           _loadPrivatePlaylist(local, storedTracks);
+          _isLoadingMetadata = false;
+          notifyListeners();
+          if (isUserPlaylist) {
+            try {
+              final metadata = coreBridge.getPlaylist(local.itemId, 'library');
+              final metadataResult = metadata.then<Playlist?>(
+                (value) => value,
+                onError: (Object _) => null,
+              );
+              final tracks = await _activeQueryScope.execute(
+                () => coreBridge.getPlaylistTracks(
+                  local.itemId,
+                  'library',
+                  forceRefresh: false,
+                ),
+                onCancel: () {},
+              );
+              final refreshedPlaylist = await metadataResult;
+              if (!_isLoadCanceled && loadGeneration == _loadGeneration) {
+                _loadPrivatePlaylist(refreshedPlaylist ?? local, tracks);
+                hasLoadedPrivateTracks = true;
+              }
+            } on CoreQueryCanceled {
+              return;
+            } catch (_) {
+              return;
+            }
+          }
           if (!isUserPlaylist) {
             await sectionProvider.initialize(local);
             if (sectionProvider.mappings.isNotEmpty && !_isDisposed) {
@@ -167,6 +273,7 @@ class PlaylistDetailController extends ChangeNotifier {
       if (!_isDisposed && loadGeneration == _loadGeneration) {
         _isLoadingMetadata = false;
         _isLoadingTracks =
+            !hasLoadedPrivateTracks &&
             _playlist != null &&
             (userDataController?.isLoadingPlaylistTracks(_playlist!.itemId) ??
                 false);
@@ -254,23 +361,32 @@ class PlaylistDetailController extends ChangeNotifier {
 
   Future<void> _loadMetadata() async {
     try {
-      final Playlist online = await coreBridge.getPlaylist(
-        itemId,
-        providerInstanceIdOrDomain,
+      final Playlist online = await _activeQueryScope.execute(
+        () => coreBridge.getPlaylist(itemId, providerInstanceIdOrDomain),
+        onCancel: () {},
       );
+      if (_isLoadCanceled) return;
       _playlist = userDataController?.withFavoriteStatus(online) ?? online;
       _isPlaylistFavorite = _playlist?.favorite ?? false;
     } catch (_) {
-      _playlist = null;
+      if (!_isLoadCanceled) _playlist = null;
+    } finally {
+      if (!_isLoadCanceled) {
+        _isLoadingMetadata = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> _loadTracks(int loadGeneration) async {
     try {
-      final List<Track> loaded = await coreBridge.getPlaylistTracks(
-        sectionProvider.selectedItemId,
-        sectionProvider.selectedProvider,
-        forceRefresh: true,
+      final List<Track> loaded = await _activeQueryScope.execute(
+        () => coreBridge.getPlaylistTracks(
+          sectionProvider.selectedItemId,
+          sectionProvider.selectedProvider,
+          forceRefresh: false,
+        ),
+        onCancel: () {},
       );
       if (_isDisposed || loadGeneration != _loadGeneration) {
         return;
@@ -314,15 +430,36 @@ class PlaylistDetailController extends ChangeNotifier {
       return;
     }
 
-    final List<List<Album>> albumGroups = await Future.wait(
-      artistKeys.map((artistKey) async {
+    final pendingArtists = artistKeys.iterator;
+    final queryScope = _activeQueryScope;
+    Future<List<Album>> loadArtistAlbums() async {
+      final albums = <Album>[];
+      while (!_isDisposed &&
+          loadGeneration == _loadGeneration &&
+          !queryScope.isCanceled &&
+          pendingArtists.moveNext()) {
+        final artistKey = pendingArtists.current;
         try {
-          return await coreBridge.getArtistAlbums(artistKey.$2, artistKey.$1);
-        } catch (_) {
-          return <Album>[];
-        }
-      }),
-    );
+          albums.addAll(
+            await queryScope.execute(
+              () => coreBridge.getArtistAlbums(artistKey.$2, artistKey.$1),
+              onCancel: () {},
+            ),
+          );
+        } catch (_) {}
+      }
+      return albums;
+    }
+
+    _isLoadingTrackAlbums = true;
+    final List<List<Album>> albumGroups =
+        await Future.wait(
+          List.generate(3, (_) => loadArtistAlbums()),
+        ).whenComplete(() {
+          if (!_isDisposed && loadGeneration == _loadGeneration) {
+            _isLoadingTrackAlbums = false;
+          }
+        });
     if (_isDisposed || loadGeneration != _loadGeneration) {
       return;
     }

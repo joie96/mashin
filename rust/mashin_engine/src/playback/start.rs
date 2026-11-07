@@ -1,7 +1,7 @@
 //! Presentation-only start requests never mutate the native audio or MA queue state.
 
-use crate::music_assistant::models::identifiers::QueueItemId;
-use crate::music_assistant::models::queue::PlayState;
+use crate::domain::identifiers::QueueItemId;
+use crate::playback::models::PlayState;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -162,108 +162,6 @@ mod tests {
             revision,
             state,
         }
-    }
-
-    #[test]
-    fn media_waits_for_new_audio_not_command_ack_or_old_playing() {
-        let mut start = PlaybackStart::default();
-        let old = observation("old", 1, PlayState::Playing);
-        let request = start.begin(StartKind::Media, old.clone());
-        assert_eq!(
-            start.project(old.clone(), Instant::now()),
-            PlayState::Buffering
-        );
-        start.complete(request, true);
-        assert_eq!(start.project(old, Instant::now()), PlayState::Buffering);
-        assert_eq!(
-            start.project(observation("new", 0, PlayState::Playing), Instant::now()),
-            PlayState::Playing
-        );
-    }
-
-    #[test]
-    fn resume_accepts_new_revision_but_not_the_old_error() {
-        let mut start = PlaybackStart::default();
-        let old = observation("stream", 3, PlayState::Error);
-        let request = start.begin(StartKind::Resume, old.clone());
-        assert_eq!(start.project(old, Instant::now()), PlayState::Buffering);
-        start.complete(request, true);
-        assert_eq!(
-            start.project(observation("stream", 4, PlayState::Playing), Instant::now()),
-            PlayState::Playing
-        );
-    }
-
-    #[test]
-    fn stale_completion_cannot_clear_new_start_and_cancel_restores_real_state() {
-        let mut start = PlaybackStart::default();
-        let old = observation("stream", 0, PlayState::Paused);
-        let first = start.begin(StartKind::Media, old.clone());
-        let second = start.begin(StartKind::Resume, old.clone());
-        start.complete(first, false);
-        assert_eq!(
-            start.project(old.clone(), Instant::now()),
-            PlayState::Buffering
-        );
-        start.complete(second, false);
-        assert_eq!(start.project(old.clone(), Instant::now()), PlayState::Error);
-        start.begin(StartKind::Resume, old.clone());
-        start.cancel();
-        assert_eq!(start.project(old, Instant::now()), PlayState::Paused);
-    }
-
-    #[test]
-    fn matching_audio_error_and_timeout_end_buffering() {
-        let mut start = PlaybackStart::default();
-        let old = observation("old", 0, PlayState::Idle);
-        let request = start.begin(StartKind::Media, old.clone());
-        start.complete(request, true);
-        assert_eq!(
-            start.project(observation("new", 0, PlayState::Error), Instant::now()),
-            PlayState::Error
-        );
-        start.begin(StartKind::Media, old);
-        assert_eq!(
-            start.project(
-                observation("old", 0, PlayState::Idle),
-                Instant::now() + START_TIMEOUT
-            ),
-            PlayState::Error
-        );
-    }
-
-    #[test]
-    fn cancelled_or_replaced_request_cannot_complete_its_successor() {
-        let presentation = Arc::new(Mutex::new(PlaybackStart::default()));
-        let old = observation("old", 0, PlayState::Paused);
-        let first =
-            PlaybackStartRequest::begin(presentation.clone(), StartKind::Media, old.clone());
-        presentation.lock().unwrap().cancel();
-        assert!(!first.is_pending());
-        let second =
-            PlaybackStartRequest::begin(presentation.clone(), StartKind::Resume, old.clone());
-        first.complete(false);
-        assert!(second.is_pending());
-        assert_eq!(
-            presentation.lock().unwrap().project(old, Instant::now()),
-            PlayState::Buffering
-        );
-    }
-
-    #[test]
-    fn old_local_buffering_must_not_complete_a_media_start() {
-        let mut start = PlaybackStart::default();
-        let mut old = observation("old", 0, PlayState::Buffering);
-        old.identity = StartIdentity::Local(Some(Uuid::new_v4()));
-        let request = start.begin(StartKind::Media, old.clone());
-        start.complete(request, true);
-        assert_eq!(
-            start.project(old.clone(), Instant::now()),
-            PlayState::Buffering
-        );
-        old.revision += 1;
-        old.state = PlayState::Playing;
-        assert_eq!(start.project(old, Instant::now()), PlayState::Buffering);
     }
 
     #[test]

@@ -735,9 +735,7 @@ class _MediaTableSectionMobileState<T>
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -784,7 +782,7 @@ class _MediaTableSectionMobileState<T>
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+      providerId: provider,
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -818,9 +816,7 @@ class _MediaTableSectionMobileState<T>
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.album_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -853,9 +849,7 @@ class _MediaTableSectionMobileState<T>
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.queue_music_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -887,9 +881,7 @@ class _MediaTableSectionMobileState<T>
       coverUrl: item.imageUriForSize(80),
       fallbackIcon: Icons.person_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -921,7 +913,7 @@ class _MediaTableSectionMobileState<T>
       coverUrl: null,
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: '-',
-      providerIconSvg: null,
+      providerId: null,
       isFirst: isFirst,
       isSelected: isSelected,
       selectionModeActive: selectionModeActive,
@@ -942,7 +934,7 @@ class _MobileTableRowBase extends StatelessWidget {
   final String? coverUrl;
   final IconData fallbackIcon;
   final String providerLabel;
-  final String? providerIconSvg;
+  final String? providerId;
   final bool isFirst;
   final bool isSelected;
   final bool selectionModeActive;
@@ -964,7 +956,7 @@ class _MobileTableRowBase extends StatelessWidget {
     required this.coverUrl,
     required this.fallbackIcon,
     required this.providerLabel,
-    required this.providerIconSvg,
+    required this.providerId,
     required this.isFirst,
     required this.isSelected,
     required this.selectionModeActive,
@@ -1081,7 +1073,7 @@ class _MobileTableRowBase extends StatelessWidget {
                                 !allowsProviderSelection || playbackItem == null
                                 ? MediaProviderIcon(
                                     providerLabel: providerLabel,
-                                    iconSvg: providerIconSvg,
+                                    providerId: providerId,
                                     size: 16,
                                   )
                                 : MediaItemProviderIcon(item: playbackItem!),
@@ -1181,7 +1173,7 @@ Widget _buildMobileTableRowBase({
   required String? coverUrl,
   required IconData fallbackIcon,
   required String providerLabel,
-  required String? providerIconSvg,
+  required String? providerId,
   required bool isFirst,
   required bool isSelected,
   required bool selectionModeActive,
@@ -1202,7 +1194,7 @@ Widget _buildMobileTableRowBase({
     coverUrl: coverUrl,
     fallbackIcon: fallbackIcon,
     providerLabel: providerLabel,
-    providerIconSvg: providerIconSvg,
+    providerId: providerId,
     isFirst: isFirst,
     isSelected: isSelected,
     selectionModeActive: selectionModeActive,

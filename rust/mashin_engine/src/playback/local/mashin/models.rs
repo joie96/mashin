@@ -1,62 +1,13 @@
 //! Immutable V1 stream identities and formats shared by transport, cache, and decoder.
 
-use crate::music_assistant::models::identifiers::{PlayerId, QueueId, QueueItemId};
+use crate::domain::identifiers::{PlayerId, QueueId, QueueItemId};
+use crate::domain::settings::AudioProfileId;
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 pub(crate) const MAX_INTEGER: u64 = 9_007_199_254_740_991;
 pub(crate) const HEADER_BYTES: usize = 41;
 pub(crate) const MAX_PAYLOAD_BYTES: usize = 262_144;
-
-#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub(crate) enum AudioProfileId {
-    Flac,
-    #[serde(rename = "opus_96k")]
-    Opus96k,
-    #[serde(rename = "opus_128k")]
-    Opus128k,
-    #[serde(rename = "opus_192k")]
-    Opus192k,
-    #[default]
-    #[serde(rename = "opus_256k")]
-    Opus256k,
-}
-
-impl AudioProfileId {
-    pub(crate) const ALL: [Self; 5] = [
-        Self::Flac,
-        Self::Opus96k,
-        Self::Opus128k,
-        Self::Opus192k,
-        Self::Opus256k,
-    ];
-
-    pub(crate) fn bitrate(self) -> Option<u32> {
-        match self {
-            Self::Flac => None,
-            Self::Opus96k => Some(96_000),
-            Self::Opus128k => Some(128_000),
-            Self::Opus192k => Some(192_000),
-            Self::Opus256k => Some(256_000),
-        }
-    }
-}
-
-impl std::str::FromStr for AudioProfileId {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "flac" => Ok(Self::Flac),
-            "opus_96k" => Ok(Self::Opus96k),
-            "opus_128k" => Ok(Self::Opus128k),
-            "opus_192k" => Ok(Self::Opus192k),
-            "opus_256k" => Ok(Self::Opus256k),
-            _ => Err("invalid Mashin audio profile".into()),
-        }
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -237,47 +188,6 @@ pub(crate) fn test_stream() -> StreamDescriptor {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn profile_ids_match_the_provider_contract() {
-        assert_eq!(
-            serde_json::to_value(AudioProfileId::ALL).unwrap(),
-            serde_json::json!(["flac", "opus_96k", "opus_128k", "opus_192k", "opus_256k"])
-        );
-        for profile in AudioProfileId::ALL {
-            let wire_name = serde_json::to_value(profile).unwrap();
-            assert_eq!(
-                wire_name
-                    .as_str()
-                    .unwrap()
-                    .parse::<AudioProfileId>()
-                    .unwrap(),
-                profile
-            );
-        }
-        assert!("opus".parse::<AudioProfileId>().is_err());
-    }
-
-    #[test]
-    fn validates_complete_profile_formats() {
-        let mut stream = test_stream();
-        assert!(stream.validate().is_ok());
-        stream.output_format.channels = 3;
-        assert!(stream.validate().is_err());
-        stream.output_format = OutputFormat {
-            profile_id: AudioProfileId::Opus128k,
-            container: Container::Ogg,
-            codec: Codec::Opus,
-            sample_rate_hz: 48000,
-            bit_depth: None,
-            channels: 2,
-            target_bitrate_bps: Some(128000),
-            uses_vbr: true,
-        };
-        assert!(stream.validate().is_ok());
-        stream.output_format.bit_depth = Some(16);
-        assert!(stream.validate().is_err());
-    }
 
     #[test]
     fn rejects_noncanonical_stream_identifiers() {

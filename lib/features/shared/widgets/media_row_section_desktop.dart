@@ -1462,7 +1462,7 @@ Widget _buildDesktopMediaRowAlbum({
     tertiaryText: _albumTertiary(item),
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     isFavorite: isFavorite,
     onFavoriteTap: onFavoriteTap,
@@ -1503,7 +1503,7 @@ Widget _buildDesktopMediaRowPlaylist({
     tertiaryText: null,
     coverUrl: item.imageUriForSize(256) ?? '',
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     isFavorite: isFavorite,
     onFavoriteTap: onFavoriteTap,
@@ -1544,7 +1544,7 @@ Widget _buildDesktopMediaRowArtist({
     coverUrl: item.imageUriForSize(256) ?? '',
     isCircularCover: true,
     providerLabel: _providerLabelFromId(item.provider),
-    providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(item.provider),
+    providerId: item.provider,
     onPlayTap: onPlayTap,
     isFavorite: isFavorite,
     onFavoriteTap: onFavoriteTap,
@@ -1590,9 +1590,7 @@ Widget _buildDesktopMediaRowTrack({
       onAlbumTap: onAlbumTap,
       coverUrl: item.imageUriForSize(256) ?? '',
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       onPlayTap: item.canPlay ? onPlayTap : null,
       isFavorite: isFavorite,
       onFavoriteTap: onFavoriteTap,
@@ -1629,7 +1627,7 @@ Widget _buildDesktopMediaRowUnknown({
     tertiaryText: '-',
     coverUrl: '',
     providerLabel: '-',
-    providerIconSvg: null,
+    providerId: null,
     onPlayTap: onPlayTap,
     isFavorite: isFavorite,
     onFavoriteTap: onFavoriteTap,
@@ -1650,7 +1648,7 @@ Widget _buildDesktopMediaRowItemBase({
   required String? tertiaryText,
   required String? coverUrl,
   required String providerLabel,
-  required String? providerIconSvg,
+  required String? providerId,
   required VoidCallback? onPlayTap,
   required bool isFavorite,
   required VoidCallback? onFavoriteTap,
@@ -1696,7 +1694,7 @@ Widget _buildDesktopMediaRowItemBase({
             icon: icon,
             coverUrl: coverUrl,
             providerLabel: providerLabel,
-            providerIconSvg: providerIconSvg,
+            providerId: providerId,
             providerItem: playbackItem ?? titleLinkItem,
             onPlayTap: onPlayTap,
             isFavorite: isFavorite,
@@ -1871,7 +1869,7 @@ class _DesktopMediaCover extends StatefulWidget {
   final IconData icon;
   final String? coverUrl;
   final String providerLabel;
-  final String? providerIconSvg;
+  final String? providerId;
   final MediaItem? providerItem;
   final VoidCallback? onPlayTap;
   final bool isFavorite;
@@ -1890,7 +1888,7 @@ class _DesktopMediaCover extends StatefulWidget {
     required this.icon,
     required this.coverUrl,
     required this.providerLabel,
-    required this.providerIconSvg,
+    required this.providerId,
     this.providerItem,
     required this.onPlayTap,
     required this.isFavorite,
@@ -2089,7 +2087,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
             child: widget.providerItem == null
                 ? MediaProviderIcon(
                     providerLabel: widget.providerLabel,
-                    iconSvg: widget.providerIconSvg,
+                    providerId: widget.providerId,
                     size: 18,
                   )
                 : MediaItemProviderIcon(

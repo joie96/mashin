@@ -5,12 +5,12 @@ import '../../features/core/core_events.dart';
 import '../../features/core/core_bridge.dart';
 import '../../features/core/core_models.dart';
 import '../../features/core/core_userdata.dart';
+import '../../features/shared/widgets/media_image.dart';
 import 'preferred_provider_controller.dart';
 
 class AppSessionController extends ChangeNotifier {
   static const Duration _startupTimeout = Duration(seconds: 5);
   static const Duration _sessionStartupTimeout = Duration(seconds: 20);
-  static const Duration _sessionDataLoadTimeout = Duration(minutes: 2);
 
   AppSessionController({MashinCoreBridge? coreBridge})
     : coreBridge = coreBridge ?? MashinCoreBridge() {
@@ -33,7 +33,6 @@ class AppSessionController extends ChangeNotifier {
   bool _isAuthenticated = false;
   bool _isLoading = true;
   bool _isDisposed = false;
-  late int _localCacheSizeBytes;
   bool _isDarkTheme = true;
   bool _shouldShowMultiDeviceButton = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
@@ -44,7 +43,6 @@ class AppSessionController extends ChangeNotifier {
   String get audioProfile => _audioProfile;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
-  int get localCacheSizeBytes => _localCacheSizeBytes;
   bool get isDarkTheme => _isDarkTheme;
   bool get shouldShowMultiDeviceButton => _shouldShowMultiDeviceButton;
   LogLevelPreference get logLevel => _logLevel;
@@ -62,7 +60,7 @@ class AppSessionController extends ChangeNotifier {
       _initializeUserDataController();
       _isLoading = false;
       notifyListeners();
-      await _loadSessionData();
+      await _startSessionDataLoad();
     } catch (error, stackTrace) {
       if (_isLoading) {
         _isAuthenticated = false;
@@ -103,7 +101,7 @@ class AppSessionController extends ChangeNotifier {
       _isAuthenticated = true;
       _initializeUserDataController();
       notifyListeners();
-      unawaited(_loadSessionData());
+      unawaited(_startSessionDataLoad());
       return null;
     } catch (_) {
       return 'Verbindung fehlgeschlagen. Bitte Server-URL prüfen.';
@@ -130,7 +128,6 @@ class AppSessionController extends ChangeNotifier {
 
     await saveSessionSettings(
       SessionSettingsUpdate(
-        localCacheSizeBytes: _localCacheSizeBytes,
         isDarkTheme: isDarkTheme,
         logLevel: _logLevel,
         shouldShowMultiDeviceButton: _shouldShowMultiDeviceButton,
@@ -140,7 +137,6 @@ class AppSessionController extends ChangeNotifier {
 
   Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
     await coreBridge.saveSessionSettings(settings);
-    _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
@@ -156,6 +152,7 @@ class AppSessionController extends ChangeNotifier {
     _disposeUserDataController();
     PreferredProviderController.instance.reset();
     ProviderManifestRegistry.clear();
+    MediaImage.configureArtworkLoader(null);
     MediaItemImage.configureProxyBaseUrl('');
     await coreEvents.reset();
     if (!_isDisposed) notifyListeners();
@@ -175,7 +172,6 @@ class AppSessionController extends ChangeNotifier {
     MediaItemImage.configureProxyBaseUrl(_baseUrl);
     _username = settings.username;
     _audioProfile = settings.audioProfile;
-    _localCacheSizeBytes = settings.localCacheSizeBytes;
     _isDarkTheme = settings.isDarkTheme;
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
@@ -193,31 +189,24 @@ class AppSessionController extends ChangeNotifier {
     }
     final controller = UserData(coreBridge: coreBridge);
     _userDataController = controller;
+    MediaImage.configureArtworkLoader(coreBridge.getMediaArtwork);
   }
 
-  // Rust owns the ordered data load; icons and playback remain independent.
-  Future<void> _loadSessionData() async {
+  // Rust owns parallel data loading; icons, snapshots and playback remain independent.
+  Future<void> _startSessionDataLoad() async {
     final controller = _userDataController;
     if (controller == null || _isDisposed) return;
-    final sessionData = _runStartupTask('session data', () async {
-      await coreBridge.loadSessionData();
-      if (!_isDisposed && identical(controller, _userDataController)) {
-        await controller.refreshLibrarySnapshot();
-      }
-    }, _sessionDataLoadTimeout);
+    final sessionData = _runStartupTask('session data start', () async {
+      await coreBridge.startSessionDataLoad();
+    }, _startupTimeout);
     await Future.wait(<Future<void>>[
       _runStartupTask(
         'user data snapshot',
         controller.refreshLibrarySnapshot,
         _startupTimeout,
       ),
-      sessionData.then(
-        (_) => _runStartupTask(
-          'provider icons',
-          _loadProviderIcons,
-          _startupTimeout,
-        ),
-      ),
+      _runStartupTask('provider icons', _loadProviderIcons, _startupTimeout),
+      sessionData,
       _runStartupTask('playback events', coreEvents.start, _startupTimeout),
     ]);
   }
@@ -244,6 +233,9 @@ class AppSessionController extends ChangeNotifier {
     }
 
     final controller = _userDataController;
+    ProviderManifestRegistry.configureIconLoader(
+      coreBridge.getProviderIconData,
+    );
     final manifests = await coreBridge.getProviderManifests();
     if (_isDisposed ||
         !_isAuthenticated ||
@@ -251,26 +243,6 @@ class AppSessionController extends ChangeNotifier {
       return;
     }
     ProviderManifestRegistry.registerAll(manifests);
-    await Future.wait(
-      manifests.where((manifest) => manifest.hasDefaultIcon).map((
-        manifest,
-      ) async {
-        try {
-          final iconData = await coreBridge.getProviderIconData(
-            manifest.domain,
-          );
-          if (iconData != null &&
-              !_isDisposed &&
-              _isAuthenticated &&
-              identical(controller, _userDataController)) {
-            ProviderManifestRegistry.registerIconData(
-              manifest.domain,
-              iconData,
-            );
-          }
-        } catch (_) {}
-      }),
-    );
   }
 
   void _disposeUserDataController() {
@@ -291,6 +263,7 @@ class AppSessionController extends ChangeNotifier {
     unawaited(_disposeCoreBridge());
     if (identical(_instance, this)) {
       _instance = null;
+      MediaImage.configureArtworkLoader(null);
       PreferredProviderController.instance.reset();
     }
     super.dispose();

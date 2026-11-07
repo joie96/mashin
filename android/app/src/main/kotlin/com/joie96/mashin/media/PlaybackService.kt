@@ -273,10 +273,10 @@ class PlaybackService : MediaLibraryService() {
     // Snapshots are read off the main thread and projected only on the player looper.
     private fun readSnapshot(): PlaybackSnapshot {
         val state = JSONObject(checkNotNull(RustCoreBridge.query("mediaSessionState", null)))
-        val settings = JSONObject(checkNotNull(RustCoreBridge.query("sessionSettings", null)))
+        val settings = JSONObject(checkNotNull(RustCoreBridge.query("getSessionSettings", null)))
         val userData = if (state.getJSONObject("queue").optJSONArray("items")?.length()?.let { it > 0 } == true) {
             try {
-                RustCoreBridge.query("userData", null)?.let(::JSONObject)
+                RustCoreBridge.query("getUserData", null)?.let(::JSONObject)
             } catch (error: Exception) {
                 Log.w(TAG, "Favorite state is unavailable", error)
                 null

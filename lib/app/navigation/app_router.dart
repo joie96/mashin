@@ -157,10 +157,19 @@ class AppRouter {
             path: '/login',
             builder: (BuildContext context, GoRouterState state) => Scaffold(
               body: SafeArea(
-                child: LoginScreen(
-                  initialBaseUrl: session.baseUrl,
-                  initialUsername: session.username,
-                  onSubmit: session.login,
+                child: LayoutBuilder(
+                  builder: (context, constraints) => SingleChildScrollView(
+                    child: ConstrainedBox(
+                      constraints: BoxConstraints(
+                        minHeight: constraints.maxHeight,
+                      ),
+                      child: LoginScreen(
+                        initialBaseUrl: session.baseUrl,
+                        initialUsername: session.username,
+                        onSubmit: session.login,
+                      ),
+                    ),
+                  ),
                 ),
               ),
             ),

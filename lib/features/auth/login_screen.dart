@@ -2,11 +2,12 @@ import 'package:flutter/material.dart';
 
 import '../../app/theme/app_theme.dart';
 
-typedef LoginSubmit = Future<String?> Function({
-  required String baseUrl,
-  required String username,
-  required String password,
-});
+typedef LoginSubmit =
+    Future<String?> Function({
+      required String baseUrl,
+      required String username,
+      required String password,
+    });
 
 class LoginScreen extends StatefulWidget {
   final String initialBaseUrl;
@@ -37,7 +38,9 @@ class _LoginScreenState extends State<LoginScreen> {
   void initState() {
     super.initState();
     _serverController = TextEditingController(text: widget.initialBaseUrl);
-    _usernameController = TextEditingController(text: widget.initialUsername ?? '');
+    _usernameController = TextEditingController(
+      text: widget.initialUsername ?? '',
+    );
     _passwordController = TextEditingController();
   }
 
@@ -68,7 +71,9 @@ class _LoginScreenState extends State<LoginScreen> {
                 children: <Widget>[
                   Text(
                     'Bei Music Assistant anmelden',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(fontWeight: FontWeight.w700),
+                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                   const SizedBox(height: 16),
                   TextFormField(
@@ -85,7 +90,8 @@ class _LoginScreenState extends State<LoginScreen> {
                       }
 
                       final uri = Uri.tryParse(text);
-                      if (uri == null || (!uri.hasScheme || !uri.hasAuthority)) {
+                      if (uri == null ||
+                          (!uri.hasScheme || !uri.hasAuthority)) {
                         return 'Bitte eine gültige URL eingeben';
                       }
 
@@ -110,9 +116,7 @@ class _LoginScreenState extends State<LoginScreen> {
                   TextFormField(
                     controller: _passwordController,
                     obscureText: true,
-                    decoration: const InputDecoration(
-                      labelText: 'Passwort',
-                    ),
+                    decoration: const InputDecoration(labelText: 'Passwort'),
                     validator: (String? value) {
                       if ((value ?? '').isEmpty) {
                         return 'Bitte Passwort eingeben';
@@ -126,7 +130,9 @@ class _LoginScreenState extends State<LoginScreen> {
                     const SizedBox(height: 12),
                     Text(
                       _error!,
-                      style: TextStyle(color: Theme.of(context).colorScheme.error),
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
                     ),
                   ],
                   const SizedBox(height: 18),

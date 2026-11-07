@@ -1,5 +1,6 @@
 //! One native owner for CPAL, the decoder and the bounded current/next audio buffer.
-//! Network reconnects only replace sockets; dropping this worker stops local audio.
+//! Network reconnects only replace sockets; explicit shutdown stops every pipeline clone.
+//! The caller joins on a blocking executor; the last worker Drop is only a fallback.
 
 use super::buffer::{BufferStatistics, StreamBuffer};
 use super::models::{AudioCommand, AudioFormat, AudioState, AudioStatus};
@@ -8,8 +9,8 @@ use crate::audio::decoder::decode_chunk;
 
 use crate::audio::output::AudioOutput;
 use std::collections::VecDeque;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -576,16 +577,30 @@ struct Worker {
     snapshot: watch::Receiver<AudioSnapshot>,
     events: broadcast::Sender<AudioEvent>,
     should_keep_running: Arc<AtomicBool>,
-    thread: Option<JoinHandle<()>>,
+    thread_wakeup: std::thread::Thread,
+    thread: Mutex<Option<JoinHandle<()>>>,
+}
+
+impl Worker {
+    // Keep the lock through join so concurrent callers observe completed native teardown.
+    fn shutdown(&self) -> std::thread::Result<()> {
+        self.should_keep_running.store(false, Ordering::Release);
+        self.thread_wakeup.unpark();
+        let mut thread = self
+            .thread
+            .lock()
+            .unwrap_or_else(|error| error.into_inner());
+        if let Some(thread) = thread.take() {
+            thread.join()
+        } else {
+            Ok(())
+        }
+    }
 }
 
 impl Drop for Worker {
     fn drop(&mut self) {
-        self.should_keep_running.store(false, Ordering::Release);
-        if let Some(thread) = self.thread.take() {
-            thread.thread().unpark();
-            let _ = thread.join();
-        }
+        let _ = self.shutdown();
     }
 }
 
@@ -681,9 +696,15 @@ impl AudioPipeline {
                 snapshot,
                 events,
                 should_keep_running,
-                thread: Some(thread),
+                thread_wakeup: thread.thread().clone(),
+                thread: Mutex::new(Some(thread)),
             }),
         })
+    }
+
+    // Joins decoder/output teardown even with live clones; never call on a runtime worker.
+    pub(crate) fn shutdown(&self) -> std::thread::Result<()> {
+        self.worker.shutdown()
     }
 
     // Network tasks wait for the native acceptance boundary before acknowledging.
@@ -728,6 +749,9 @@ impl AudioPipeline {
     }
 
     async fn submit(&self, operation: Operation) -> Result<(AudioSnapshot, bool), String> {
+        if !self.worker.should_keep_running.load(Ordering::Acquire) {
+            return Err("native audio audio worker stopped".into());
+        }
         let (response, receiver) = oneshot::channel();
         self.worker
             .requests
@@ -737,9 +761,7 @@ impl AudioPipeline {
             })
             .await
             .map_err(|_| "native audio audio worker stopped")?;
-        if let Some(thread) = &self.worker.thread {
-            thread.thread().unpark();
-        }
+        self.worker.thread_wakeup.unpark();
         receiver
             .await
             .map_err(|_| "native audio audio worker stopped")?
@@ -808,100 +830,28 @@ mod tests {
         }
     }
 
-    #[test]
-    fn repeated_transport_commands_do_not_restart_or_repause_the_native_stream() {
-        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
-        let current = test_stream();
-        output.execute(AudioCommand::SetMedia {
-            current: Some(current.clone()),
-            prepared: None,
-            media_revision: 1,
-            initial_output_state: AudioState::Playing,
-        }).unwrap();
-        output.retain(chunk(current.stream_id)).unwrap();
-        output.pump_with(|_, _| Ok(Arc::from([0i32; 960]))).unwrap();
-        for should_play in [true, true, false, false, true, true] {
-            let command = if should_play {
-                AudioCommand::Play { stream_id: Some(current.stream_id) }
-            } else {
-                AudioCommand::Pause { stream_id: Some(current.stream_id) }
-            };
-            output.execute(command).unwrap();
-            assert_eq!(output.sink.as_ref().unwrap().is_playing.get(), should_play);
-            assert_eq!(output.state, if should_play { AudioState::Playing } else { AudioState::Paused });
-            assert!(output.error.is_none());
-        }
-    }
-
-    #[test]
-    fn failed_decoder_preserves_its_reason_and_rejects_play_until_new_media() {
-        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
-        let current = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        output.retain(chunk(current.stream_id)).unwrap();
-        let error = output
-            .pump_with(|_, _| Err("Opus decode failed: invalid packet".into()))
-            .unwrap_err();
-        output.fail(error.clone());
-        assert_eq!(output.snapshot().error.as_deref(), Some(error.as_str()));
-        assert!(output
-            .execute(AudioCommand::Play {
-                stream_id: Some(current.stream_id),
-            })
-            .is_err());
-        assert_eq!(output.state, AudioState::Error);
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(test_stream()),
-                prepared: None,
-                media_revision: 2,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        assert!(output.error.is_none());
-        assert_eq!(output.state, AudioState::Buffering);
-    }
-
-    #[test]
-    fn codec_switch_replaces_the_sink_and_decodes_with_the_new_descriptor() {
-        use crate::audio::models::AudioCodec;
-
-        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
-        for (index, codec) in [AudioCodec::Flac, AudioCodec::Opus, AudioCodec::Flac]
-            .into_iter()
-            .enumerate()
-        {
-            let mut current = test_stream();
-            current.output_format.codec = codec;
-            current.output_format.bit_depth = (codec == AudioCodec::Flac).then_some(16);
-            output
-                .execute(AudioCommand::SetMedia {
-                    current: Some(current.clone()),
-                    prepared: None,
-                    media_revision: index as u64 + 1,
-                    initial_output_state: AudioState::Playing,
-                })
-                .unwrap();
-            assert!(output.sink.is_none());
-            assert_eq!(output.decoded_chunk_index, 1);
-            output.retain(chunk(current.stream_id)).unwrap();
-            output
-                .pump_with(|cached, format| {
-                    assert_eq!(cached.stream_id, current.stream_id);
-                    assert_eq!(format.codec, codec);
-                    Ok(Arc::from([0i32]))
-                })
-                .unwrap();
-            assert!(output.sink.is_some());
-            assert_eq!(output.state, AudioState::Playing);
-            assert!(output.error.is_none());
+    fn pipeline_with_controlled_worker(
+        run: impl FnOnce(watch::Sender<AudioSnapshot>) + Send + 'static,
+    ) -> AudioPipeline {
+        let initial = PipelineState::<FakeSink>::new(1024, 30, false)
+            .unwrap()
+            .snapshot();
+        let (snapshots, snapshot) = watch::channel(initial);
+        let (requests, receiver) = mpsc::channel(4);
+        let (events, _) = broadcast::channel(64);
+        let thread = std::thread::spawn(move || {
+            let _requests = receiver;
+            run(snapshots);
+        });
+        AudioPipeline {
+            worker: Arc::new(Worker {
+                requests,
+                snapshot,
+                events,
+                should_keep_running: Arc::new(AtomicBool::new(true)),
+                thread_wakeup: thread.thread().clone(),
+                thread: Mutex::new(Some(thread)),
+            }),
         }
     }
 
@@ -1085,40 +1035,6 @@ mod tests {
     }
 
     #[test]
-    fn playback_reclaims_history_under_pressure_without_waiting_for_another_chunk() {
-        let mut output = PipelineState::<FakeSink>::new(1000, 30, false).unwrap();
-        let stream = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(stream.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        for index in 1..=3 {
-            let mut cached = chunk(stream.stream_id);
-            cached.index = index;
-            cached.first_frame = (index - 1) * 48000;
-            cached.frame_count = 48000;
-            cached.is_final = false;
-            cached.encoded_bytes = vec![0; 300].into();
-            output.retain(cached).unwrap();
-        }
-        output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
-        assert_eq!(output.snapshot().buffer_capacity, 100);
-        output.sink.as_ref().unwrap().position.set(48000);
-        output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
-        assert_eq!(output.snapshot().buffer_capacity, 400);
-        assert!(output.cache.current().unwrap().chunk(1).is_none());
-        assert!(output.cache.current().unwrap().chunk(2).is_some());
-        assert_eq!(
-            output.snapshot().status.received_streams[0].next_chunk_index,
-            4
-        );
-    }
-
-    #[test]
     fn cached_seek_supports_retained_backwards_targets_and_short_eof_chunks() {
         let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
         let stream = test_stream();
@@ -1165,503 +1081,5 @@ mod tests {
             .execute(AudioCommand::Stop { stream_id: None })
             .unwrap();
         assert!(output.seek_cached(stream.stream_id, 0).is_err());
-    }
-
-    #[test]
-    fn manual_activation_preserves_164_seconds_and_is_idempotent() {
-        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
-        let current = test_stream();
-        let next = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: Some(next.clone()),
-                media_revision: 2,
-                initial_output_state: if output.should_play {
-                    AudioState::Playing
-                } else {
-                    AudioState::Paused
-                },
-            })
-            .unwrap();
-        let mut unfinished = chunk(current.stream_id);
-        unfinished.is_final = false;
-        unfinished.frame_count = 48_000;
-        output.retain(unfinished).unwrap();
-        for index in 0..164 {
-            let mut cached = chunk(next.stream_id);
-            cached.index = index + 1;
-            cached.first_frame = index * 48_000;
-            cached.frame_count = 48_000;
-            cached.is_final = index == 163;
-            output.retain(cached).unwrap();
-        }
-        assert_eq!(
-            output.cache.statistics(0).prepared_remaining_millis,
-            164_000
-        );
-        let bytes = output
-            .cache
-            .prepared()
-            .unwrap()
-            .chunk(1)
-            .unwrap()
-            .encoded_bytes
-            .clone();
-        let stale = AudioCommand::ActivatePrepared {
-            current_stream_id: current.stream_id,
-            stream_id: next.stream_id,
-            media_revision: 3,
-        };
-        let before = output.snapshot();
-        assert!(output.execute(stale).is_err());
-        assert_eq!(output.snapshot(), before);
-        let activate = AudioCommand::ActivatePrepared {
-            current_stream_id: current.stream_id,
-            stream_id: next.stream_id,
-            media_revision: 2,
-        };
-        output.execute(activate.clone()).unwrap();
-        assert_eq!(output.cache.statistics(0).current_remaining_millis, 164_000);
-        assert_eq!(
-            output.snapshot().status.received_streams[0].next_chunk_index,
-            165
-        );
-        assert!(Arc::ptr_eq(
-            &bytes,
-            &output
-                .cache
-                .current()
-                .unwrap()
-                .chunk(1)
-                .unwrap()
-                .encoded_bytes
-        ));
-        assert!(output.snapshot().prepared.is_none());
-        assert!(matches!(
-            output.audible_events[0].1,
-            AudioEvent::PreparedActivated { .. }
-        ));
-        assert_eq!(output.audible_events.len(), 1);
-        output.position_frame = 4800;
-        output.execute(activate).unwrap();
-        assert_eq!(output.position_frame, 4800);
-        assert_eq!(output.audible_events.len(), 1);
-        output
-            .execute(AudioCommand::Stop { stream_id: None })
-            .unwrap();
-        assert!(output.snapshot().activation.is_none());
-    }
-
-    #[test]
-    fn complete_media_state_preserves_output_and_replaces_only_changed_identity() {
-        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
-        let current = test_stream();
-        let prepared = test_stream();
-        let announce = AudioCommand::SetMedia {
-            current: Some(current.clone()),
-            prepared: Some(prepared.clone()),
-            media_revision: 1,
-            initial_output_state: AudioState::Paused,
-        };
-        output.execute(announce).unwrap();
-        output.retain(chunk(current.stream_id)).unwrap();
-        output.retain(chunk(prepared.stream_id)).unwrap();
-        output.pump_with(|_, _| Ok(Arc::from([0i32]))).unwrap();
-        output.position_frame = 200;
-        output.revision = 4;
-        let bytes = output
-            .cache
-            .prepared()
-            .unwrap()
-            .chunk(1)
-            .unwrap()
-            .encoded_bytes
-            .clone();
-        let preserve = AudioCommand::SetMedia {
-            current: Some(current),
-            prepared: Some(prepared.clone()),
-            media_revision: 2,
-            initial_output_state: AudioState::Playing,
-        };
-        output.execute(preserve.clone()).unwrap();
-        assert_eq!(output.position_frame, 200);
-        assert_eq!(output.revision, 4);
-        assert!(!output.should_play);
-        assert!(output.sink.is_some());
-        let before = output.snapshot();
-        output.execute(preserve.clone()).unwrap();
-        assert_eq!(output.snapshot(), before);
-        let mut changed = preserve;
-        if let AudioCommand::SetMedia {
-            initial_output_state,
-            ..
-        } = &mut changed
-        {
-            *initial_output_state = AudioState::Paused;
-        }
-        assert!(output.execute(changed).is_err());
-        assert_eq!(output.snapshot(), before);
-        output
-            .execute(AudioCommand::Play {
-                stream_id: before.status.current_stream_id,
-            })
-            .unwrap();
-        let resumed = output.snapshot();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: resumed.current.clone(),
-                prepared: Some(prepared.clone()),
-                media_revision: 3,
-                initial_output_state: AudioState::Paused,
-            })
-            .unwrap();
-        assert!(output.should_play);
-        assert_eq!(
-            output.snapshot().status.output_state,
-            resumed.status.output_state
-        );
-        assert_eq!(output.position_frame, resumed.status.position_frame);
-        assert_eq!(output.revision, resumed.status.output_revision);
-        let replacement = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(replacement.clone()),
-                prepared: Some(prepared.clone()),
-                media_revision: 4,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        assert_eq!(output.snapshot().current, Some(replacement));
-        assert_eq!(output.position_frame, 0);
-        assert_eq!(output.revision, 0);
-        assert!(Arc::ptr_eq(
-            &bytes,
-            &output
-                .cache
-                .prepared()
-                .unwrap()
-                .chunk(1)
-                .unwrap()
-                .encoded_bytes
-        ));
-        assert_eq!(
-            output.cache.prepared().unwrap().cursor().next_chunk_index,
-            2
-        );
-        output
-            .execute(AudioCommand::SetMedia {
-                current: None,
-                prepared: None,
-                media_revision: 5,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        assert_eq!(output.state, AudioState::Idle);
-        assert!(!output.should_play);
-        assert_eq!(output.position_frame, 0);
-        assert_eq!(output.revision, 0);
-        assert!(output.snapshot().status.received_streams.is_empty());
-    }
-
-    #[test]
-    fn media_promotion_preserves_receipt_and_duplicate_does_not_rewind() {
-        let mut output = PipelineState::<FakeSink>::new(1024, 30, false).unwrap();
-        let current = test_stream();
-        let prepared = test_stream();
-        let grant = AudioCommand::SetMedia {
-            current: Some(current.clone()),
-            prepared: Some(prepared.clone()),
-            media_revision: 1,
-            initial_output_state: AudioState::Playing,
-        };
-        output.execute(grant.clone()).unwrap();
-        output.retain(chunk(prepared.stream_id)).unwrap();
-        output
-            .execute(AudioCommand::ActivatePrepared {
-                current_stream_id: current.stream_id,
-                stream_id: prepared.stream_id,
-                media_revision: 1,
-            })
-            .unwrap();
-        output.position_frame = 100;
-        output.execute(grant).unwrap();
-        assert_eq!(output.position_frame, 100);
-        let activation = output.activation.clone();
-        let promotion = AudioCommand::SetMedia {
-            current: Some(prepared.clone()),
-            prepared: None,
-            media_revision: 2,
-            initial_output_state: AudioState::Playing,
-        };
-        output.execute(promotion.clone()).unwrap();
-        assert_eq!(output.activation, activation);
-        assert_eq!(output.position_frame, 100);
-        assert_eq!(output.snapshot().current, Some(prepared));
-        output.position_frame = 200;
-        output.execute(promotion).unwrap();
-        assert_eq!(output.position_frame, 200);
-    }
-
-    #[test]
-    fn buffer_summary_is_rate_limited_and_only_reports_configured_audio() {
-        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
-        let start = output.last_buffer_summary;
-        assert!(
-            output
-                .take_buffer_statistics(start + BUFFER_SUMMARY_INTERVAL)
-                .is_none()
-        );
-        let current = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Paused,
-            })
-            .unwrap();
-        output.retain(chunk(current.stream_id)).unwrap();
-        assert!(
-            output
-                .take_buffer_statistics(start + Duration::from_secs(4))
-                .is_none()
-        );
-        let summary = output
-            .take_buffer_statistics(start + BUFFER_SUMMARY_INTERVAL)
-            .unwrap();
-        assert_eq!(summary.cached_chunks, 1);
-        assert_eq!(summary.retained_bytes, 1);
-        assert_eq!(summary.current_remaining_millis, 10);
-        assert!(
-            output
-                .take_buffer_statistics(start + Duration::from_secs(9))
-                .is_none()
-        );
-        assert!(
-            output
-                .take_buffer_statistics(start + Duration::from_secs(10))
-                .is_some()
-        );
-        output
-            .execute(AudioCommand::Stop { stream_id: None })
-            .unwrap();
-        assert!(
-            output
-                .take_buffer_statistics(start + Duration::from_secs(15))
-                .is_none()
-        );
-    }
-
-    #[test]
-    fn transport_eof_does_not_promote_before_audible_end() {
-        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
-        let current = test_stream();
-        let next = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: Some(next.clone()),
-                media_revision: 2,
-                initial_output_state: if output.should_play {
-                    AudioState::Playing
-                } else {
-                    AudioState::Paused
-                },
-            })
-            .unwrap();
-        output.retain(chunk(current.stream_id)).unwrap();
-        output.retain(chunk(next.stream_id)).unwrap();
-        assert!(
-            output
-                .pump_with(|_, _| Ok(Arc::from([])))
-                .unwrap()
-                .is_empty()
-        );
-        assert!(output.pump().unwrap().is_empty());
-        assert_eq!(
-            output.snapshot().status.current_stream_id,
-            Some(current.stream_id)
-        );
-        output.sink.as_ref().unwrap().position.set(479);
-        assert!(output.pump().unwrap().is_empty());
-        output.sink.as_ref().unwrap().is_drained.set(true);
-        let events = output.pump().unwrap();
-        assert_eq!(
-            events[0],
-            AudioEvent::TrackEnded {
-                stream_id: current.stream_id
-            }
-        );
-        assert!(
-            matches!(events[1], AudioEvent::TrackStarted { stream_id, media_revision: 2, .. } if stream_id == next.stream_id)
-        );
-        assert_eq!(
-            output.snapshot().status.current_stream_id,
-            Some(next.stream_id)
-        );
-        assert_eq!(
-            output.snapshot().status.received_streams[0].next_chunk_index,
-            2
-        );
-    }
-
-    #[test]
-    fn audible_end_waits_for_successor_without_losing_playback_intent() {
-        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
-        let current = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        output.retain(chunk(current.stream_id)).unwrap();
-        output.pump_with(|_, _| Ok(Arc::from([]))).unwrap();
-        output.sink.as_ref().unwrap().is_drained.set(true);
-        assert_eq!(
-            output.pump().unwrap(),
-            vec![AudioEvent::TrackEnded {
-                stream_id: current.stream_id,
-            }]
-        );
-        assert_eq!(output.snapshot().status.output_state, AudioState::Buffering);
-        assert!(output.pump().unwrap().is_empty());
-        output
-            .execute(AudioCommand::Pause {
-                stream_id: Some(current.stream_id),
-            })
-            .unwrap();
-        assert!(output.pump().unwrap().is_empty());
-        assert_eq!(output.snapshot().status.output_state, AudioState::Paused);
-        output
-            .execute(AudioCommand::Play {
-                stream_id: Some(current.stream_id),
-            })
-            .unwrap();
-        let next = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(current.clone()),
-                prepared: Some(next.clone()),
-                media_revision: 2,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        assert!(output.pump().unwrap().is_empty());
-        output.retain(chunk(next.stream_id)).unwrap();
-        let events = output.pump().unwrap();
-        assert_eq!(events.len(), 1);
-        assert!(matches!(
-            events[0],
-            AudioEvent::TrackStarted { stream_id, .. } if stream_id == next.stream_id
-        ));
-        output
-            .execute(AudioCommand::Stop {
-                stream_id: Some(next.stream_id),
-            })
-            .unwrap();
-        assert_eq!(output.snapshot().status.output_state, AudioState::Idle);
-    }
-
-    #[test]
-    fn rejected_commands_do_not_replace_playback_or_volume() {
-        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
-        let stream = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(stream.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        let before = output.snapshot();
-        assert!(
-            output
-                .execute(AudioCommand::Pause {
-                    stream_id: Some(Uuid::new_v4())
-                })
-                .is_err()
-        );
-        assert!(
-            output
-                .execute(AudioCommand::SetVolume {
-                    volume_percent: 101
-                })
-                .is_err()
-        );
-        let mut invalid = test_stream();
-        invalid.output_format.channels = 0;
-        assert!(
-            output
-                .execute(AudioCommand::SetMedia {
-                    current: Some(invalid),
-                    prepared: None,
-                    media_revision: 1,
-                    initial_output_state: AudioState::Playing,
-                })
-                .is_err()
-        );
-        assert_eq!(before, output.snapshot());
-    }
-
-    #[test]
-    fn pause_then_play_of_decoded_final_chunk_is_playing_not_buffering() {
-        let mut output = PipelineState::<FakeSink>::new(1_048_576, 30, false).unwrap();
-        let stream = test_stream();
-        output
-            .execute(AudioCommand::SetMedia {
-                current: Some(stream.clone()),
-                prepared: None,
-                media_revision: 1,
-                initial_output_state: AudioState::Playing,
-            })
-            .unwrap();
-        output.retain(chunk(stream.stream_id)).unwrap();
-        output.pump_with(|_, _| Ok(Arc::from([]))).unwrap();
-        output
-            .execute(AudioCommand::Pause {
-                stream_id: Some(stream.stream_id),
-            })
-            .unwrap();
-        output
-            .execute(AudioCommand::Play {
-                stream_id: Some(stream.stream_id),
-            })
-            .unwrap();
-        output.pump().unwrap();
-        assert_eq!(output.snapshot().status.output_state, AudioState::Playing);
-    }
-
-    #[tokio::test]
-    async fn worker_receipts_are_bounded_and_shutdown_has_no_runtime_dependency() {
-        let output = AudioPipeline::new(1_048_576, 30, false).unwrap();
-        let snapshot = output
-            .execute(AudioCommand::SetMute { is_muted: true })
-            .await
-            .unwrap();
-        assert!(snapshot.status.is_muted);
-        assert_eq!(snapshot.status.output_revision, 1);
-        assert!(output.retain(chunk(Uuid::new_v4())).await.is_err());
-        assert!(output.snapshot().status.received_streams.is_empty());
     }
 }

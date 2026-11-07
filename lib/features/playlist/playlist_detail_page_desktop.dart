@@ -8,6 +8,7 @@ import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/detail_page_lifecycle.dart';
 import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
@@ -43,7 +44,8 @@ class PlaylistDetailPageDesktop extends StatefulWidget {
       _PlaylistDetailPageDesktopState();
 }
 
-class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
+class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
+    with DetailPageLifecycle<PlaylistDetailPageDesktop> {
   static const double _coverSize = 200;
 
   late final PlaylistDetailController _controller;
@@ -62,6 +64,11 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop> {
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.loadPlaylist());
     });
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    unawaited(_controller.setPageVisible(isVisible));
   }
 
   @override

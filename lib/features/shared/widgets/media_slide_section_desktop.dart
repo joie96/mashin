@@ -666,7 +666,7 @@ class MediaSlideItemData {
   final String? coverUrl;
   final IconData fallbackIcon;
   final String providerLabel;
-  final String? providerIconSvg;
+  final String? providerId;
   final List<Artist> artists;
   final Album? album;
 
@@ -678,7 +678,7 @@ class MediaSlideItemData {
     required this.coverUrl,
     required this.fallbackIcon,
     required this.providerLabel,
-    required this.providerIconSvg,
+    required this.providerId,
     required this.artists,
     required this.album,
   });
@@ -697,7 +697,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+      providerId: provider,
       artists: track?.artists ?? const <Artist>[],
       album: track?.album,
     );
@@ -712,9 +712,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.music_note_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       artists: item.artists,
       album: item.album,
     );
@@ -729,9 +727,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.album_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       artists: item.artists,
       album: item,
     );
@@ -746,9 +742,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.queue_music_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       artists: const <Artist>[],
       album: null,
     );
@@ -763,9 +757,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
       coverUrl: item.imageUriForSize(512),
       fallbackIcon: Icons.person_outlined,
       providerLabel: _providerLabelFromId(item.provider),
-      providerIconSvg: ProviderManifestRegistry.iconSvgForProvider(
-        item.provider,
-      ),
+      providerId: item.provider,
       artists: <Artist>[item],
       album: null,
     );
@@ -781,7 +773,7 @@ MediaSlideItemData resolveMediaSlideItemData(Object? item) {
     coverUrl: null,
     fallbackIcon: Icons.music_note_outlined,
     providerLabel: '-',
-    providerIconSvg: null,
+    providerId: null,
     artists: const <Artist>[],
     album: null,
   );

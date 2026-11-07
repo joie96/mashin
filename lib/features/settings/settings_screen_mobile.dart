@@ -10,8 +10,6 @@ class SettingsScreenMobile extends StatelessWidget {
     super.key,
     required this.musicAssistantUrl,
     required this.onLogout,
-    required this.cacheSizeController,
-    required this.cacheSizeFocusNode,
     required this.isDarkTheme,
     required this.logLevel,
     required this.onThemeChanged,
@@ -22,8 +20,6 @@ class SettingsScreenMobile extends StatelessWidget {
 
   final String musicAssistantUrl;
   final VoidCallback? onLogout;
-  final TextEditingController cacheSizeController;
-  final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
@@ -78,29 +74,6 @@ class SettingsScreenMobile extends StatelessWidget {
                     icon: const Icon(Icons.logout_outlined, size: 18),
                     label: const Text('Abmelden'),
                   ),
-                ),
-                const SizedBox(height: 32),
-                Text(
-                  'Lokaler Cache',
-                  style: Theme.of(context).textTheme.titleMedium,
-                ),
-                const SizedBox(height: 12),
-                TextField(
-                  key: const Key('settings-cache-size'),
-                  controller: cacheSizeController,
-                  focusNode: cacheSizeFocusNode,
-                  onTapOutside: (_) => cacheSizeFocusNode.unfocus(),
-                  keyboardType: TextInputType.number,
-                  decoration: const InputDecoration(
-                    labelText: 'Cache-Größe',
-                    suffixText: 'MB',
-                    prefixIcon: Icon(Icons.storage_outlined),
-                  ),
-                ),
-                const SizedBox(height: 10),
-                Text(
-                  '25 bis 1000 MB RAM fuer den Mashin-Player.',
-                  style: TextStyle(color: colors.textSecondary),
                 ),
                 const SizedBox(height: 32),
                 Text('Theme', style: Theme.of(context).textTheme.titleMedium),

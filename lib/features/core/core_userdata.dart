@@ -19,6 +19,8 @@ class UserData extends ChangeNotifier {
   bool _needsSnapshotRefresh = false;
   bool _isLoadingLibraryData = false;
   bool _isLoadingFavorites = false;
+  bool _hasLoadedFavorites = false;
+  Map<(MediaType, String, String), bool> _favoriteOverrides = {};
   bool _isLoadingPlaylists = false;
   Set<String> _loadingPlaylistIds = <String>{};
   bool _isDisposed = false;
@@ -75,9 +77,16 @@ class UserData extends ChangeNotifier {
   // Reads the current Rust snapshot without restarting its session-owned loading.
   Future<void> refreshLibrarySnapshot() => _refreshSnapshot();
 
-  bool isFavorite(MediaItem item) =>
-      _favoriteUriKeys.contains((item.mediaType, item.uri ?? '')) ||
-      _itemIdentityKeys(item).any(_favoriteIdentityKeys.contains);
+  bool isFavorite(MediaItem item) {
+    for (final key in _itemIdentityKeys(item)) {
+      if (_favoriteOverrides[key] case final known?) return known;
+    }
+    if (_favoriteUriKeys.contains((item.mediaType, item.uri ?? '')) ||
+        _itemIdentityKeys(item).any(_favoriteIdentityKeys.contains)) {
+      return true;
+    }
+    return _hasLoadedFavorites ? false : item.favorite;
+  }
 
   T withFavoriteStatus<T extends MediaItem>(T item) {
     final bool favorite = isFavorite(item);
@@ -196,6 +205,14 @@ class UserData extends ChangeNotifier {
 
   void _applySnapshot(Map<String, dynamic> snapshot) {
     _isLoadingFavorites = snapshot['is_loading_favorites'] == true;
+    _hasLoadedFavorites = snapshot['has_loaded_favorites'] == true;
+    _favoriteOverrides = {
+      for (final entry in _listOfMaps(snapshot['favorite_overrides']))
+        for (final key in _itemIdentityKeys(
+          MediaItem.fromJson(_map(entry['item'])),
+        ))
+          key: entry['is_favorite'] == true,
+    };
     _isLoadingPlaylists = snapshot['is_loading_playlists'] == true;
     final Map<String, dynamic> favorites = _map(snapshot['favorites']);
     _favoriteTracks = _readTracks(favorites['tracks'], true);
@@ -222,15 +239,12 @@ class UserData extends ChangeNotifier {
       snapshot['playlists'],
     )) {
       try {
-        final Playlist playlist = _copyPlaylist(
-          Playlist.fromJson(value),
-          false,
-        );
+        final Playlist playlist = Playlist.fromJson(value);
         playlists.add(playlist);
         if (value['is_loading_tracks'] == true) {
           loadingPlaylistIds.add(playlist.itemId);
         }
-        tracksByPlaylist[playlist.itemId] = _readTracks(value['items'], false);
+        tracksByPlaylist[playlist.itemId] = _readTracks(value['items'], null);
       } on FormatException {
         continue;
       }
@@ -244,11 +258,13 @@ class UserData extends ChangeNotifier {
     notifyListeners();
   }
 
-  List<Track> _readTracks(Object? value, bool favorite) =>
+  List<Track> _readTracks(Object? value, bool? favorite) =>
       List<Track>.unmodifiable(
-        _listOfMaps(
-          value,
-        ).map((json) => _copyTrack(Track.fromJson(json), favorite)),
+        _listOfMaps(value).map(
+          (json) => favorite == null
+              ? Track.fromJson(json)
+              : _copyTrack(Track.fromJson(json), favorite),
+        ),
       );
   List<Album> _readAlbums(Object? value, bool favorite) =>
       List<Album>.unmodifiable(

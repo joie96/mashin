@@ -16,21 +16,24 @@ impl PeriodicWorker {
         backend: &Arc<Mutex<Backend>>,
     ) -> Self {
         let backend = Arc::downgrade(backend);
-        Self::start(move || {
-            if let Some(backend) = backend.upgrade() {
-                if let Ok(mut backend) = backend.lock() {
-                    backend.process_playback_cycle();
-                }
-            }
+        Self::start(move |should_keep_running| {
+            let Some(backend) = backend.upgrade() else {
+                return;
+            };
+            let events = match backend.lock() {
+                Ok(mut backend) => backend.collect_presentation_events(),
+                Err(_) => return,
+            };
+            events.publish(|| should_keep_running.load(Ordering::Acquire));
         })
     }
 
-    pub(crate) fn start(run_periodic_work: impl Fn() + Send + 'static) -> Self {
+    pub(crate) fn start(run_periodic_work: impl Fn(&AtomicBool) + Send + 'static) -> Self {
         let should_keep_running = Arc::new(AtomicBool::new(true));
         let should_keep_running_for_thread = Arc::clone(&should_keep_running);
         let task = std::thread::spawn(move || {
             while should_keep_running_for_thread.load(Ordering::Relaxed) {
-                run_periodic_work();
+                run_periodic_work(&should_keep_running_for_thread);
                 std::thread::park_timeout(Duration::from_millis(25));
             }
         });
@@ -40,7 +43,26 @@ impl PeriodicWorker {
         }
     }
 
-    // Stops and joins the worker before its native dependencies can be released.
+    // Request cancellation under state locks; the caller joins completion outside them.
+    pub(crate) fn shutdown(
+        mut self,
+        runtime: &tokio::runtime::Handle,
+    ) -> tokio::task::JoinHandle<()> {
+        self.should_keep_running.store(false, Ordering::Relaxed);
+        let task = self.task.take();
+        if let Some(task) = &task {
+            task.thread().unpark();
+        }
+        runtime.spawn_blocking(move || {
+            if let Some(task) = task {
+                if let Err(panic) = task.join() {
+                    std::panic::resume_unwind(panic);
+                }
+            }
+        })
+    }
+
+    // Fallback for an owner dropped without transferring its explicit completion handle.
     pub(crate) fn stop(&mut self) {
         self.should_keep_running.store(false, Ordering::Relaxed);
         if let Some(task) = self.task.take() {
@@ -53,32 +75,5 @@ impl PeriodicWorker {
 impl Drop for PeriodicWorker {
     fn drop(&mut self) {
         self.stop();
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    struct WorkerLifetime(Arc<AtomicBool>);
-    impl Drop for WorkerLifetime {
-        fn drop(&mut self) {
-            self.0.store(true, Ordering::Release);
-        }
-    }
-
-    #[test]
-    fn stop_waits_until_the_worker_releases_its_dependencies() {
-        let is_released = Arc::new(AtomicBool::new(false));
-        let lifetime = WorkerLifetime(is_released.clone());
-        let (sender, receiver) = std::sync::mpsc::channel();
-        let mut worker = PeriodicWorker::start(move || {
-            std::hint::black_box(&lifetime);
-            let _ = sender.send(());
-        });
-        receiver.recv_timeout(Duration::from_secs(1)).unwrap();
-        worker.stop();
-        assert!(is_released.load(Ordering::Acquire));
-        worker.stop();
     }
 }

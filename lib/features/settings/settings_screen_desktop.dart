@@ -37,8 +37,6 @@ class SettingsScreenDesktop extends StatelessWidget {
   const SettingsScreenDesktop({
     super.key,
     required this.musicAssistantUrl,
-    required this.cacheSizeController,
-    required this.cacheSizeFocusNode,
     required this.isDarkTheme,
     required this.logLevel,
     required this.onThemeChanged,
@@ -48,8 +46,6 @@ class SettingsScreenDesktop extends StatelessWidget {
   });
 
   final String musicAssistantUrl;
-  final TextEditingController cacheSizeController;
-  final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
   final ValueChanged<bool> onThemeChanged;
@@ -101,8 +97,6 @@ class SettingsScreenDesktop extends StatelessWidget {
                   children: <Widget>[
                     _DesktopSettingsForm(
                       musicAssistantUrl: musicAssistantUrl,
-                      cacheSizeController: cacheSizeController,
-                      cacheSizeFocusNode: cacheSizeFocusNode,
                       isDarkTheme: isDarkTheme,
                       onThemeChanged: onThemeChanged,
                       shouldShowMultiDeviceButton: shouldShowMultiDeviceButton,
@@ -170,8 +164,6 @@ class _DesktopLogTab extends StatelessWidget {
 class _DesktopSettingsForm extends StatelessWidget {
   const _DesktopSettingsForm({
     required this.musicAssistantUrl,
-    required this.cacheSizeController,
-    required this.cacheSizeFocusNode,
     required this.isDarkTheme,
     required this.onThemeChanged,
     required this.shouldShowMultiDeviceButton,
@@ -179,8 +171,6 @@ class _DesktopSettingsForm extends StatelessWidget {
   });
 
   final String musicAssistantUrl;
-  final TextEditingController cacheSizeController;
-  final FocusNode cacheSizeFocusNode;
   final bool isDarkTheme;
   final ValueChanged<bool> onThemeChanged;
   final bool shouldShowMultiDeviceButton;
@@ -205,29 +195,6 @@ class _DesktopSettingsForm extends StatelessWidget {
                 decoration: _desktopSettingsFieldDecoration(
                   colors: colors,
                   icon: Icons.dns_outlined,
-                ),
-              ),
-            ),
-          ),
-        ),
-        const _DesktopSettingsDivider(),
-        _DesktopSettingsSection(
-          title: 'Wiedergabe',
-          child: _DesktopSettingRow(
-            title: 'Lokaler Cache',
-            description: '25 bis 1000 MB RAM fuer den Mashin-Player.',
-            control: SizedBox(
-              width: _desktopSettingsControlWidth,
-              child: TextField(
-                key: const Key('settings-cache-size'),
-                controller: cacheSizeController,
-                focusNode: cacheSizeFocusNode,
-                onTapOutside: (_) => cacheSizeFocusNode.unfocus(),
-                keyboardType: TextInputType.number,
-                decoration: _desktopSettingsFieldDecoration(
-                  colors: colors,
-                  icon: Icons.storage_outlined,
-                  suffixText: 'MB',
                 ),
               ),
             ),

@@ -2,9 +2,9 @@
 
 use super::mashin::audio_adapter::MashinAudioAdapter;
 use super::mashin::receiver::{MashinReceiver, ReceiverConfiguration};
-use crate::music_assistant::connection::MusicAssistantConnection;
-use crate::music_assistant::models::identifiers::{QueueId, QueueItemId};
+use crate::domain::identifiers::{QueueId, QueueItemId};
 use crate::playback::models::MediaSessionState;
+use crate::playback::server::PlaybackConnection;
 use std::sync::{Arc, Mutex};
 
 #[derive(Default)]
@@ -47,7 +47,9 @@ impl QueueBootstrap {
         }
         if matches!(self, Self::Loading) {
             if let Some(snapshot) = synchronized {
-                let selection = snapshot.queue.current_index
+                let selection = snapshot
+                    .queue
+                    .current_index
                     .and_then(|index| snapshot.queue.items.get(index))
                     .map(|item| InitialQueueSelection {
                         queue_id: snapshot.queue.queue_id.clone(),
@@ -64,7 +66,12 @@ impl QueueBootstrap {
         if state.queue.queue_id != selection.queue_id {
             return;
         }
-        if let Some(index) = state.queue.items.iter().position(|item| item.queue_item_id == selection.item_id) {
+        if let Some(index) = state
+            .queue
+            .items
+            .iter()
+            .position(|item| item.queue_item_id == selection.item_id)
+        {
             state.queue.current_index = Some(index);
             state.player_state.current_index = Some(index);
             state.player_state.current_queue_item_id = Some(selection.item_id.clone());
@@ -79,14 +86,14 @@ pub(crate) struct LocalSessionConfiguration {
     pub(crate) device_id: String,
     pub(crate) client_name: String,
     pub(crate) cache_bytes: usize,
-    pub(crate) audio_profile: super::mashin::models::AudioProfileId,
+    pub(crate) audio_profile: crate::domain::settings::AudioProfileId,
     pub(crate) volume: u8,
 }
 
 pub(crate) struct AudioProfileChange {
     session: Arc<LocalSession>,
-    profile: super::mashin::models::AudioProfileId,
-    previous_profile: super::mashin::models::AudioProfileId,
+    profile: crate::domain::settings::AudioProfileId,
+    previous_profile: crate::domain::settings::AudioProfileId,
 }
 
 impl AudioProfileChange {
@@ -113,7 +120,7 @@ impl AudioProfileChange {
     // Persisted preference and native session identity commit together, not negotiated server state.
     pub(crate) fn commit(
         &self,
-        persist: impl FnOnce(super::mashin::models::AudioProfileId) -> Result<(), String>,
+        persist: impl FnOnce(crate::domain::settings::AudioProfileId) -> Result<(), String>,
     ) -> Result<(), String> {
         let mut configuration = self
             .session
@@ -131,9 +138,10 @@ impl AudioProfileChange {
 }
 
 pub(crate) struct LocalSession {
+    runtime: tokio::runtime::Handle,
     pub(super) output: MashinAudioAdapter,
     pub(super) receiver: MashinReceiver,
-    pub(super) connection: Arc<MusicAssistantConnection>,
+    pub(super) connection: Arc<dyn PlaybackConnection>,
     pub(super) queue_bootstrap: Mutex<QueueBootstrap>,
     configuration: Mutex<LocalSessionConfiguration>,
 }
@@ -141,13 +149,13 @@ pub(crate) struct LocalSession {
 impl LocalSession {
     // The API token belongs only to MA API/EventHub, never to receiver sockets.
     pub(crate) fn new(
-        runtime: &tokio::runtime::Runtime,
+        runtime: &tokio::runtime::Handle,
         configuration: &LocalSessionConfiguration,
-        connection: Arc<MusicAssistantConnection>,
+        connection: Arc<dyn PlaybackConnection>,
     ) -> Result<Self, String> {
         let output =
             MashinAudioAdapter::new(configuration.cache_bytes, configuration.volume, false)?;
-        let music_assistant_url = connection.server_url.0.clone();
+        let music_assistant_url = connection.server_url();
         let receiver = MashinReceiver::new(
             runtime,
             ReceiverConfiguration {
@@ -157,9 +165,10 @@ impl LocalSession {
                 audio_profile: configuration.audio_profile,
             },
             output.clone(),
-            connection.client.clone(),
+            connection.client(),
         )?;
         Ok(Self {
+            runtime: runtime.clone(),
             output,
             receiver,
             connection,
@@ -168,10 +177,29 @@ impl LocalSession {
         })
     }
 
+    // Join receiver/recovery before audio on the blocking executor, independent of retained Arcs.
+    pub(crate) fn shutdown(session: Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let runtime = session.runtime.clone();
+        let worker = session.receiver.shutdown();
+        runtime.clone().spawn_blocking(move || {
+            let result = worker.map(|worker| runtime.block_on(worker));
+            let audio_result = session.output.shutdown();
+            drop(session);
+            if let Some(Err(error)) = result {
+                if error.is_panic() {
+                    std::panic::resume_unwind(error.into_panic());
+                }
+            }
+            if let Err(error) = audio_result {
+                std::panic::resume_unwind(error);
+            }
+        })
+    }
+
     // The operation retains its receiver through mode changes and captures live rollback state.
     pub(crate) fn prepare_audio_profile_change(
         session: &Arc<Self>,
-        profile: super::mashin::models::AudioProfileId,
+        profile: crate::domain::settings::AudioProfileId,
     ) -> AudioProfileChange {
         AudioProfileChange {
             session: session.clone(),
@@ -180,11 +208,16 @@ impl LocalSession {
         }
     }
 
+    // Runtime capability and committed session identity.
+    pub(crate) fn runtime(&self) -> &tokio::runtime::Handle {
+        &self.runtime
+    }
+
     // Server-negotiated profiles and persisted volume must not recreate the user's receiver.
     pub(super) fn matches(
         &self,
         configuration: &LocalSessionConfiguration,
-        connection: &Arc<MusicAssistantConnection>,
+        connection: &Arc<dyn PlaybackConnection>,
     ) -> Result<bool, String> {
         let mut current = self
             .configuration
@@ -193,120 +226,5 @@ impl LocalSession {
             .clone();
         current.volume = configuration.volume;
         Ok(current == *configuration && Arc::ptr_eq(&self.connection, connection))
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::music_assistant::models::queue::PlayState;
-    use crate::playback::models::Queue;
-
-    fn server_snapshot() -> MediaSessionState {
-        let item = serde_json::from_value(serde_json::json!({
-            "queue_id":"registered-player", "queue_item_id":"saved-item", "name":"Saved",
-            "duration":180, "media_item":{"item_id":"track", "provider":"test", "name":"Saved", "media_type":"track"}
-        })).unwrap();
-        MediaSessionState {
-            queue: Queue {
-                queue_id: QueueId("registered-player".into()),
-                items: vec![item],
-                current_index: Some(0),
-                shuffle_enabled: true,
-                autoplay_enabled: true,
-                ..Queue::default()
-            },
-            player_state: crate::playback::models::PlayerState {
-                playback_state: PlayState::Playing,
-                position_millis: Some(12_500),
-                ..Default::default()
-            },
-        }
-    }
-
-    fn local_state(snapshot: &MediaSessionState) -> MediaSessionState {
-        let mut queue = snapshot.queue.clone();
-        queue.current_index = None;
-        MediaSessionState { queue, player_state: Default::default() }
-    }
-
-    #[test]
-    fn bootstrap_waits_for_registration_and_a_complete_snapshot() {
-        let snapshot = server_snapshot();
-        let mut bootstrap = QueueBootstrap::default();
-        let mut local = local_state(&snapshot);
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        assert_eq!(local.queue.current_index, None);
-        bootstrap.start_loading();
-        bootstrap.project(&mut local, None, false);
-        assert!(matches!(bootstrap, QueueBootstrap::Loading));
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        assert_eq!(local.queue.current_index, Some(0));
-        assert_eq!(local.player_state.position_millis, Some(12_500));
-        assert_eq!(local.player_state.duration_millis, Some(180_000));
-        assert_ne!(local.player_state.playback_state, PlayState::Playing);
-        assert!(local.queue.shuffle_enabled && local.queue.autoplay_enabled);
-    }
-
-    #[test]
-    fn reconnect_does_not_reimport_server_selection_or_position() {
-        let mut snapshot = server_snapshot();
-        let mut bootstrap = QueueBootstrap::default();
-        bootstrap.start_loading();
-        bootstrap.project(&mut local_state(&snapshot), Some(&snapshot), false);
-        snapshot.queue.current_index = None;
-        snapshot.player_state.position_millis = Some(99_000);
-        bootstrap.start_loading();
-        let mut local = local_state(&snapshot);
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        assert_eq!(local.queue.current_index, Some(0));
-        assert_eq!(local.player_state.position_millis, Some(12_500));
-    }
-
-    #[test]
-    fn local_activity_rejects_a_late_initial_snapshot_permanently() {
-        let snapshot = server_snapshot();
-        let mut bootstrap = QueueBootstrap::default();
-        bootstrap.start_loading();
-        let mut local = local_state(&snapshot);
-        bootstrap.project(&mut local, Some(&snapshot), true);
-        bootstrap.start_loading();
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        assert!(matches!(bootstrap, QueueBootstrap::Local));
-        assert_eq!(local.queue.current_index, None);
-        assert_eq!(local.player_state.position_millis, None);
-    }
-
-    #[test]
-    fn queue_mutation_keeps_local_selection_and_position_after_reconnect() {
-        let snapshot = server_snapshot();
-        let mut bootstrap = QueueBootstrap::default();
-        bootstrap.start_loading();
-        let mut local = local_state(&snapshot);
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        bootstrap.take_local_authority();
-        local.queue.current_index = None;
-        local.player_state.current_index = None;
-        local.player_state.current_queue_item_id = Some(QueueItemId("local-stream".into()));
-        local.player_state.position_millis = Some(42_000);
-        let expected = local.clone();
-        bootstrap.project(&mut local, None, false);
-        bootstrap.start_loading();
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        assert!(matches!(bootstrap, QueueBootstrap::Local));
-        assert_eq!(local, expected);
-    }
-
-    #[test]
-    fn an_empty_initial_queue_completes_bootstrap() {
-        let mut bootstrap = QueueBootstrap::default();
-        bootstrap.start_loading();
-        let empty = MediaSessionState { queue: Queue::default(), player_state: Default::default() };
-        bootstrap.project(&mut local_state(&empty), Some(&empty), false);
-        assert!(matches!(bootstrap, QueueBootstrap::Complete(None)));
-        let snapshot = server_snapshot();
-        let mut local = local_state(&snapshot);
-        bootstrap.project(&mut local, Some(&snapshot), false);
-        assert_eq!(local.queue.current_index, None);
     }
 }

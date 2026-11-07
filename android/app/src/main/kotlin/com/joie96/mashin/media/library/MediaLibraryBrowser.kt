@@ -28,7 +28,7 @@ import java.util.concurrent.Executors
 import org.json.JSONArray
 import org.json.JSONObject
 
-// Media-library browsing and boundary media-item caching.
+// Online media-library browsing and Media3 playback identity mapping.
 @UnstableApi
 internal class MediaLibraryBrowser(
     private val context: Context,
@@ -206,7 +206,7 @@ internal class MediaLibraryBrowser(
         }
     }
 
-    // Library boundary mapping and serialized media caching.
+    // Library boundary mapping and serialized playback references.
     private fun libraryItem(
         id: String,
         title: String,
@@ -255,7 +255,7 @@ internal class MediaLibraryBrowser(
         "home:playlistSuggestions" -> recommendationItems("user_artist_playlists_monthly", "playlist", normalizePlaylistNames = true)
         "home:topTracks" -> recommendationItems("user_top_tracks_monthly", "track")
         "home:topArtists" -> recommendationItems("user_top_artists_monthly", "artist")
-        "home:recent" -> LibraryChildren(mediaItemsFromJson(query("recentlyPlayed", null), true, mediaType = "track"))
+        "home:recent" -> LibraryChildren(mediaItemsFromJson(query("recentlyPlayedTracks", null), true, mediaType = "track"))
         "discover:exploration" -> discoverRecommendationItems("user_exploration_weekly", "track", true)
         "discover:albums" -> discoverRecommendationItems("sitewide_top_albums_weekly", "album")
         "discover:similarUsers" -> discoverRecommendationItems("similarusers_jam_weekly", "track", true)
@@ -441,7 +441,7 @@ internal class MediaLibraryBrowser(
             data.optBoolean("is_loading_playlists"))
     }
 
-    private fun userDataSnapshot(): String = query("userData", null)
+    private fun userDataSnapshot(): String = query("getUserData", null)
         ?: JSONObject().put("is_loading_favorites", true).put("is_loading_playlists", true).toString()
 
     private fun referencedItems(referenceId: String, queryKind: String): List<MediaItem> {
@@ -554,7 +554,7 @@ internal class MediaLibraryBrowser(
         val proxyId = image.optString("proxy_id").takeUnless { it == "null" }
         val path = image.optString("path")
         val source = if (!proxyId.isNullOrEmpty()) {
-            val settings = JSONObject(query("sessionSettings", null) ?: "{}")
+            val settings = JSONObject(query("getSessionSettings", null) ?: "{}")
             val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
             if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
         } else path

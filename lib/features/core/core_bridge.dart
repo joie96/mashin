@@ -163,6 +163,12 @@ typedef _DartRegisterEventCallbackFn =
 typedef _NativeJsonCommandFn = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _DartJsonCommandFn = int Function(ffi.Pointer<Utf8>);
 
+extension CatalogUpdates on MashinCoreBridgeApi {
+  Stream<CatalogUpdate> get catalogUpdates => events
+      .where((event) => event['type'] == 'catalog_updated')
+      .map(CatalogUpdate.fromJson);
+}
+
 abstract class MashinCoreBridgeApi {
   Stream<Queue> get queueChanges;
   Stream<PlayerState> get playerStateChanges;
@@ -182,9 +188,11 @@ abstract class MashinCoreBridgeApi {
   Future<void> refreshPlayerState();
   Future<RecommendationSnapshot> getRecommendations({
     required RecommendationView view,
+    bool refresh = true,
   });
   Future<List<ProviderManifest>> getProviderManifests();
   Future<String?> getProviderIconData(String provider);
+  Future<MediaItemImage?> getMediaArtwork(MediaItem item);
   Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40});
   Future<SearchResults> searchMedia(
     String query,
@@ -255,7 +263,7 @@ abstract class MashinCoreBridgeApi {
     String playlistId,
     List<int> positionsToRemove,
   );
-  Future<void> loadSessionData();
+  Future<void> startSessionDataLoad();
   Future<Map<String, dynamic>> loadUserData();
   Future<Map<String, dynamic>> getUserData();
   Future<void> setUserDataFavorites(List<MediaItem> items, bool favorite);
@@ -416,9 +424,10 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   @override
   Future<RecommendationSnapshot> getRecommendations({
     required RecommendationView view,
+    bool refresh = true,
   }) => _startMusicAssistantQuery<RecommendationSnapshot>(
     'recommendations',
-    <String, Object?>{'view': view.name},
+    <String, Object?>{'view': view.name, 'refresh': refresh},
     (Object? decoded) {
       if (decoded is! Map<String, dynamic>) {
         throw const FormatException('recommendations must be a snapshot');
@@ -458,6 +467,16 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
           final iconData = decoded.trim();
           return iconData.isEmpty ? null : iconData;
         },
+      );
+
+  @override
+  Future<MediaItemImage?> getMediaArtwork(MediaItem item) =>
+      _startMusicAssistantQuery<MediaItemImage?>(
+        'mediaArtwork',
+        <String, Object?>{'item': createMusicAssistantMediaItemPayload(item)},
+        (Object? decoded) => decoded == null
+            ? null
+            : MediaItemImage.fromJson(decoded as Map<String, dynamic>),
       );
 
   @override
@@ -631,12 +650,48 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     String kind,
     Map<String, Object?> arguments,
     T Function(Object? decoded) decoder,
-  ) => _submitOperation<T>(
-    kind,
-    arguments,
-    decoder,
-    queryScope: CoreQueryScope.current ?? CoreQueryScope(),
-  );
+  ) async {
+    final queryKind = switch (kind) {
+      'recentlyPlayedTracks' => CatalogQueryKind.recentlyPlayed,
+      'searchMedia' => CatalogQueryKind.search,
+      _ =>
+        CatalogQueryKind.values
+            .where((value) => value.name == kind)
+            .firstOrNull,
+    };
+    Object? latest;
+    var hasUpdate = false;
+    final subscription = queryKind == null
+        ? null
+        : events.listen((event) {
+            if (event['type'] != 'catalog_updated') return;
+            if (arguments['forceRefresh'] == true) return;
+            final update = CatalogUpdate.fromJson(event);
+            if (update.kind != queryKind ||
+                update.itemId != arguments['itemId'] ||
+                update.provider != arguments['provider'] ||
+                update.searchQuery != arguments['query'] ||
+                update.limit != arguments['limit'] ||
+                update.allowDynamicTracks != arguments['allowDynamicTracks'] ||
+                update.allowLookup != arguments['allowLookup'] ||
+                (queryKind == CatalogQueryKind.search &&
+                    update.mediaType?.name != arguments['mediaType'])) {
+              return;
+            }
+            latest = (event['value'] as Map).values.single;
+            hasUpdate = true;
+          });
+    try {
+      return await _submitOperation<T>(
+        kind,
+        arguments,
+        (result) => decoder(hasUpdate ? latest : result),
+        queryScope: CoreQueryScope.current ?? CoreQueryScope(),
+      );
+    } finally {
+      await subscription?.cancel();
+    }
+  }
 
   Future<T> _submitOperation<T>(
     String kind,
@@ -977,8 +1032,8 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   });
 
   @override
-  Future<void> loadSessionData() =>
-      _submitVoidOperation('loadSessionData', const <String, Object?>{});
+  Future<void> startSessionDataLoad() =>
+      _submitVoidOperation('startSessionDataLoad', const <String, Object?>{});
 
   @override
   Future<Map<String, dynamic>> loadUserData() =>

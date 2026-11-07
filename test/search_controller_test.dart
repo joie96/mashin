@@ -13,6 +13,43 @@ import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart'
 import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 
 void main() {
+  test(
+    'catalog updates respect active search',
+    () async {
+      final bridge = _EventSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      await controller.runSearch('jazz');
+      void emit(String query, List<Map<String, dynamic>> tracks) {
+        bridge.updates.add(<String, dynamic>{
+          'type': 'catalog_updated',
+          'query': <String, dynamic>{
+            'Search': <String, dynamic>{
+              'query': query,
+              'media_type': 'track',
+              'limit': 50,
+            },
+          },
+          'value': <String, dynamic>{
+            'Search': <String, dynamic>{'tracks': tracks},
+          },
+        });
+      }
+
+      emit('old', []);
+      expect(controller.tracks.single.name, 'Track');
+      emit('jazz', [
+        {'item_id': 'fresh', 'provider': 'library', 'name': 'Fresh'},
+      ]);
+      expect(controller.tracks.single.name, 'Fresh');
+      emit('jazz', []);
+      expect(controller.tracks, isEmpty);
+    },
+  );
+
   test('loads every search result type through the core bridge', () async {
     final coreBridge = _FakeSearchCoreBridge();
     final controller = SearchController(coreBridge: coreBridge);
@@ -390,7 +427,16 @@ class _AlbumSearchCoreBridge extends _FakeSearchCoreBridge {
   }
 }
 
+class _EventSearchCoreBridge extends _FakeSearchCoreBridge {
+  final updates = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  @override
+  Stream<Map<String, dynamic>> get events => updates.stream;
+}
+
 class _FakeSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
+  @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+
   String? query;
   final List<MediaType> requestedTypes = <MediaType>[];
 
@@ -445,6 +491,9 @@ const SearchResults _emptyResults = SearchResults(
 );
 
 class _DeferredSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
+  @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+
   final Map<(String, MediaType), Completer<SearchResults>> requests =
       <(String, MediaType), Completer<SearchResults>>{};
 

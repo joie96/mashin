@@ -17,9 +17,12 @@ class AlbumDetailController extends ChangeNotifier {
   }) : sectionProvider = DetailProviderSelection(
          itemId: itemId,
          provider: providerInstanceIdOrDomain,
-       );
+       ) {
+    _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+  }
 
   final DetailProviderSelection sectionProvider;
+  StreamSubscription<CatalogUpdate>? _catalogSubscription;
   bool _isSelectingProvider = false;
 
   final MashinCoreBridgeApi coreBridge;
@@ -53,7 +56,7 @@ class AlbumDetailController extends ChangeNotifier {
       _isControllerDisposed ||
       (CoreQueryScope.current ?? _queryScope).isCanceled;
 
-  // Visibility owns read requests; returning waits for the canceled load before restarting.
+  // Hidden generations release their subscriptions without delaying a returning page.
   Future<void> setPageVisible(bool isVisible) async {
     if (_isControllerDisposed || _isPageVisible == isVisible) return;
     _isPageVisible = isVisible;
@@ -62,10 +65,10 @@ class AlbumDetailController extends ChangeNotifier {
       _requiresReload =
           _loadingFuture != null || _isLoadingMetadata || isLoadingSections;
       _queryScope.cancel();
+      _loadingFuture = null;
       _logSection('page', 'hidden; read requests canceled');
       return;
     }
-    await _loadingFuture;
     if (_isControllerDisposed ||
         !_isPageVisible ||
         generation != _visibilityGeneration) {
@@ -88,12 +91,79 @@ class AlbumDetailController extends ChangeNotifier {
   @override
   void dispose() {
     _isControllerDisposed = true;
+    unawaited(_catalogSubscription?.cancel());
     _queryScope.cancel();
     _logSection('page', 'disposed; pending results will be ignored');
     _metadataNotifier.dispose();
     _tracksNotifier.dispose();
     _relatedNotifier.dispose();
     super.dispose();
+  }
+
+  // Confirmed refresh results replace only the requested section.
+  void _onCatalogUpdate(CatalogUpdate update) {
+    if (_isLoadCanceled || !_isPageVisible) return;
+    if (update.matches(
+          CatalogQueryKind.album,
+          itemId,
+          providerInstanceIdOrDomain,
+        ) &&
+        update.item is Album) {
+      final album = update.item! as Album;
+      _album = userDataController?.withFavoriteStatus(album) ?? album;
+      _isAlbumFavorite = isItemFavorite(_album!);
+      _metadataNotifier.notifyListeners();
+    } else if (update.matches(
+      CatalogQueryKind.albumTracks,
+      sectionProvider.selectedItemId,
+      sectionProvider.selectedProvider,
+    )) {
+      _tracks = update.tracks
+          .map(_withLoadedAlbum)
+          .map(
+            (track) => userDataController?.withFavoriteStatus(track) ?? track,
+          )
+          .toList(growable: false);
+      _tracksNotifier.notifyListeners();
+    } else if (_album?.artists.any(
+          (artist) =>
+              artist.itemId == update.itemId &&
+                  artist.provider == update.provider ||
+              artist.providerMappings.any(
+                (mapping) =>
+                    mapping.itemId == update.itemId &&
+                    mapping.providerInstance == update.provider,
+              ),
+        ) ??
+        false) {
+      switch (update.kind) {
+        case CatalogQueryKind.artistAlbums:
+          _otherAlbums = update.albums
+              .where(
+                (album) =>
+                    album.itemId != _album?.itemId ||
+                    album.provider != _album?.provider,
+              )
+              .map(
+                (album) =>
+                    userDataController?.withFavoriteStatus(album) ?? album,
+              )
+              .toList(growable: false);
+        case CatalogQueryKind.similarArtists:
+          _similarArtists = update.artists
+              .map(
+                (artist) =>
+                    userDataController?.withFavoriteStatus(artist) ?? artist,
+              )
+              .toList(growable: false);
+        default:
+          return;
+      }
+      _relatedNotifier.notifyListeners();
+    } else {
+      return;
+    }
+    notifyListeners();
   }
 
   Album? get album => _album;
@@ -234,37 +304,12 @@ class AlbumDetailController extends ChangeNotifier {
         sectionProvider.selectedProvider,
       );
       if (_isLoadCanceled) return;
-      final Album? loadedAlbum = _album;
       _tracks = List<Track>.unmodifiable(
         loaded
-            .map((Track track) {
-              final Track withAlbum = loadedAlbum == null
-                  ? track
-                  : Track(
-                      itemId: track.itemId,
-                      provider: track.provider,
-                      name: track.name,
-                      duration: track.duration,
-                      artists: track.artists,
-                      version: track.version,
-                      sortName: track.sortName,
-                      uri: track.uri,
-                      externalIds: track.externalIds,
-                      isPlayable: track.isPlayable,
-                      available: track.available,
-                      album: loadedAlbum,
-                      image: track.image,
-                      providerMappings: track.providerMappings,
-                      metadata: track.metadata,
-                      favorite: track.favorite,
-                      position: track.position,
-                      dateAdded: track.dateAdded,
-                      discNumber: track.discNumber,
-                      trackNumber: track.trackNumber,
-                    );
-              return userDataController?.withFavoriteStatus(withAlbum) ??
-                  withAlbum;
-            })
+            .map(_withLoadedAlbum)
+            .map(
+              (track) => userDataController?.withFavoriteStatus(track) ?? track,
+            )
             .toList(growable: false),
       );
       _logSection(
@@ -284,6 +329,32 @@ class AlbumDetailController extends ChangeNotifier {
       if (!_isLoadCanceled) _tracksNotifier.notifyListeners();
       notifyListeners();
     }
+  }
+
+  Track _withLoadedAlbum(Track track) {
+    if (_album == null) return track;
+    return Track(
+      itemId: track.itemId,
+      provider: track.provider,
+      name: track.name,
+      duration: track.duration,
+      artists: track.artists,
+      version: track.version,
+      sortName: track.sortName,
+      uri: track.uri,
+      externalIds: track.externalIds,
+      isPlayable: track.isPlayable,
+      available: track.available,
+      album: _album,
+      image: track.image,
+      providerMappings: track.providerMappings,
+      metadata: track.metadata,
+      favorite: track.favorite,
+      position: track.position,
+      dateAdded: track.dateAdded,
+      discNumber: track.discNumber,
+      trackNumber: track.trackNumber,
+    );
   }
 
   Future<void> _loadOtherAlbums() async {
@@ -463,9 +534,12 @@ class AlbumDetailController extends ChangeNotifier {
   // A single load generation owns all sequential and parallel section requests.
   Future<void> _runLoad(Future<void> Function() load) {
     if (_isLoadCanceled) return Future<void>.value();
-    return _loadingFuture ??= _queryScope.run(load).whenComplete(() {
-      _loadingFuture = null;
+    if (_loadingFuture case final pending?) return pending;
+    late final Future<void> loading;
+    loading = _queryScope.run(load).whenComplete(() {
+      if (identical(_loadingFuture, loading)) _loadingFuture = null;
     });
+    return _loadingFuture = loading;
   }
 
   // Diagnostics identify concurrent page instances without logging response payloads.

@@ -79,7 +79,7 @@ class _DetailProviderSwitcherState extends State<DetailProviderSwitcher> {
               alignment: Alignment.centerLeft,
               child: MediaProviderIcon(
                 providerLabel: provider,
-                iconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+                providerId: provider,
                 size: _selectedIconSize,
               ),
             ),
@@ -242,9 +242,7 @@ class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
                   child: MediaProviderIcon(
                     key: const ValueKey<String>('item-provider-primary'),
                     providerLabel: label,
-                    iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                      provider,
-                    ),
+                    providerId: provider,
                     size: widget.size,
                   ),
                 ),
@@ -482,10 +480,7 @@ class _DesktopProviderRowState extends State<_DesktopProviderRow> {
                                 'desktop-provider-${entry.$2.providerInstance}',
                               ),
                               providerLabel: entry.$2.providerDomain,
-                              iconSvg:
-                                  ProviderManifestRegistry.iconSvgForProvider(
-                                    entry.$2.providerDomain,
-                                  ),
+                              providerId: entry.$2.providerDomain,
                               size: size,
                             ),
                           ),
@@ -622,9 +617,7 @@ class _ProviderIconStackState extends State<_ProviderIconStack>
                             _mappings[index].providerDomain,
                           )?.name ??
                           _mappings[index].providerDomain,
-                      iconSvg: ProviderManifestRegistry.iconSvgForProvider(
-                        _mappings[index].providerDomain,
-                      ),
+                      providerId: _mappings[index].providerDomain,
                       size: bounds[index].width,
                     ),
                   ),

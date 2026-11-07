@@ -20,6 +20,13 @@ Supported targets: Windows x64/ARM64 and Android ARM64.
 
 See the [build guide](scripts/README.md) for setup and release builds.
 
+## Architecture
+
+Catalog browsing requires an online Music Assistant session. Android media controls
+and Android Auto use the same online catalog and playback session.
+The [cache replacement contract](docs/cache_replacement_contract.md) separates
+removal of the previous cache from any future implementation.
+
 ## FFmpeg
 
 Mashin dynamically links FFmpeg under LGPL-2.1-or-later. App packages include

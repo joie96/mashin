@@ -1,11 +1,29 @@
 //! Shared command and snapshot contract for the two engine-owned playback modes.
 
-use crate::music_assistant::models::identifiers::QueueItemId;
-use crate::music_assistant::models::media::MediaItem;
-use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
+use crate::application::events::{ApplicationEvent, EventPublisher};
+use crate::domain::identifiers::QueueItemId;
+use crate::domain::media::MediaItem;
 use crate::playback::models::{MediaSessionState, PlayerState, Queue};
+use crate::playback::models::{QueueOption, RepeatMode};
 use crate::playback::start::{PlaybackStart, StartObservation};
 use std::sync::{Arc, Mutex};
+
+pub(crate) struct PresentationEvents {
+    pub(crate) publisher: EventPublisher,
+    pub(crate) events: Vec<ApplicationEvent>,
+}
+
+impl PresentationEvents {
+    // Delivery runs only after the backend lock has been released.
+    pub(crate) fn publish(self, should_publish: impl Fn() -> bool) {
+        for event in self.events {
+            if !should_publish() {
+                break;
+            }
+            self.publisher.publish(event);
+        }
+    }
+}
 
 pub(crate) type PlaybackCommand = futures_util::future::BoxFuture<'static, Result<(), String>>;
 
@@ -15,6 +33,7 @@ pub(crate) trait PlaybackBackend: Send {
     fn activate(&mut self) -> Result<(), String>;
     fn deactivate(&mut self);
     fn shutdown(&mut self);
+    fn take_retired_workers(&mut self) -> Vec<tokio::task::JoinHandle<()>>;
     fn queue_play_media(
         &mut self,
         media_items: Vec<MediaItem>,
@@ -45,7 +64,7 @@ pub(crate) trait PlaybackBackend: Send {
             player_state: self.player_state(),
         }
     }
-    fn process_playback_cycle(&mut self);
+    fn collect_presentation_events(&mut self) -> PresentationEvents;
     fn set_autoplay(&mut self, is_enabled: bool);
     fn take_pending_commands(&mut self) -> Vec<PlaybackCommand>;
 }

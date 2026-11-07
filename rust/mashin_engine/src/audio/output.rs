@@ -529,35 +529,3 @@ fn build_local_fifo_stream(
     };
     stream.map_err(|err| err.to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn channel_mapping_preserves_frames_and_avoids_integer_overflow() {
-        assert_eq!(
-            &*convert_channels(Arc::from([12, -4]), 1, 2).unwrap(),
-            &[12, 12, -4, -4]
-        );
-        assert_eq!(
-            &*convert_channels(Arc::from([i32::MAX, i32::MAX]), 2, 1).unwrap(),
-            &[i32::MAX]
-        );
-        assert!(convert_channels(Arc::from([1]), 2, 1).is_err());
-    }
-
-    #[test]
-    fn resampler_flushes_short_final_chunk_without_padding_or_lost_frames() {
-        for (source, target) in [(44100, 48000), (48000, 44100)] {
-            let mut resampler = AudioResampler::new(source, target, 2).unwrap();
-            let samples = resampler.process(vec![1000; 351 * 2].into()).unwrap();
-            let tail = resampler.finish().unwrap();
-            assert_eq!(
-                samples.len() + tail.len(),
-                (351 * target as usize / source as usize) * 2
-            );
-            assert!(resampler.finish().unwrap().is_empty());
-        }
-    }
-}

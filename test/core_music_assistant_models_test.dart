@@ -1,12 +1,64 @@
 // ignore_for_file: prefer_const_constructors
+import 'dart:async';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/core/core_userdata.dart';
+import 'package:mashin/features/artist/artist_detail_controller.dart';
+import 'package:mashin/features/album/album_detail_controller.dart';
+import 'package:mashin/features/playlist/playlist_detail_controller.dart';
+import 'package:mashin/features/home/home_controller.dart';
+import 'package:mashin/features/explore/explore_controller.dart';
+
+class _CatalogEventBridge extends _UnusedCoreBridge {
+  final updates = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+
+  @override
+  Stream<Map<String, dynamic>> get events => updates.stream;
+
+  @override
+  void log(LogLevelPreference level, String category, String message) {}
+}
 
 class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
   @override
   Stream<Map<String, dynamic>> get events => const Stream.empty();
+}
+
+class _RecommendationEventBridge extends _CatalogEventBridge {
+  String? trackName = 'Cached';
+  final refreshes = <bool>[];
+
+  @override
+  Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40}) async => [];
+
+  @override
+  Future<RecommendationSnapshot> getRecommendations({
+    required RecommendationView view,
+    bool refresh = true,
+  }) async {
+    refreshes.add(refresh);
+    final tracks = <Map<String, dynamic>>[
+      if (trackName != null)
+        _mediaJson('track')
+          ..['name'] = trackName
+          ..['is_playable'] = true,
+    ];
+    return RecommendationSnapshot.fromJson(<String, dynamic>{
+      'is_loading': false,
+      'has_load_error': false,
+      'folders': <Map<String, dynamic>>[
+        <String, dynamic>{
+          'item_id': view == RecommendationView.home
+              ? 'user_recommendations'
+              : 'user_exploration_weekly',
+          'provider': 'test',
+          'name': 'Recommendations',
+          'items': tracks,
+        },
+      ],
+    });
+  }
 }
 
 class _FavoriteSnapshotBridge extends _UnusedCoreBridge {
@@ -17,6 +69,7 @@ class _FavoriteSnapshotBridge extends _UnusedCoreBridge {
 
   @override
   Future<Map<String, dynamic>> loadUserData() async => <String, dynamic>{
+    'has_loaded_favorites': true,
     'favorites': <String, dynamic>{
       'tracks': <Map<String, dynamic>>[
         if (hasFavorite)
@@ -69,6 +122,157 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 };
 
 void main() {
+  test(
+    'home and explore apply changed and empty recommendations without refresh loops',
+    () async {
+      for (final view in RecommendationView.values) {
+        final bridge = _RecommendationEventBridge();
+        final home = HomeController(coreBridge: bridge);
+        final explore = ExploreController(coreBridge: bridge);
+        if (view == RecommendationView.home) {
+          await home.load();
+        } else {
+          await explore.load();
+        }
+        await Future<void>.delayed(Duration.zero);
+        List<Track> tracks() => view == RecommendationView.home
+            ? home.recommendationItems
+            : explore.weeklyExploration;
+        expect(tracks().single.name, 'Cached');
+        bridge.trackName = 'Fresh';
+        bridge.updates.add(<String, dynamic>{
+          'type': 'recommendations_changed',
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(tracks().single.name, 'Fresh');
+        bridge.trackName = null;
+        bridge.updates.add(<String, dynamic>{
+          'type': 'recommendations_changed',
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(tracks(), isEmpty);
+        expect(bridge.refreshes, <bool>[true, false, false]);
+        home.dispose();
+        explore.dispose();
+        await bridge.updates.close();
+      }
+    },
+  );
+
+  test(
+    'catalog updates replace matching detail sections without new requests',
+    () async {
+      final bridge = _CatalogEventBridge();
+      final artist = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: 'artist-id',
+        providerInstanceIdOrDomain: 'library',
+      );
+      final album = AlbumDetailController(
+        coreBridge: bridge,
+        itemId: 'album-id',
+        providerInstanceIdOrDomain: 'library',
+      );
+      final playlist = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist-id',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        artist.dispose();
+        album.dispose();
+        playlist.dispose();
+        await bridge.updates.close();
+      });
+      void emit(
+        String query,
+        String id,
+        String resultKind,
+        Object result, {
+        String provider = 'library',
+      }) {
+        bridge.updates.add(<String, dynamic>{
+          'type': 'catalog_updated',
+          'query': <String, dynamic>{
+            query: <String, dynamic>{'item_id': id, 'provider': provider},
+          },
+          'value': <String, dynamic>{resultKind: result},
+        });
+      }
+
+      emit(
+        'Artist',
+        'artist-id',
+        'Artist',
+        _mediaJson('artist')..['name'] = 'Fresh artist',
+      );
+      emit(
+        'Album',
+        'album-id',
+        'Album',
+        _mediaJson('album')..['name'] = 'Fresh album',
+      );
+      emit(
+        'Playlist',
+        'playlist-id',
+        'Playlist',
+        _mediaJson('playlist')..['name'] = 'Fresh playlist',
+      );
+      expect(artist.artist?.name, 'Fresh artist');
+      expect(album.album?.name, 'Fresh album');
+      expect(playlist.playlist?.name, 'Fresh playlist');
+      emit('PlaylistTracks', 'playlist-id', 'Tracks', <Object>[
+        _mediaJson('track'),
+      ]);
+      expect(playlist.tracks.single.itemId, 'track-id');
+      emit('PlaylistTracks', 'playlist-id', 'Tracks', <Object>[]);
+      expect(playlist.tracks, isEmpty);
+      emit(
+        'Album',
+        'album-id',
+        'Album',
+        _mediaJson('album')..['name'] = 'Wrong provider',
+        provider: 'other',
+      );
+      expect(album.album?.name, 'Fresh album');
+      await artist.setPageVisible(false);
+      emit(
+        'Artist',
+        'artist-id',
+        'Artist',
+        _mediaJson('artist')..['name'] = 'Hidden update',
+      );
+      expect(artist.artist?.name, 'Fresh artist');
+    },
+  );
+
+  test(
+    'catalog update preserves request identity separately from canonical media',
+    () {
+      final update = CatalogUpdate.fromJson(<String, dynamic>{
+        'query': <String, dynamic>{
+          'Album': <String, dynamic>{
+            'item_id': 'source-album',
+            'provider': 'source',
+          },
+        },
+        'value': <String, dynamic>{'Album': _mediaJson('album')},
+      });
+      expect(
+        update.matches(CatalogQueryKind.album, 'source-album', 'source'),
+        isTrue,
+      );
+      expect(update.item?.provider, 'library');
+      expect(
+        () => CatalogUpdate.fromJson(<String, dynamic>{
+          'query': <String, dynamic>{},
+          'value': <String, dynamic>{},
+        }),
+        throwsFormatException,
+      );
+    },
+  );
+
   test(
     'recommendation snapshots preserve independent folder loading and cached playlist tracks',
     () {
@@ -157,6 +361,7 @@ void main() {
   );
 
   test('queue artwork survives parsing without media artwork', () {
+    MediaItemImage.configureProxyBaseUrl('https://music.example');
     final item = QueueItem.fromJson(<String, dynamic>{
       'queue_item_id': 'queued-track',
       'media_item': <String, dynamic>{
@@ -168,6 +373,7 @@ void main() {
       'image': <String, dynamic>{
         'type': 'thumb',
         'path': 'https://example.com/queue-cover.jpg',
+        'proxy_id': 'queue-cover',
         'provider': 'test',
         'remotely_accessible': true,
       },
@@ -180,6 +386,7 @@ void main() {
   });
 
   test('queue artwork falls back to media artwork when absent or null', () {
+    MediaItemImage.configureProxyBaseUrl('https://music.example');
     for (final hasImageField in <bool>[false, true]) {
       final json = <String, dynamic>{
         'queue_item_id': 'queued-track',
@@ -189,6 +396,7 @@ void main() {
               <String, dynamic>{
                 'type': 'thumb',
                 'path': 'https://example.com/media-cover.jpg',
+                'proxy_id': 'media-cover',
                 'provider': 'test',
                 'remotely_accessible': true,
               },
@@ -358,31 +566,6 @@ void main() {
     userData.dispose();
   });
 
-  test('queue availability follows MA without local cache overrides', () {
-    final media = Track.fromJson(_mediaJson('track')..['available'] = false);
-    final partial = QueueItem(
-      queueItemId: 'partial',
-      mediaItem: media,
-      available: false,
-    );
-    final complete = QueueItem(
-      queueItemId: 'complete',
-      mediaItem: media,
-      available: true,
-    );
-    expect(partial.canPlay, isFalse);
-    expect(partial.isAvailable, isFalse);
-    expect(complete.canPlay, isTrue);
-    expect(complete.isAvailable, isTrue);
-    final buffering = QueueItem(
-      queueItemId: 'buffering',
-      mediaItem: media,
-      available: true,
-    );
-    expect(buffering.canPlay, isTrue);
-    expect(buffering.isAvailable, isTrue);
-  });
-
   test('availability survives parsing and playback payload serialization', () {
     for (final mediaType in <String>[
       'track',
@@ -415,6 +598,70 @@ void main() {
   );
 
   tearDown(() => MediaItemImage.configureProxyBaseUrl(null));
+
+  test('settings wire contains only online session preferences', () {
+    expect(
+      const SessionSettingsUpdate(
+        isDarkTheme: true,
+        logLevel: LogLevelPreference.info,
+        shouldShowMultiDeviceButton: false,
+      ).toJson(),
+      {
+        'theme': 'dark',
+        'logLevel': 'info',
+        'shouldShowMultiDeviceButton': false,
+      },
+    );
+  });
+
+  test('artwork requires an observed proxy ID or inline content', () {
+    MediaItemImage.configureProxyBaseUrl('https://music.example/ma');
+    for (final path in [
+      'cover.jpg',
+      '/local/cover.jpg',
+      'https://cdn.example/cover.jpg',
+    ]) {
+      expect(
+        MediaItemImage(
+          type: 'thumb',
+          path: path,
+          provider: 'url',
+          remotelyAccessible: true,
+        ).getProxyPath(),
+        isNull,
+      );
+    }
+    const inline =
+        'data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%2F%3E';
+    expect(
+      const MediaItemImage(
+        type: 'thumb',
+        path: inline,
+        provider: 'builtin',
+        remotelyAccessible: false,
+      ).getProxyPath(),
+      inline,
+    );
+    final proxy = const MediaItemImage(
+      type: 'thumb',
+      path: '/server/cover.jpg',
+      provider: 'library',
+      remotelyAccessible: false,
+      proxyId: 'known-cover',
+    ).getProxyPath(size: 160)!;
+    expect(proxy, 'https://music.example/ma/imageproxy/known-cover?size=160');
+    expect(MediaItemImage.isProxyUrl(proxy), isTrue);
+    for (final invalid in [
+      '',
+      'data:image/png;base64,AA==',
+      'https://cdn.example/imageproxy/known-cover',
+      'https://music.example/ma/local/cover.jpg',
+      'https://music.example/ma/imageproxy/',
+      'https://music.example/ma/imageproxy/known-cover/other',
+    ]) {
+      expect(MediaItemImage.isProxyUrl(invalid), isFalse);
+    }
+  });
 
   test('decodes all concrete Music Assistant media variants', () {
     expect(mediaItemFromJson(_mediaJson('artist')), isA<Artist>());

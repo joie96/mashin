@@ -12,6 +12,8 @@ import '../../../app/theme/app_theme.dart';
 import '../../core/core_bridge.dart';
 import '../../core/core_events.dart';
 import '../../core/core_models.dart';
+import '../../core/core_query_scope.dart';
+import '../detail_page_lifecycle.dart';
 import '../selection/selection_controller.dart';
 import 'media_link_text.dart';
 import 'media_image.dart';
@@ -1898,7 +1900,7 @@ Widget _buildDesktopTableRowQueue({
             children: <Widget>[
               MediaProviderIcon(
                 providerLabel: _providerLabelFromId(provider),
-                iconSvg: ProviderManifestRegistry.iconSvgForProvider(provider),
+                providerId: provider,
                 size: 16,
               ),
             ],
@@ -3356,37 +3358,139 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
   }
 }
 
-class MediaProviderIcon extends StatelessWidget {
-  static final Map<String, String> _decodedInlineSvgCache = <String, String>{};
-  static final Map<String, Widget> _inlineSvgWidgetCache = <String, Widget>{};
-
+class MediaProviderIcon extends StatefulWidget {
   final String providerLabel;
-  final String? iconSvg;
+  final String? providerId;
   final double size;
 
   const MediaProviderIcon({
     super.key,
     required this.providerLabel,
-    required this.iconSvg,
+    required this.providerId,
     this.size = 16,
   });
 
   @override
+  State<MediaProviderIcon> createState() => _MediaProviderIconState();
+}
+
+class _MediaProviderIconState extends State<MediaProviderIcon>
+    with DetailPageLifecycle<MediaProviderIcon> {
+  CoreQueryScope _queryScope = CoreQueryScope();
+  String? _iconData;
+  bool _isVisible = true;
+  bool _isLoading = false;
+  bool _hasLoaded = false;
+  int _generation = 0;
+
+  // Visible icon reads belong to the widget, not a global image store.
+  @override
+  void initState() {
+    super.initState();
+    ProviderManifestRegistry.changes.addListener(_onManifestsChanged);
+  }
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    onDetailPageVisibilityChanged(
+      TickerMode.valuesOf(context).enabled &&
+          (ModalRoute.of(context)?.isCurrent ?? true),
+    );
+    if (_isVisible) unawaited(_loadIcon());
+  }
+
+  @override
+  void didUpdateWidget(covariant MediaProviderIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.providerId != widget.providerId) _onManifestsChanged();
+  }
+
+  @override
+  void onDetailPageVisibilityChanged(bool isVisible) {
+    if (_isVisible == isVisible) return;
+    _isVisible = isVisible;
+    _cancelIconRead();
+    if (isVisible) {
+      _queryScope = CoreQueryScope();
+      unawaited(_loadIcon());
+    }
+  }
+
+  @override
+  void dispose() {
+    ProviderManifestRegistry.changes.removeListener(_onManifestsChanged);
+    _cancelIconRead();
+    super.dispose();
+  }
+
+  // Metadata changes and cancellation invalidate late online responses.
+  void _cancelIconRead() {
+    _generation++;
+    _queryScope.cancel();
+    _isLoading = false;
+  }
+
+  void _onManifestsChanged() {
+    _cancelIconRead();
+    _queryScope = CoreQueryScope();
+    setState(() {
+      _iconData = null;
+      _hasLoaded = false;
+    });
+    if (_isVisible) unawaited(_loadIcon());
+  }
+
+  Future<void> _loadIcon() async {
+    if (!_isVisible || _isLoading || _hasLoaded) return;
+    _isLoading = true;
+    final generation = ++_generation;
+    try {
+      final icon = await _queryScope.run(
+        () => _queryScope.execute(
+          () => ProviderManifestRegistry.getProviderIconData(
+            widget.providerId ?? '',
+          ),
+          onCancel: () {},
+        ),
+      );
+      if (!mounted || generation != _generation) return;
+      setState(() {
+        _iconData = icon;
+        _hasLoaded = true;
+      });
+    } on CoreQueryCanceled {
+      return;
+    } catch (_) {
+      if (mounted && generation == _generation) {
+        setState(() => _hasLoaded = true);
+      }
+    } finally {
+      if (generation == _generation) _isLoading = false;
+    }
+  }
+
+  // Inline normalization and framework-owned image rendering.
+  @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final String? trimmed = iconSvg?.trim();
+    final String? trimmed =
+        (_iconData ??
+                ProviderManifestRegistry.iconSvgForProvider(
+                  widget.providerId ?? '',
+                ))
+            ?.trim();
     final Widget fallback = Icon(
       Icons.radio_button_checked_outlined,
-      size: size,
+      size: widget.size,
       color: colors.textSecondary,
     );
     if (trimmed == null || trimmed.isEmpty) {
       return fallback;
     }
 
-    final String decoded = _decodedInlineSvgCache.putIfAbsent(
-      trimmed,
-      () => _inlineSvgClassFillColors(_maybeDecodeSvgPayload(trimmed)),
+    final String decoded = _inlineSvgClassFillColors(
+      _maybeDecodeSvgPayload(trimmed),
     );
     final bool isInlineSvg =
         decoded.startsWith('<svg') ||
@@ -3394,33 +3498,32 @@ class MediaProviderIcon extends StatelessWidget {
         decoded.contains('<svg');
 
     if (isInlineSvg) {
-      final String cacheKey = '$size::$decoded';
-      return _inlineSvgWidgetCache.putIfAbsent(
-        cacheKey,
-        () => SvgPicture.string(decoded, width: size, height: size),
+      return SvgPicture.string(
+        decoded,
+        width: widget.size,
+        height: widget.size,
+        errorBuilder: (_, _, _) => fallback,
       );
     }
 
     if (_isRasterImageDataUri(trimmed)) {
-      return MediaImage(
-        source: trimmed,
-        fit: BoxFit.contain,
-        fallback: fallback,
+      return SizedBox.square(
+        dimension: widget.size,
+        child: MediaImage(
+          source: trimmed,
+          fit: BoxFit.contain,
+          fallback: fallback,
+        ),
       );
     }
 
-    final Uri? uri = Uri.tryParse(trimmed);
-    final bool isNetworkSvg =
-        uri != null && (uri.scheme == 'http' || uri.scheme == 'https');
-    if (!isNetworkSvg) {
-      return fallback;
-    }
-
-    return SvgPicture.network(
-      trimmed,
-      width: size,
-      height: size,
-      placeholderBuilder: (_) => fallback,
+    return SizedBox.square(
+      dimension: widget.size,
+      child: MediaImage(
+        source: trimmed,
+        fit: BoxFit.contain,
+        fallback: fallback,
+      ),
     );
   }
 }

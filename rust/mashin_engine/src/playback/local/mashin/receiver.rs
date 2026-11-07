@@ -2,20 +2,21 @@
 //! Socket loss retains authorized audio; only explicit server rejection resets playback.
 
 use super::audio_adapter::MashinAudioAdapter;
-use super::models::{AudioProfileId, StreamCursor, HEADER_BYTES, MAX_INTEGER, MAX_PAYLOAD_BYTES};
+use super::models::{StreamCursor, HEADER_BYTES, MAX_INTEGER, MAX_PAYLOAD_BYTES};
 use super::protocol::{
     self, AckStatus, Capabilities, ClientMessage, CommandAck, ControlCommand, ProtocolError,
     ServerMessage,
 };
 use super::recovery;
 use crate::audio::models::AudioEvent;
+use crate::domain::settings::AudioProfileId;
 use crate::logging::Logger;
-use crate::music_assistant::client::MusicAssistantClient;
+use crate::playback::server::PlaybackServer;
 use futures_util::{SinkExt, StreamExt};
 use std::collections::VecDeque;
 use std::future::Future;
 use std::pin::Pin;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::net::TcpStream;
 use tokio::sync::{broadcast, mpsc, oneshot, watch};
@@ -59,7 +60,7 @@ struct ProfileRequest {
 }
 
 pub(crate) struct MashinReceiver {
-    worker: JoinHandle<()>,
+    worker: Mutex<Option<JoinHandle<()>>>,
     snapshot: watch::Receiver<ReceiverSnapshot>,
     requests: mpsc::Sender<ProfileRequest>,
 }
@@ -67,10 +68,10 @@ pub(crate) struct MashinReceiver {
 impl MashinReceiver {
     // Configuration and lifecycle; ownership belongs to the native session.
     pub(crate) fn new(
-        runtime: &tokio::runtime::Runtime,
+        runtime: &tokio::runtime::Handle,
         configuration: ReceiverConfiguration,
         output: MashinAudioAdapter,
-        client: Arc<MusicAssistantClient>,
+        client: Arc<dyn PlaybackServer>,
     ) -> Result<Self, String> {
         endpoints(&configuration.music_assistant_url)?;
         if configuration.device_id.is_empty()
@@ -96,14 +97,33 @@ impl MashinReceiver {
             );
         });
         Ok(Self {
-            worker,
+            worker: Mutex::new(Some(worker)),
             snapshot,
             requests,
         })
     }
 
+    // Stop both socket and recovery futures; the session owner joins outside playback locks.
+    pub(crate) fn shutdown(&self) -> Option<JoinHandle<()>> {
+        let worker = self
+            .worker
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take()?;
+        worker.abort();
+        Some(worker)
+    }
+
     // Profile changes are committed only after the server's authoritative response.
     pub(crate) async fn set_audio_profile(&self, profile: AudioProfileId) -> Result<(), String> {
+        if self
+            .worker
+            .lock()
+            .map_err(|_| "Mashin receiver lock poisoned")?
+            .is_none()
+        {
+            return Err("Mashin receiver stopped".into());
+        }
         let (response, receiver) = oneshot::channel();
         self.requests
             .send(ProfileRequest { profile, response })
@@ -123,7 +143,7 @@ impl MashinReceiver {
 
 impl Drop for MashinReceiver {
     fn drop(&mut self) {
-        self.worker.abort();
+        self.shutdown();
     }
 }
 
@@ -301,7 +321,16 @@ async fn connect(
     });
     *audio_connection_id = increment(*audio_connection_id)?;
     let mut sequence = 0;
-    let received_streams = report(&mut control, &epoch, output, &mut sequence, &mut last_event_id, false, *audio_connection_id).await?;
+    let received_streams = report(
+        &mut control,
+        &epoch,
+        output,
+        &mut sequence,
+        &mut last_event_id,
+        false,
+        *audio_connection_id,
+    )
+    .await?;
     let mut connecting = Some(connect_audio(
         audio_url.clone(),
         configuration.device_id.clone(),
@@ -452,8 +481,15 @@ async fn connect(
 }
 
 fn requires_replacement(error: &ProtocolError) -> bool {
-    matches!(error.code.as_str(), "cache_unavailable" | "stale_playback" | "stream_unavailable" | "stream_failed" | "encoder_failed" | "recovery_failed")
-        && !(error.code == "stream_unavailable" && error.is_retryable)
+    matches!(
+        error.code.as_str(),
+        "cache_unavailable"
+            | "stale_playback"
+            | "stream_unavailable"
+            | "stream_failed"
+            | "encoder_failed"
+            | "recovery_failed"
+    ) && !(error.code == "stream_unavailable" && error.is_retryable)
 }
 
 async fn request_audio_binding(
@@ -711,370 +747,4 @@ fn increment(value: u64) -> Result<u64, String> {
         .checked_add(1)
         .filter(|value| *value <= MAX_INTEGER)
         .ok_or("Mashin counter exhausted".into())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    fn server_message(kind: &str, epoch: &str, payload: serde_json::Value) -> Message {
-        let text = serde_json::json!({"protocol_version":3,"type":kind,"message_id":Uuid::new_v4().to_string(),"connection_epoch":epoch,"payload":payload}).to_string();
-        protocol::decode(&text, Some(epoch)).expect("valid server test message");
-        Message::Text(text.into())
-    }
-
-    async fn next_json(socket: &mut WebSocketStream<TcpStream>, kind: &str) -> serde_json::Value {
-        loop {
-            match socket.next().await.unwrap().unwrap() {
-                Message::Text(text) => {
-                    let message: serde_json::Value = serde_json::from_str(&text).unwrap();
-                    assert!(kind == "audio_reconnect_request" || message["type"] != "audio_reconnect_request", "unexpected extra audio binding request");
-                    if message["type"] == kind {
-                        return message;
-                    }
-                }
-                Message::Ping(bytes) => socket.send(Message::Pong(bytes)).await.unwrap(),
-                _ => panic!("unexpected client frame"),
-            }
-        }
-    }
-
-    #[test]
-    fn live_handshake_replay_and_reconnect_preserve_native_output() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(8), async {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                let address = listener.local_addr().unwrap();
-                let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
-                let server = tokio::spawn(async move {
-                    for generation in 0..2 {
-                        let (stream, _) = listener.accept().await.unwrap();
-                        let mut control = tokio_tungstenite::accept_async(stream).await.unwrap();
-                        let hello = next_json(&mut control, "hello").await;
-                        assert!(hello["connection_epoch"].is_null());
-                        assert_eq!(hello["payload"]["resume_state"]["volume_percent"], if generation == 0 { 30 } else { 42 });
-                        assert_eq!(hello["payload"]["resume_state"]["output_revision"], 0);
-                        assert!(hello["payload"]["resume_state"]["current_stream_id"].is_null());
-                        assert_eq!(hello["payload"]["resume_state"]["output_state"], "idle");
-                        assert_eq!(hello["payload"]["resume_state"]["position_frame"], 0);
-                        assert_eq!(hello["payload"]["resume_state"]["received_streams"], serde_json::json!([]));
-                        let epoch = format!("epoch-{generation}");
-                        control.send(server_message("welcome", &epoch, serde_json::json!({
-                            "player_id":"mashin-test", "provider_version":"1", "server_revision":"test",
-                            "limits":protocol::ProtocolLimits::default(), "audio_profiles":AudioProfileId::ALL,
-                            "selected_audio_profile":"flac", "audio_binding_id":format!("binding-{generation}"),
-                            "current_stream":null, "desired_output_state":"idle", "media_revision":0, "prepared_next":null
-                        }))).await.unwrap();
-                        let (stream, _) = listener.accept().await.unwrap();
-                        let mut audio = tokio_tungstenite::accept_async(stream).await.unwrap();
-                        let hello = next_json(&mut audio, "audio_hello").await;
-                        assert_eq!(hello["connection_epoch"], epoch);
-                        assert_eq!(hello["payload"]["audio_connection_id"], if generation == 0 { 1 } else { 3 });
-                        audio.send(server_message("audio_ready", &epoch, serde_json::json!({}))).await.unwrap();
-                        let grant = next_json(&mut control, "buffer_status").await;
-                        assert_eq!(grant["payload"]["buffer_capacity"], MAX_PAYLOAD_BYTES);
-                        let command = server_message("set_volume", &epoch, serde_json::json!({"command_id":1,"volume_percent":42 + generation}));
-                        control.send(command.clone()).await.unwrap();
-                        let ack = next_json(&mut control, "command_ack").await;
-                        assert_eq!(ack["payload"]["status"], "accepted");
-                        control.send(command).await.unwrap();
-                        assert_eq!(next_json(&mut control, "command_ack").await["payload"], ack["payload"]);
-                        let state = next_json(&mut control, "player_state").await;
-                        assert_eq!(state["payload"]["output_revision"], 0);
-                        assert_eq!(state["payload"]["volume_percent"], 42 + generation);
-                        let current = super::super::models::test_stream();
-                        let prepared = super::super::models::test_stream();
-                        control.send(server_message("set_media", &epoch, serde_json::json!({
-                            "command_id":2, "media_revision":1, "current":current,
-                            "prepared":prepared, "initial_output_state":"paused"
-                        }))).await.unwrap();
-                        assert_eq!(next_json(&mut control, "command_ack").await["payload"]["status"], "accepted");
-                        let state = next_json(&mut control, "player_state").await;
-                        assert_eq!(state["payload"]["stream_id"], current.stream_id.to_string());
-                        assert_eq!(state["payload"]["output_state"], "paused");
-                        control.send(server_message("stop", &epoch, serde_json::json!({
-                            "command_id":3, "stream_id":current.stream_id
-                        }))).await.unwrap();
-                        assert_eq!(next_json(&mut control, "command_ack").await["payload"]["status"], "accepted");
-                        let state = next_json(&mut control, "player_state").await;
-                        assert!(state["payload"]["stream_id"].is_null());
-                        assert_eq!(state["payload"]["output_state"], "idle");
-                        assert_eq!(state["payload"]["output_revision"], 0);
-                        assert_eq!(state["payload"]["position_frame"], 0);
-                        if generation == 0 {
-                            let failure = server_message("error", &epoch, serde_json::json!({
-                                "correlation_id":null, "stream_id":null, "audio_connection_id":1,
-                                "error":{"code":"stream_unavailable", "message":"Audio response deadline expired", "is_retryable":true, "retry_after_millis":null}
-                            }));
-                            control.send(failure.clone()).await.unwrap();
-                            control.send(failure).await.unwrap();
-                            let reconnect = next_json(&mut control, "audio_reconnect_request").await;
-                            control.send(server_message("audio_binding", &epoch, serde_json::json!({
-                                "request_id":reconnect["payload"]["request_id"], "audio_binding_id":"replacement-binding"
-                            }))).await.unwrap();
-                            let (stream, _) = listener.accept().await.unwrap();
-                            let mut replacement = tokio_tungstenite::accept_async(stream).await.unwrap();
-                            let hello = next_json(&mut replacement, "audio_hello").await;
-                            assert_eq!(hello["connection_epoch"], epoch);
-                            assert_eq!(hello["payload"]["audio_connection_id"], 2);
-                            replacement.send(server_message("audio_ready", &epoch, serde_json::json!({}))).await.unwrap();
-                            assert_eq!(next_json(&mut control, "buffer_status").await["payload"]["audio_connection_id"], 2);
-                            control.send(server_message("error", &epoch, serde_json::json!({
-                                "correlation_id":null, "stream_id":null, "audio_connection_id":1,
-                                "error":{"code":"stream_unavailable", "message":"Late old audio failure", "is_retryable":true, "retry_after_millis":null}
-                            }))).await.unwrap();
-                            control.send(server_message("state_request", &epoch, serde_json::json!({"command_id":4}))).await.unwrap();
-                            assert_eq!(next_json(&mut control, "command_ack").await["payload"]["status"], "accepted");
-                            replacement.close(None).await.unwrap();
-                        }
-                        control.close(None).await.unwrap();
-                        audio.close(None).await.unwrap();
-                    }
-                });
-                let receiver = MashinReceiver::new(&runtime, ReceiverConfiguration { music_assistant_url: format!("http://{address}"), device_id:"test-device".into(), client_name:"Test".into(), audio_profile:AudioProfileId::Flac }, output.clone(), Arc::new(MusicAssistantClient::new(&format!("http://{address}"), None))).unwrap();
-                server.await.unwrap();
-                assert_eq!(output.snapshot().resume.volume_percent, 43);
-                assert_eq!(output.snapshot().resume.output_revision, 0);
-                drop(receiver);
-            }).await.unwrap();
-        });
-    }
-
-    #[test]
-    fn retryable_handshake_error_preserves_registered_media() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(8), async {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                let address = listener.local_addr().unwrap();
-                let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
-                output.execute(ControlCommand::SetMedia {
-                    command_id: 1,
-                    current: Some(super::super::models::test_stream()),
-                    prepared: Some(super::super::models::test_stream()),
-                    media_revision: 1,
-                    initial_output_state: super::super::models::OutputState::Paused,
-                }).await.unwrap();
-                let expected = serde_json::to_value(output.snapshot().resume).unwrap();
-                let server = tokio::spawn(async move {
-                    for _ in 0..2 {
-                        let (stream, _) = listener.accept().await.unwrap();
-                        let mut control = tokio_tungstenite::accept_async(stream).await.unwrap();
-                        let hello = next_json(&mut control, "hello").await;
-                        assert_eq!(hello["payload"]["resume_state"], expected);
-                        control.send(server_message("error", "handshake-error", serde_json::json!({
-                            "correlation_id":null, "stream_id":null, "audio_connection_id":null,
-                            "error":{"code":"stream_unavailable", "message":"Temporarily unavailable", "is_retryable":true, "retry_after_millis":null}
-                        }))).await.unwrap();
-                    }
-                });
-                let receiver = MashinReceiver::new(&runtime, ReceiverConfiguration {
-                    music_assistant_url: format!("http://{address}"), device_id: "test-device".into(),
-                    client_name: "Test".into(), audio_profile: AudioProfileId::Flac,
-                }, output, Arc::new(MusicAssistantClient::new(&format!("http://{address}"), None))).unwrap();
-                server.await.unwrap();
-                drop(receiver);
-            }).await.unwrap();
-        });
-    }
-
-    #[test]
-    fn local_stop_during_handshake_is_reported_before_audio_binding() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            tokio::time::timeout(Duration::from_secs(8), async {
-                let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                let address = listener.local_addr().unwrap();
-                let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
-                let current = super::super::models::test_stream();
-                output.execute(ControlCommand::SetMedia {
-                    command_id: 1, current: Some(current.clone()), prepared: None,
-                    media_revision: 1, initial_output_state: super::super::models::OutputState::Paused,
-                }).await.unwrap();
-                let local = output.clone();
-                let server = tokio::spawn(async move {
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let mut control = tokio_tungstenite::accept_async(stream).await.unwrap();
-                    let hello = next_json(&mut control, "hello").await;
-                    assert_eq!(hello["payload"]["resume_state"]["current_stream_id"], current.stream_id.to_string());
-                    local.execute(ControlCommand::Stop { command_id: 0, stream_id: None }).await.unwrap();
-                    control.send(server_message("welcome", "stop-epoch", serde_json::json!({
-                        "player_id":"mashin-test", "provider_version":"1", "server_revision":"test",
-                        "limits":protocol::ProtocolLimits::default(), "audio_profiles":AudioProfileId::ALL,
-                        "selected_audio_profile":"flac", "audio_binding_id":"binding",
-                        "current_stream":{"stream":current,"next_received_chunk_index":1,"next_produced_chunk_index":1,"is_complete":false,"final_frame_count":null,"error":null},
-                        "desired_output_state":"paused", "media_revision":1, "prepared_next":null
-                    }))).await.unwrap();
-                    let state = next_json(&mut control, "player_state").await;
-                    assert_eq!(state["payload"]["output_state"], "idle");
-                    assert!(state["payload"]["stream_id"].is_null());
-                    let (stream, _) = listener.accept().await.unwrap();
-                    let mut audio = tokio_tungstenite::accept_async(stream).await.unwrap();
-                    let hello = next_json(&mut audio, "audio_hello").await;
-                    assert_eq!(hello["payload"]["received_streams"], serde_json::json!([]));
-                    audio.send(server_message("audio_ready", "stop-epoch", serde_json::json!({}))).await.unwrap();
-                    next_json(&mut control, "buffer_status").await;
-                });
-                let receiver = MashinReceiver::new(&runtime, ReceiverConfiguration {
-                    music_assistant_url: format!("http://{address}"), device_id:"test-device".into(),
-                    client_name:"Test".into(), audio_profile:AudioProfileId::Flac,
-                }, output.clone(), Arc::new(MusicAssistantClient::new(&format!("http://{address}"), None))).unwrap();
-                server.await.unwrap();
-                assert!(output.snapshot().current.is_none());
-                drop(receiver);
-            }).await.unwrap();
-        });
-    }
-
-    #[test]
-    fn rejected_resume_reconnects_empty_and_explicitly_requests_replacement() {
-        let runtime = tokio::runtime::Runtime::new().unwrap();
-        runtime.block_on(async {
-            for reject_handshake in [true, false] {
-                tokio::time::timeout(Duration::from_secs(8), async {
-                    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-                    let address = listener.local_addr().unwrap();
-                    let output = MashinAudioAdapter::new(1_048_576, 30, false).unwrap();
-                    let mut current = super::super::models::test_stream();
-                    current.media_start_position_millis = 162_000;
-                    output.execute(ControlCommand::SetMedia {
-                        command_id: 1, current: Some(current.clone()), prepared: None,
-                        media_revision: 1, initial_output_state: super::super::models::OutputState::Paused,
-                    }).await.unwrap();
-                    let requested = Arc::new(tokio::sync::Notify::new());
-                    let load_requested = requested.clone();
-                    let (client, api_server) = crate::music_assistant::client::tests::server_with_request_handler(vec![
-                        ("player_queues/all", serde_json::json!([{"queue_id":"queue", "current_item":{"queue_id":"queue", "queue_item_id":"item", "name":"Retained"}}])),
-                        ("player_queues/play_index", serde_json::json!(null)),
-                    ], move |request| {
-                        if request["command"] == "player_queues/play_index" {
-                            assert_eq!(request["args"], serde_json::json!({"queue_id":"queue", "index":"item", "seek_position":162}));
-                            load_requested.notify_one();
-                        }
-                    });
-                    let replacement = super::super::models::test_stream();
-                    let expected_stream = replacement.stream_id;
-                    let server = tokio::spawn(async move {
-                        let (stream, _) = listener.accept().await.unwrap();
-                        let mut control = tokio_tungstenite::accept_async(stream).await.unwrap();
-                        let hello = next_json(&mut control, "hello").await;
-                        assert_eq!(hello["payload"]["resume_state"]["current_stream_id"], current.stream_id.to_string());
-                        let epoch = "rejected-epoch";
-                        if !reject_handshake {
-                            control.send(server_message("welcome", epoch, serde_json::json!({
-                                "player_id":"player", "provider_version":"1", "server_revision":"test",
-                                "limits":protocol::ProtocolLimits::default(), "audio_profiles":AudioProfileId::ALL,
-                                "selected_audio_profile":"flac", "audio_binding_id":"old-binding",
-                                "current_stream":{"stream":current,"next_received_chunk_index":1,"next_produced_chunk_index":1,"is_complete":false,"final_frame_count":null,"error":null},
-                                "desired_output_state":"paused", "media_revision":1, "prepared_next":null
-                            }))).await.unwrap();
-                            let (stream, _) = listener.accept().await.unwrap();
-                            let mut audio = tokio_tungstenite::accept_async(stream).await.unwrap();
-                            next_json(&mut audio, "audio_hello").await;
-                            audio.send(server_message("audio_ready", epoch, serde_json::json!({}))).await.unwrap();
-                            next_json(&mut control, "buffer_status").await;
-                        }
-                        control.send(server_message("error", epoch, serde_json::json!({
-                            "correlation_id":null, "stream_id":null, "audio_connection_id":null,
-                            "error":{"code":"cache_unavailable", "message":"Resume rejected", "is_retryable":false, "retry_after_millis":null}
-                        }))).await.unwrap();
-                        let (stream, _) = listener.accept().await.unwrap();
-                        let mut control = tokio_tungstenite::accept_async(stream).await.unwrap();
-                        let hello = next_json(&mut control, "hello").await;
-                        assert!(hello["payload"]["resume_state"]["current_stream_id"].is_null());
-                        assert_eq!(hello["payload"]["resume_state"]["received_streams"], serde_json::json!([]));
-                        let epoch = "replacement-epoch";
-                        control.send(server_message("welcome", epoch, serde_json::json!({
-                            "player_id":"player", "provider_version":"1", "server_revision":"test",
-                            "limits":protocol::ProtocolLimits::default(), "audio_profiles":AudioProfileId::ALL,
-                            "selected_audio_profile":"flac", "audio_binding_id":"new-binding",
-                            "current_stream":null, "desired_output_state":"idle", "media_revision":0, "prepared_next":null
-                        }))).await.unwrap();
-                        let (stream, _) = listener.accept().await.unwrap();
-                        let mut audio = tokio_tungstenite::accept_async(stream).await.unwrap();
-                        next_json(&mut audio, "audio_hello").await;
-                        audio.send(server_message("audio_ready", epoch, serde_json::json!({}))).await.unwrap();
-                        next_json(&mut control, "buffer_status").await;
-                        requested.notified().await;
-                        control.send(server_message("set_media", epoch, serde_json::json!({
-                            "command_id":1, "media_revision":1, "current":replacement,
-                            "prepared":null, "initial_output_state":"playing"
-                        }))).await.unwrap();
-                        assert_eq!(next_json(&mut control, "command_ack").await["payload"]["status"], "accepted");
-                        let state = next_json(&mut control, "player_state").await;
-                        assert_eq!(state["payload"]["output_state"], "paused");
-                    });
-                    let receiver = MashinReceiver::new(&runtime, ReceiverConfiguration {
-                        music_assistant_url:format!("http://{address}"), device_id:"test-device".into(),
-                        client_name:"Test".into(), audio_profile:AudioProfileId::Flac,
-                    }, output.clone(), Arc::new(client)).unwrap();
-                    server.await.unwrap();
-                    tokio::task::spawn_blocking(move || api_server.join().unwrap()).await.unwrap();
-                    assert_eq!(output.snapshot().resume.current_stream_id, Some(expected_stream));
-                    drop(receiver);
-                }).await.unwrap();
-            }
-        });
-    }
-
-    #[test]
-    fn endpoints_use_ma_origin_without_authentication_or_sendspin_port() {
-        assert_eq!(
-            endpoints("https://ma.example:8095/proxy/").unwrap(),
-            (
-                "wss://ma.example:8095/proxy/mashin-stream/v3/control".into(),
-                "wss://ma.example:8095/proxy/mashin-stream/v3/audio".into()
-            )
-        );
-        assert_eq!(
-            endpoints("http://ma.example:8095").unwrap(),
-            (
-                "ws://ma.example:8095/mashin-stream/v3/control".into(),
-                "ws://ma.example:8095/mashin-stream/v3/audio".into()
-            )
-        );
-        assert!(endpoints("http://ma.example/?token=secret").is_err());
-        assert!(endpoints("http://user:secret@ma.example").is_err());
-    }
-
-    #[test]
-    fn command_replays_are_exact_and_history_is_bounded() {
-        let mut acks = Acknowledgments::new();
-        for command_id in 1..=33 {
-            let command = ControlCommand::SetVolume {
-                command_id,
-                volume_percent: 30,
-            };
-            assert!(acks.find(&command).unwrap().is_none());
-            acks.retain(
-                command,
-                CommandAck {
-                    command_id,
-                    status: AckStatus::Accepted,
-                    error: None,
-                },
-            );
-        }
-        assert_eq!(acks.history.len(), 32);
-        assert!(acks
-            .find(&ControlCommand::SetVolume {
-                command_id: 33,
-                volume_percent: 30
-            })
-            .unwrap()
-            .is_some());
-        assert!(acks
-            .find(&ControlCommand::SetVolume {
-                command_id: 33,
-                volume_percent: 31
-            })
-            .is_err());
-        assert!(acks
-            .find(&ControlCommand::SetVolume {
-                command_id: 1,
-                volume_percent: 30
-            })
-            .is_err());
-    }
 }

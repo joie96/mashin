@@ -244,7 +244,7 @@ internal class RustSessionPlayer(
         return builder.build()
     }
 
-    // Resolve existing queue identities from the snapshot, not the browse cache.
+    // Resolve existing queue identities from the canonical playback snapshot.
     private fun resolveMediaItem(mediaId: String): JSONObject? = snapshot.mediaItems
         .firstOrNull { it.mediaId == mediaId }?.mediaMetadata?.extras
         ?.getString(PlaybackSnapshotMapper.SERIALIZED_MEDIA_ITEM_KEY)?.let(::JSONObject)

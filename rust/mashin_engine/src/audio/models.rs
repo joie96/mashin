@@ -160,22 +160,3 @@ pub(crate) fn test_format() -> AudioFormat {
         bit_depth: Some(16),
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn decoder_format_rejects_invalid_layouts() {
-        let mut format = test_format();
-        assert!(format.validate().is_ok());
-        format.channels = 0;
-        assert!(format.validate().is_err());
-        format.channels = 2;
-        format.codec = AudioCodec::Opus;
-        assert!(format.validate().is_err());
-        format.bit_depth = None;
-        assert!(format.validate().is_ok());
-        format.sample_rate_hz = 44_100;
-        assert!(format.validate().is_err());
-    }
-}

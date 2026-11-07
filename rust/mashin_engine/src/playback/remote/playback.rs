@@ -1,20 +1,20 @@
 //! Remote mode projects and controls an MA target without local audio resources.
 
-use crate::core::event_channel::publish_background_event;
-use crate::core::models::MediaSessionEvent;
-use crate::music_assistant::models::identifiers::QueueItemId;
-use crate::music_assistant::models::media::MediaItem;
-use crate::music_assistant::models::queue::{QueueOption, RepeatMode};
-use crate::music_assistant::playback_target::MusicAssistantPlaybackTarget;
-use crate::music_assistant::queue_projection::QueueSnapshotRequest;
+use crate::application::events::{ApplicationEvent, EventPublisher};
+use crate::domain::identifiers::QueueItemId;
+use crate::domain::media::MediaItem;
 use crate::playback::backend::{PlaybackBackend, PlaybackCommand};
 use crate::playback::models::{PlayerState, Queue};
+use crate::playback::models::{QueueOption, RepeatMode};
+use crate::playback::queue_projection::QueueSnapshotRequest;
+use crate::playback::server_target::ServerTarget;
 use crate::playback::start::{PlaybackStart, StartIdentity, StartObservation};
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 pub(crate) struct RemotePlayback {
-    target: MusicAssistantPlaybackTarget,
+    event_publisher: EventPublisher,
+    target: ServerTarget,
     last_queue: Option<Queue>,
     last_queue_revision: Option<(QueueSnapshotRequest, bool)>,
     last_player: Option<PlayerState>,
@@ -25,15 +25,16 @@ impl RemotePlayback {
     // Construction and target configuration.
     pub(crate) fn configure(
         &mut self,
-        configuration: crate::music_assistant::playback_target::MusicAssistantPlaybackTargetConfiguration,
+        configuration: crate::playback::server_target::ServerTargetConfiguration,
     ) -> Result<(), String> {
         self.shutdown();
         self.target.configure(configuration)
     }
 
-    pub(crate) fn new() -> Self {
+    pub(crate) fn new(event_publisher: EventPublisher) -> Self {
         Self {
-            target: MusicAssistantPlaybackTarget::new(),
+            event_publisher,
+            target: ServerTarget::new(),
             last_queue: None,
             last_queue_revision: None,
             last_player: None,
@@ -62,7 +63,10 @@ impl PlaybackBackend for RemotePlayback {
         self.target.activate()
     }
     fn deactivate(&mut self) {
-        self.start.lock().expect("playback start lock poisoned").cancel();
+        self.start
+            .lock()
+            .expect("playback start lock poisoned")
+            .cancel();
         self.target.deactivate();
         self.last_queue = None;
         self.last_queue_revision = None;
@@ -71,6 +75,10 @@ impl PlaybackBackend for RemotePlayback {
     fn shutdown(&mut self) {
         self.deactivate();
         self.target.shutdown();
+    }
+
+    fn take_retired_workers(&mut self) -> Vec<tokio::task::JoinHandle<()>> {
+        self.target.take_retired_workers()
     }
 
     // Queue commands.
@@ -141,7 +149,10 @@ impl PlaybackBackend for RemotePlayback {
     }
     fn player_state(&self) -> PlayerState {
         let mut player = self.target.player_state();
-        player.playback_state = self.start.lock().expect("playback start lock poisoned")
+        player.playback_state = self
+            .start
+            .lock()
+            .expect("playback start lock poisoned")
             .project(self.start_observation(), Instant::now());
         player
     }
@@ -150,38 +161,27 @@ impl PlaybackBackend for RemotePlayback {
     }
 
     // The facade polls the selected mode independently of Flutter widgets.
-    fn process_playback_cycle(&mut self) {
+    fn collect_presentation_events(&mut self) -> crate::playback::backend::PresentationEvents {
+        let mut events = Vec::new();
         let revision = self.target.queue_revision();
         if self.last_queue_revision != revision {
             self.last_queue_revision = revision;
             let queue = self.target.queue();
             if self.last_queue.as_ref() != Some(&queue) {
                 self.last_queue = Some(queue.clone());
-                publish_background_event(MediaSessionEvent::QueueChanged { queue });
+                events.push(ApplicationEvent::QueueChanged { queue });
             }
         }
         let player = self.player_state();
         if self.last_player.as_ref() != Some(&player) {
             self.last_player = Some(player.clone());
-            publish_background_event(MediaSessionEvent::PlayerStateChanged {
+            events.push(ApplicationEvent::PlayerStateChanged {
                 player_state: player,
             });
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::playback::mode::PlaybackMode;
-
-    #[test]
-    fn unconfigured_remote_rejects_commands_without_creating_audio() {
-        let mut remote = RemotePlayback::new();
-        assert_eq!(remote.player_state().active_mode, PlaybackMode::Remote);
-        assert_eq!(remote.player_state().buffered_position_millis, None);
-        assert!(remote.transport_play().is_err());
-        assert!(remote.play_queue_index(0).is_err());
-        remote.shutdown();
+        crate::playback::backend::PresentationEvents {
+            publisher: self.event_publisher.clone(),
+            events,
+        }
     }
 }

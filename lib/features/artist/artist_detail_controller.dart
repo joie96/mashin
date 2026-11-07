@@ -35,9 +35,12 @@ class ArtistDetailController extends ChangeNotifier {
   }) : sectionProvider = DetailProviderSelection(
          itemId: itemId,
          provider: providerInstanceIdOrDomain,
-       );
+       ) {
+    _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+  }
 
   final DetailProviderSelection sectionProvider;
+  StreamSubscription<CatalogUpdate>? _catalogSubscription;
   bool _isSelectingProvider = false;
 
   Artist? _artist;
@@ -64,7 +67,7 @@ class ArtistDetailController extends ChangeNotifier {
       _isControllerDisposed ||
       (CoreQueryScope.current ?? _queryScope).isCanceled;
 
-  // Visibility owns read requests; returning waits for the canceled load before restarting.
+  // Hidden generations release their subscriptions without delaying a returning page.
   Future<void> setPageVisible(bool isVisible) async {
     if (_isControllerDisposed || _isPageVisible == isVisible) return;
     _isPageVisible = isVisible;
@@ -73,11 +76,11 @@ class ArtistDetailController extends ChangeNotifier {
       _requiresReload =
           _loadingFuture != null || _isLoadingMetadata || isLoadingSections;
       _queryScope.cancel();
+      _loadingFuture = null;
       _deezerHttpClient.close();
       _logSection('page', 'hidden; read requests canceled');
       return;
     }
-    await _loadingFuture;
     if (_isControllerDisposed ||
         !_isPageVisible ||
         generation != _visibilityGeneration) {
@@ -101,6 +104,7 @@ class ArtistDetailController extends ChangeNotifier {
   @override
   void dispose() {
     _isControllerDisposed = true;
+    unawaited(_catalogSubscription?.cancel());
     _queryScope.cancel();
     _deezerHttpClient.close();
     _logSection('page', 'disposed; pending results will be ignored');
@@ -151,6 +155,56 @@ class ArtistDetailController extends ChangeNotifier {
   Listenable get topTracksListenable => _topTracksNotifier;
 
   // Data Loading
+  void _onCatalogUpdate(CatalogUpdate update) {
+    if (_isLoadCanceled || !_isPageVisible) return;
+    if (update.matches(
+          CatalogQueryKind.artist,
+          itemId,
+          providerInstanceIdOrDomain,
+        ) &&
+        update.item is Artist) {
+      final artist = update.item! as Artist;
+      _artist = userDataController?.withFavoriteStatus(artist) ?? artist;
+      _isArtistFavorite = isItemFavorite(_artist!);
+      _metadataNotifier.notifyListeners();
+    } else if (update.itemId == sectionProvider.selectedItemId &&
+        update.provider == sectionProvider.selectedProvider) {
+      switch (update.kind) {
+        case CatalogQueryKind.artistAlbums:
+          _albums = update.albums
+              .map(
+                (album) =>
+                    userDataController?.withFavoriteStatus(album) ?? album,
+              )
+              .toList(growable: false);
+          _albumsNotifier.notifyListeners();
+        case CatalogQueryKind.artistTopTracks:
+          _topTracks = update.tracks
+              .map(_withAlbumYear)
+              .map(
+                (track) =>
+                    userDataController?.withFavoriteStatus(track) ?? track,
+              )
+              .toList(growable: false);
+          _topTracksNotifier.notifyListeners();
+        case CatalogQueryKind.similarArtists:
+          if (update.limit != 25) return;
+          _similarArtists = update.artists
+              .map(
+                (artist) =>
+                    userDataController?.withFavoriteStatus(artist) ?? artist,
+              )
+              .toList(growable: false);
+          _similarArtistsNotifier.notifyListeners();
+        default:
+          return;
+      }
+    } else {
+      return;
+    }
+    notifyListeners();
+  }
+
   Future<void> loadArtist() => _runLoad(_loadArtist);
 
   Future<void> _loadArtist() async {
@@ -201,11 +255,7 @@ class ArtistDetailController extends ChangeNotifier {
     _topTracksNotifier.notifyListeners();
     _similarArtistsNotifier.notifyListeners();
     notifyListeners();
-    await _loadAlbums();
-    if (_isLoadCanceled) return;
-    await _loadTopTracks();
-    if (_isLoadCanceled) return;
-    await _loadSimilarArtists();
+    await Future.wait([_loadAlbums(), _loadTopTracks(), _loadSimilarArtists()]);
   }
 
   Future<void> _loadArtistMetadata() async {
@@ -420,9 +470,12 @@ class ArtistDetailController extends ChangeNotifier {
   // A single load generation owns all sequential and parallel section requests.
   Future<void> _runLoad(Future<void> Function() load) {
     if (_isLoadCanceled) return Future<void>.value();
-    return _loadingFuture ??= _queryScope.run(load).whenComplete(() {
-      _loadingFuture = null;
+    if (_loadingFuture case final pending?) return pending;
+    late final Future<void> loading;
+    loading = _queryScope.run(load).whenComplete(() {
+      if (identical(_loadingFuture, loading)) _loadingFuture = null;
     });
+    return _loadingFuture = loading;
   }
 
   // Diagnostics identify concurrent page instances without logging response payloads.

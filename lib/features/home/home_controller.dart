@@ -21,8 +21,27 @@ class HomeController extends ChangeNotifier {
     math.Random? random,
   }) : _random = random ?? math.Random() {
     _eventSubscription = coreBridge.events.listen((event) {
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'catalog_updated') {
+        final update = CatalogUpdate.fromJson(event);
+        if (update.kind == CatalogQueryKind.recentlyPlayed) {
+          _recentListens = _withFavoriteStatuses(update.tracks);
+          _recentListensNotifier.notifyListeners();
+          notifyListeners();
+        }
+      }
       if (_hasStartedLoading && event['type'] == 'recommendations_changed') {
         unawaited(_refreshRecommendationFolders());
+      }
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'user_data_changed' &&
+          _hasRecentListensLoadError &&
+          !_isReadingRecentListens &&
+          _recentListensRecoveryAttempts < 3) {
+        _recentListensRecoveryAttempts++;
+        unawaited(_loadRecentListens());
       }
     });
   }
@@ -34,6 +53,7 @@ class HomeController extends ChangeNotifier {
   bool _hasStartedLoading = false;
   Future<void>? _recommendationRefresh;
   bool _needsRecommendationRefresh = false;
+  bool _shouldRefreshRecommendations = false;
   final Map<String, List<(String, String)>> _selectedArtistFolders = {};
   final Map<(String, String), HomeArtistSection> _loadedArtistSections = {};
 
@@ -55,6 +75,9 @@ class HomeController extends ChangeNotifier {
   bool _isLoadingTopArtists = true;
   bool _isLoadingArtistSections = true;
   bool _isLoadingRecentListens = true;
+  bool _isReadingRecentListens = false;
+  bool _hasRecentListensLoadError = false;
+  int _recentListensRecoveryAttempts = 0;
 
   List<Track> _recommendationItems = const <Track>[];
   List<Playlist> _genrePlaylists = const <Playlist>[];
@@ -127,7 +150,7 @@ class HomeController extends ChangeNotifier {
   Future<void> load() async {
     if (_isDisposed) return;
     _hasStartedLoading = true;
-    unawaited(_refreshRecommendationFolders());
+    unawaited(_refreshRecommendationFolders(refresh: true));
     unawaited(_loadRecentListens());
   }
 
@@ -183,13 +206,16 @@ class HomeController extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshRecommendationFolders() {
+  Future<void> _refreshRecommendationFolders({bool refresh = false}) {
+    _shouldRefreshRecommendations |= refresh;
     _needsRecommendationRefresh = true;
     return _recommendationRefresh ??= Future<void>.microtask(() async {
       try {
         while (_needsRecommendationRefresh && !_isDisposed) {
           _needsRecommendationRefresh = false;
-          await _loadRecommendationFolders();
+          final shouldRefresh = _shouldRefreshRecommendations;
+          _shouldRefreshRecommendations = false;
+          await _loadRecommendationFolders(refresh: shouldRefresh);
         }
       } finally {
         _recommendationRefresh = null;
@@ -197,10 +223,11 @@ class HomeController extends ChangeNotifier {
     });
   }
 
-  Future<void> _loadRecommendationFolders() async {
+  Future<void> _loadRecommendationFolders({required bool refresh}) async {
     try {
       final snapshot = await coreBridge.getRecommendations(
         view: RecommendationView.home,
+        refresh: refresh,
       );
       if (_isDisposed) return;
       _applyRecommendationSnapshot(snapshot);
@@ -227,10 +254,9 @@ class HomeController extends ChangeNotifier {
     final List<Track> recommendations = List<Track>.of(
       _tracksFromFolder(recommendationFolders, 'user_recommendations'),
     );
-    if (!_hasLoadedRecommendations &&
-        !snapshot.isFolderLoading('user_recommendations') &&
+    if (!snapshot.isFolderLoading('user_recommendations') &&
         !snapshot.hasFolderLoadError('user_recommendations')) {
-      _shuffle(recommendations);
+      if (!_hasLoadedRecommendations) _shuffle(recommendations);
       _recommendationItems = _withFavoriteStatuses(recommendations);
       _hasLoadedRecommendations = true;
     }
@@ -281,6 +307,9 @@ class HomeController extends ChangeNotifier {
   }
 
   Future<void> _loadRecentListens() async {
+    if (_isDisposed || _isReadingRecentListens) return;
+    _isReadingRecentListens = true;
+    _hasRecentListensLoadError = false;
     _isLoadingRecentListens = _recentListens.isEmpty;
     _notifySection(_recentListensNotifier);
     notifyListeners();
@@ -291,8 +320,10 @@ class HomeController extends ChangeNotifier {
       if (_isDisposed) return;
       _recentListens = _withFavoriteStatuses(recent);
     } catch (_) {
+      _hasRecentListensLoadError = true;
       if (_isLoadingRecentListens) _recentListens = const <Track>[];
     } finally {
+      _isReadingRecentListens = false;
       _isLoadingRecentListens = false;
       _notifySection(_recentListensNotifier);
       notifyListeners();

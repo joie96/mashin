@@ -15,7 +15,6 @@ class SettingsScreen extends StatelessWidget {
   Widget build(BuildContext context) => SettingsEditor(
     musicAssistantUrl: session.baseUrl,
     settings: SessionSettingsUpdate(
-      localCacheSizeBytes: session.localCacheSizeBytes,
       isDarkTheme: session.isDarkTheme,
       logLevel: session.logLevel,
       shouldShowMultiDeviceButton: session.shouldShowMultiDeviceButton,
@@ -44,8 +43,6 @@ class SettingsEditor extends StatefulWidget {
 }
 
 class _SettingsEditorState extends State<SettingsEditor> {
-  late final TextEditingController _cacheSizeController;
-  late final FocusNode _cacheSizeFocusNode;
   late SessionSettingsUpdate _savedSettings;
   late SessionSettingsUpdate _settings;
   Future<void> _pendingSave = Future<void>.value();
@@ -57,52 +54,11 @@ class _SettingsEditorState extends State<SettingsEditor> {
     super.initState();
     _savedSettings = widget.settings;
     _settings = widget.settings;
-    _cacheSizeController = TextEditingController(
-      text: '${_settings.localCacheSizeBytes ~/ _bytesPerMegabyte}',
-    );
-    _cacheSizeFocusNode = FocusNode()..addListener(_onCacheSizeFocusChanged);
   }
 
-  @override
-  void dispose() {
-    _saveCacheSize(shouldShowError: false);
-    _cacheSizeFocusNode.removeListener(_onCacheSizeFocusChanged);
-    _cacheSizeFocusNode.dispose();
-    _cacheSizeController.dispose();
-    super.dispose();
-  }
-
-  // Field commits and ordered persistence.
-  void _onCacheSizeFocusChanged() {
-    if (!_cacheSizeFocusNode.hasFocus) {
-      _saveCacheSize();
-    }
-  }
-
-  void _saveCacheSize({bool shouldShowError = true}) {
-    final int? cacheSizeMb = int.tryParse(_cacheSizeController.text.trim());
-    if (cacheSizeMb == null || cacheSizeMb < 25 || cacheSizeMb > 1000) {
-      _cacheSizeController.text =
-          '${_settings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
-      if (shouldShowError) {
-        _showMessage('Cache-Groesse muss zwischen 25 und 1000 MB liegen.');
-      }
-      return;
-    }
-    _cacheSizeController.text = '$cacheSizeMb';
-    _saveSettings(
-      SessionSettingsUpdate(
-        localCacheSizeBytes: cacheSizeMb * _bytesPerMegabyte,
-        isDarkTheme: _settings.isDarkTheme,
-        logLevel: _settings.logLevel,
-        shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
-      ),
-    );
-  }
-
+  // Ordered settings persistence.
   void _saveSettings(SessionSettingsUpdate update) {
-    if (update.localCacheSizeBytes == _settings.localCacheSizeBytes &&
-        update.isDarkTheme == _settings.isDarkTheme &&
+    if (update.isDarkTheme == _settings.isDarkTheme &&
         update.logLevel == _settings.logLevel &&
         update.shouldShowMultiDeviceButton ==
             _settings.shouldShowMultiDeviceButton) {
@@ -117,10 +73,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
         if (mounted) {
           if (identical(_settings, update)) {
             setState(() => _settings = _savedSettings);
-            if (!_cacheSizeFocusNode.hasFocus) {
-              _cacheSizeController.text =
-                  '${_savedSettings.localCacheSizeBytes ~/ _bytesPerMegabyte}';
-            }
           }
           _showMessage(
             'Einstellungen konnten nicht gespeichert werden. Verbindung und Eingaben pruefen.',
@@ -134,7 +86,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
     setState(
       () => _saveSettings(
         SessionSettingsUpdate(
-          localCacheSizeBytes: _settings.localCacheSizeBytes,
           isDarkTheme: value,
           logLevel: _settings.logLevel,
           shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
@@ -147,7 +98,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
     setState(
       () => _saveSettings(
         SessionSettingsUpdate(
-          localCacheSizeBytes: _settings.localCacheSizeBytes,
           isDarkTheme: _settings.isDarkTheme,
           logLevel: value,
           shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
@@ -160,7 +110,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
     setState(
       () => _saveSettings(
         SessionSettingsUpdate(
-          localCacheSizeBytes: _settings.localCacheSizeBytes,
           isDarkTheme: _settings.isDarkTheme,
           logLevel: _settings.logLevel,
           shouldShowMultiDeviceButton: value,
@@ -171,7 +120,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
 
   Future<void> _logout() async {
     if (_isLoggingOut) return;
-    _cacheSizeFocusNode.unfocus();
     setState(() => _isLoggingOut = true);
     try {
       await _pendingSave;
@@ -196,8 +144,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
         ? SettingsScreenMobile(
             musicAssistantUrl: widget.musicAssistantUrl,
             onLogout: _isLoggingOut ? null : _logout,
-            cacheSizeController: _cacheSizeController,
-            cacheSizeFocusNode: _cacheSizeFocusNode,
             isDarkTheme: _settings.isDarkTheme,
             logLevel: _settings.logLevel,
             onThemeChanged: _saveTheme,
@@ -208,8 +154,6 @@ class _SettingsEditorState extends State<SettingsEditor> {
           )
         : SettingsScreenDesktop(
             musicAssistantUrl: widget.musicAssistantUrl,
-            cacheSizeController: _cacheSizeController,
-            cacheSizeFocusNode: _cacheSizeFocusNode,
             isDarkTheme: _settings.isDarkTheme,
             logLevel: _settings.logLevel,
             onThemeChanged: _saveTheme,
@@ -221,5 +165,3 @@ class _SettingsEditorState extends State<SettingsEditor> {
     return screen;
   }
 }
-
-const int _bytesPerMegabyte = 1024 * 1024;

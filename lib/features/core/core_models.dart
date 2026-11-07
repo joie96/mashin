@@ -1,3 +1,7 @@
+import 'dart:async';
+
+import 'package:flutter/foundation.dart';
+
 // Music Assistant media and playback enumerations.
 
 enum MediaType {
@@ -23,6 +27,110 @@ enum MediaType {
 enum AlbumType { album, single, live, soundtrack, compilation, ep, unknown }
 
 enum RecommendationView { home, explore }
+
+enum CatalogQueryKind {
+  artist,
+  album,
+  playlist,
+  albumTracks,
+  playlistTracks,
+  artistAlbums,
+  artistTopTracks,
+  similarArtists,
+  similarTracks,
+  trackVersions,
+  recentlyPlayed,
+  search,
+  other,
+}
+
+class CatalogUpdate {
+  const CatalogUpdate({
+    required this.kind,
+    this.itemId,
+    this.provider,
+    this.searchQuery,
+    this.mediaType,
+    this.limit,
+    this.allowDynamicTracks,
+    this.allowLookup,
+    this.item,
+    this.tracks = const <Track>[],
+    this.albums = const <Album>[],
+    this.artists = const <Artist>[],
+    this.searchResults,
+  });
+
+  final CatalogQueryKind kind;
+  final String? itemId;
+  final String? provider;
+  final String? searchQuery;
+  final MediaType? mediaType;
+  final int? limit;
+  final bool? allowDynamicTracks;
+  final bool? allowLookup;
+  final MediaItem? item;
+  final List<Track> tracks;
+  final List<Album> albums;
+  final List<Artist> artists;
+  final SearchResults? searchResults;
+
+  // Native query identities are independent of the canonical identities in results.
+  factory CatalogUpdate.fromJson(Map<String, dynamic> json) {
+    final query = Map<String, dynamic>.from(json['query'] as Map);
+    final value = Map<String, dynamic>.from(json['value'] as Map);
+    if (query.length != 1 || value.length != 1) {
+      throw const FormatException('invalid catalog update');
+    }
+    final queryName = query.keys.single;
+    final arguments = Map<String, dynamic>.from(query.values.single as Map);
+    final kind = CatalogQueryKind.values.firstWhere(
+      (kind) => kind.name.toLowerCase() == queryName.toLowerCase(),
+      orElse: () => CatalogQueryKind.other,
+    );
+    final resultKind = value.keys.single;
+    final result = value.values.single;
+    List<T> decodeList<T>(T Function(Map<String, dynamic>) decode) =>
+        (result as List)
+            .map((entry) => decode(Map<String, dynamic>.from(entry as Map)))
+            .toList(growable: false);
+    return CatalogUpdate(
+      kind: kind,
+      itemId: arguments['item_id'] as String?,
+      provider: arguments['provider'] as String?,
+      searchQuery: arguments['query'] as String?,
+      limit: arguments['limit'] as int?,
+      allowDynamicTracks: arguments['allow_dynamic_tracks'] as bool?,
+      allowLookup: arguments['allow_lookup'] as bool?,
+      mediaType: MediaType.values
+          .where((type) => type.name == arguments['media_type'])
+          .firstOrNull,
+      item: switch (resultKind) {
+        'Artist' => Artist.fromJson(Map<String, dynamic>.from(result as Map)),
+        'Album' => Album.fromJson(Map<String, dynamic>.from(result as Map)),
+        'Playlist' => Playlist.fromJson(
+          Map<String, dynamic>.from(result as Map),
+        ),
+        _ => null,
+      },
+      tracks: resultKind == 'Tracks'
+          ? decodeList(Track.fromJson)
+          : const <Track>[],
+      albums: resultKind == 'Albums'
+          ? decodeList(Album.fromJson)
+          : const <Album>[],
+      artists: resultKind == 'Artists'
+          ? decodeList(Artist.fromJson)
+          : const <Artist>[],
+      searchResults: resultKind == 'Search'
+          ? SearchResults.fromJson(Map<String, dynamic>.from(result as Map))
+          : null,
+    );
+  }
+
+  bool matches(CatalogQueryKind expected, String itemId, String provider) =>
+      kind == expected && this.itemId == itemId && this.provider == provider;
+}
 
 enum ContentType { pcm, opus, flac, mp3, aac, wav, ogg, unknown }
 
@@ -465,6 +573,7 @@ class MediaItemImage {
   static String _proxyBaseUrl = '';
 
   static String get currentBaseUrl => _proxyBaseUrl;
+  static String? Function(MediaItem, int)? missingArtworkSource;
 
   final String type;
   final String path;
@@ -513,7 +622,11 @@ class MediaItemImage {
     final originalPath = path.trim();
 
     if (id.isEmpty || _proxyBaseUrl.isEmpty) {
-      return originalPath.isEmpty ? null : originalPath;
+      return originalPath.toLowerCase().startsWith('data:image/') ||
+              originalPath.startsWith('<svg') ||
+              originalPath.startsWith('<?xml')
+          ? originalPath
+          : null;
     }
 
     final query = <String>[];
@@ -530,7 +643,25 @@ class MediaItemImage {
     }
 
     final qs = query.isEmpty ? '' : '?${query.join('&')}';
-    return '$_proxyBaseUrl/imageproxy/$id$qs';
+    return '$_proxyBaseUrl/imageproxy/${Uri.encodeComponent(id)}$qs';
+  }
+
+  // Only the configured server's proxy references may reach network image widgets.
+  static bool isProxyUrl(String source) {
+    if (_proxyBaseUrl.isEmpty) return false;
+    final base = Uri.tryParse('$_proxyBaseUrl/imageproxy/');
+    final uri = Uri.tryParse(source);
+    if (base == null ||
+        uri == null ||
+        (base.scheme != 'http' && base.scheme != 'https') ||
+        (uri.scheme != 'http' && uri.scheme != 'https') ||
+        uri.origin != base.origin ||
+        uri.userInfo != base.userInfo ||
+        !uri.path.startsWith(base.path)) {
+      return false;
+    }
+    final id = uri.path.substring(base.path.length);
+    return id.isNotEmpty && !id.contains('/') && !uri.hasFragment;
   }
 }
 
@@ -1281,7 +1412,7 @@ extension MediaItemImageSizing on MediaItem {
 
       final MediaItemImage? metadataImage = track.primaryImage;
       if (metadataImage == null) {
-        return null;
+        return MediaItemImage.missingArtworkSource?.call(this, normalizedSize);
       }
 
       return metadataImage.getProxyPath(
@@ -1294,7 +1425,7 @@ extension MediaItemImageSizing on MediaItem {
       final Album album = this as Album;
       final MediaItemImage? image = album.primaryImage;
       if (image == null) {
-        return null;
+        return MediaItemImage.missingArtworkSource?.call(this, normalizedSize);
       }
 
       return image.getProxyPath(
@@ -1307,7 +1438,7 @@ extension MediaItemImageSizing on MediaItem {
       final Artist artist = this as Artist;
       final MediaItemImage? image = artist.primaryImage;
       if (image == null) {
-        return null;
+        return MediaItemImage.missingArtworkSource?.call(this, normalizedSize);
       }
 
       return image.getProxyPath(
@@ -1320,7 +1451,7 @@ extension MediaItemImageSizing on MediaItem {
       final Playlist playlist = this as Playlist;
       final MediaItemImage? image = playlist.primaryImage;
       if (image == null) {
-        return null;
+        return MediaItemImage.missingArtworkSource?.call(this, normalizedSize);
       }
 
       return image.getProxyPath(
@@ -1756,13 +1887,21 @@ class ProviderManifest {
 }
 
 class ProviderManifestRegistry {
+  static final ValueNotifier<int> changes = ValueNotifier<int>(0);
+  static Future<String?> Function(String)? _loadIcon;
   static final Map<String, ProviderManifest> _byDomain =
       <String, ProviderManifest>{};
-  static final Map<String, String> _iconDataByDomain = <String, String>{};
 
+  // Session metadata lifecycle and registration.
   static void clear() {
+    _loadIcon = null;
     _byDomain.clear();
-    _iconDataByDomain.clear();
+    changes.value++;
+  }
+
+  static void configureIconLoader(Future<String?> Function(String) loadIcon) {
+    _loadIcon = loadIcon;
+    changes.value++;
   }
 
   static void registerAll(Iterable<ProviderManifest> manifests) {
@@ -1773,20 +1912,14 @@ class ProviderManifestRegistry {
       }
       _byDomain[key] = manifest;
     }
+    changes.value++;
   }
 
   static void registerOne(ProviderManifest manifest) {
     registerAll(<ProviderManifest>[manifest]);
   }
 
-  static void registerIconData(String providerOrDomain, String iconData) {
-    final domain = _providerDomain(providerOrDomain);
-    final value = iconData.trim();
-    if (domain.isNotEmpty && value.isNotEmpty) {
-      _iconDataByDomain[domain] = value;
-    }
-  }
-
+  // Metadata queries and visible consumers' online icon reads.
   static ProviderManifest? getByProvider(String providerOrDomain) {
     final domain = _providerDomain(providerOrDomain);
     if (domain.isEmpty) {
@@ -1795,27 +1928,15 @@ class ProviderManifestRegistry {
     return _byDomain[domain];
   }
 
-  static String? iconSvgForProvider(String providerOrDomain) {
-    final domain = _providerDomain(providerOrDomain);
-    final raw =
-        _iconDataByDomain[domain]?.trim() ??
-        getByProvider(providerOrDomain)?.preferredIconData?.trim();
-    if (raw == null || raw.isEmpty) {
-      return null;
-    }
+  static String? iconSvgForProvider(String providerOrDomain) =>
+      getByProvider(providerOrDomain)?.preferredIconData;
 
-    if (raw.startsWith('http://') ||
-        raw.startsWith('https://') ||
-        raw.startsWith('data:image/')) {
-      return raw;
-    }
-
-    final base = MediaItemImage.currentBaseUrl.trim();
-    if (base.isNotEmpty) {
-      return raw.startsWith('/') ? '$base$raw' : '$base/$raw';
-    }
-
-    return raw;
+  static Future<String?> getProviderIconData(String providerOrDomain) async {
+    final manifest = getByProvider(providerOrDomain);
+    final inline = manifest?.preferredIconData?.trim();
+    if (inline != null && inline.isNotEmpty) return inline;
+    if (manifest?.hasDefaultIcon != true) return null;
+    return _loadIcon?.call(_providerDomain(providerOrDomain));
   }
 
   static String _providerDomain(String providerOrDomain) {
@@ -2209,20 +2330,17 @@ class PreferredProvider {
 
 class SessionSettingsUpdate {
   const SessionSettingsUpdate({
-    required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
     this.shouldShowMultiDeviceButton = true,
   });
 
-  final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
 
   final bool shouldShowMultiDeviceButton;
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'localCacheSizeBytes': localCacheSizeBytes,
     'theme': isDarkTheme ? 'dark' : 'light',
     'logLevel': logLevel.name,
     'shouldShowMultiDeviceButton': shouldShowMultiDeviceButton,
@@ -2234,7 +2352,6 @@ class SessionSettings {
     required this.musicAssistantUrl,
     required this.username,
     required this.audioProfile,
-    required this.localCacheSizeBytes,
     required this.isDarkTheme,
     required this.logLevel,
     this.shouldShowMultiDeviceButton = true,
@@ -2244,7 +2361,6 @@ class SessionSettings {
   final String musicAssistantUrl;
   final String? username;
   final String audioProfile;
-  final int localCacheSizeBytes;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
   final PreferredProvider? preferredProvider;
@@ -2255,8 +2371,6 @@ class SessionSettings {
       musicAssistantUrl: json['musicAssistantUrl'] as String? ?? '',
       username: json['username'] as String?,
       audioProfile: json['audioProfile'] as String? ?? '',
-      localCacheSizeBytes:
-          (json['localCacheSizeBytes'] as num?)?.toInt() ?? 250 * 1024 * 1024,
       isDarkTheme: json['theme'] != 'light',
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
       shouldShowMultiDeviceButton:

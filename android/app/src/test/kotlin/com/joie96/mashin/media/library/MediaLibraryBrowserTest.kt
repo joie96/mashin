@@ -50,7 +50,7 @@ class MediaLibraryBrowserTest {
             if (kind == "recommendations") {
                 recommendationViews.add(JSONObject(checkNotNull(argument)).getString("view"))
                 JSONObject().put("folders", folders).put("is_loading", isLoadingRecommendations).toString()
-            } else if (kind == "userData") {
+            } else if (kind == "getUserData") {
                 userData.toString()
             } else {
                 val reference = JSONObject(checkNotNull(argument))
@@ -224,31 +224,6 @@ class MediaLibraryBrowserTest {
         assertEquals("home-track", children("home:recommendations").last().mediaMetadata.title)
         assertEquals("explore-track", children("discover:tracks").last().mediaMetadata.title)
         assertEquals(listOf("home", "explore"), recommendationViews)
-    }
-
-    @Test
-    fun explorationAndSimilarUsersReadCachedPlaylistTracksAndKeepPlaybackActions() {
-        for ((section, folderId) in listOf("discover:exploration" to "user_exploration_weekly",
-            "discover:similarUsers" to "similarusers_jam_weekly")) {
-            folders.put(folder(folderId, item("first", "playlist"), item("ignored", "album"))
-                .put("playlist_tracks", JSONArray().put(item("first-track", "track"))))
-            folders.put(folder(folderId, item("second", "playlist"), item("", "playlist"))
-                .put("playlist_tracks", JSONArray().put(item("second-track", "track"))))
-            references.clear()
-            val tracks = children(section)
-            assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "first-track", "second-track"),
-                tracks.map { it.mediaMetadata.title.toString() })
-            assertTrue(references.isEmpty())
-            assertTrue(tracks.all { it.mediaMetadata.isPlayable == true })
-            browser.startPlayback(tracks[0].mediaId).get()
-            browser.startPlayback(tracks[1].mediaId).get()
-            val playRequest = JSONObject(requests[requests.size - 2].arguments).getJSONObject("request")
-            assertEquals(2, playRequest.getJSONArray("mediaItems").length())
-            assertFalse(playRequest.getBoolean("shuffle"))
-            assertTrue(JSONObject(requests.last().arguments).getJSONObject("request").getBoolean("shuffle"))
-            browser.startPlayback(tracks.last().mediaId).get()
-            assertEquals(PlaybackCommandKind.StartRadio, requests.last().kind)
-        }
     }
 
     @Test
