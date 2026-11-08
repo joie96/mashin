@@ -198,6 +198,14 @@ Schreibbefehle gehen ausschliesslich an den Server. Erst dessen Erfolg und erfor
 - Bildbytes liegen ausserhalb von SQLite in eindeutig cacheeigenen Dateien. Identische Bytes duerfen ueber ihren Inhalts-Hash dedupliziert werden. Medienmetadaten enthalten Referenzen, keine persistierten Base64-Bildkopien.
 - Inline-SVGs, Data-URIs und Providericons werden an der Eingangsgrenze als Bildinhalt normalisiert und ueber denselben Dateiowner gespeichert. Sie erhalten keinen zweiten Cachepfad.
 
+### Ein gemeinsamer proxyorientierter Bildindex
+
+- Der eigene SQLite-Bildindex unter `Cache/images` ist der Index des gemeinsamen Proxybildcaches, kein zusaetzlicher Inline-, Cover- oder Iconcache. Seine Trennung vom Medienbestand stellt sicher, dass `clear_database_cache` weder Bilddateien noch deren Quellen-/Variantenzuordnung entfernt.
+- Die Identitaetskette lautet: ausgewaehlter Server -> beobachtete `proxy_id` -> Variantenparameter -> gespeicherte Bilddatei. Ein Inhalts-Hash identifiziert ausschliesslich die Bytes fuer Dateiintegritaet und optionale Deduplizierung; er ersetzt weder Proxy-ID noch Variantenidentitaet und wird nicht als neue Bildquellen-ID verwendet.
+- Der Quellen-/Variantenvertrag und seine Tests werden vor der Dateipersistenz festgelegt. Der Dateiowner wird darunter implementiert; es darf nicht zuerst ein eigenstaendiger Inline-/Covercache entstehen, dem spaeter ein zweiter Proxycache hinzugefuegt wird.
+- Inlinebilder, erzeugte Playlistcover und Providericons verwenden denselben Quellen-/Variantenindex und Dateiowner. Eine vorhandene Server-Proxy-ID bleibt massgeblich. Ohne verwendbare Proxy-ID wird nur die modellkonforme Referenz im Serverkontext verwendet, keine erfundene Ersatz-ID oder stillschweigende beliebige Netzwerkquelle.
+- Neue Bytes unter derselben Proxy-ID aktualisieren den beobachteten Quellenstand und invalidieren betroffene Varianten gemaess diesem Abschnitt. Eine andere Dateiadresse oder ein anderer Inhalts-Hash begruendet keine neue Serverquelle; der letzte gueltige sichtbare Inhalt bleibt bis zum erfolgreichen Ersatz nutzbar.
+
 ### Abruf und Anzeige
 
 - Primarer Netzwerkweg ist der MA-Bildproxy mit beobachteter `proxy_id`. Serverlokale Pfade und Provider-Interna werden nicht lokal nachimplementiert oder als lokale Dateipfade interpretiert.
@@ -241,3 +249,34 @@ Als initiale Abnahmeziele gelten fuer typische begrenzte lokale Bildschirmabfrag
 Diese Werte sind Zielkriterien, keine bereits erbrachten Nachweise. Geraet, Datensatz, Seitengroesse und Messgrenzen werden vor der Performanceabnahme festgehalten. Abweichungen brauchen ausdrueckliche Zustimmung, keine nachtraegliche Umdeutung.
 
 Es gibt zunaechst keine eigenen Cache-Budgets, Medienanzahl- oder DB-/Bild-MB-Quoten und keine Eviction. Leerung erfolgt gemaess Abschnitt 4 durch Serverwechsel oder ausdruecklichen Funktionsaufruf. Eine Performancepruefung darf keine Nutzerdaten loeschen, Bibliotheken kuenstlich begrenzen oder den Vollstaendigkeitsvertrag abschwaechen.
+
+## 11. Implementierungsstand und verbleibende Schritte
+
+Stand: 2026-11-08. Dieser Abschnitt beschreibt Arbeitsreihenfolge und offene Abnahme, keine Absenkung der Anforderungen aus Abschnitt 10. Detaillierte Nachweise stehen in [cache_implementation_evidence.md](cache_implementation_evidence.md); abgeschlossene Teilschritte bedeuten keine Gesamtabnahme des Caches.
+
+### Bereits nachgewiesene Grundlage
+
+- Anlage und atomare Persistenz der Medien-DB im aktiven Ladepfad sowie parallele lokale und serverseitige Reads mit Serverautoritaet sind umgesetzt und fokussiert nachgewiesen.
+- Kanonische Kuenstler, Alben und Tracks sowie bisherige Playlistlisten/-inhalte und Recommendations sind migriert. Private Playlists erstellen, umbenennen und entfernen sowie die Annahmereihenfolge bestaetigter Cachemutationen sind geprueft; weitere Mutations- und Lifecyclegates bleiben offen.
+- Nachweis 41 schliesst die frische Serverbestaetigung des privaten Coveradapters ab, nicht die Coverpersistenz im Anwendungspfad. Letzte dokumentierte Gesamtpruefung: 299 Rusttests und 47 fokussierte Darttests bestanden.
+- Danach wurde der Inline-Bitmapvalidator in einem fokussierten Test geprueft. Er ist noch kein aktiver Bildcache: Dateipublikation, Bildindex, Proxyabrufe und Lifecycleanbindung fehlen. Eine erneute Gesamtpruefung dieses Zwischenstands steht aus; sichere SVG-Normalisierung ist noch offen.
+
+### Naechste Implementierungsreihenfolge
+
+1. Den gemeinsamen typisierten Quellen-/Variantenvertrag anhand des aktuellen Serverbildproxys, seiner Helper und Modelle festlegen. Tests sichern Proxy-ID als Quelle, Variantenparameter, neue Bytes unter gleicher Proxy-ID und die ausdrueckliche modellkonforme Referenz ohne Proxy-ID. Es entstehen keine lokalen Ersatz-Quellen-IDs.
+2. Darunter den unabhaengigen Bildindex und Dateiowner implementieren: validierte Bytes, temporaere Datei, atomare Publikation und bestaetigte Indexzuordnung. Wiedereroeffnen, identische Bytes, Ersatz, fehlende/defekte Dateien und Publikationsfehler mit isolierten Daten pruefen. Keine bestaetigte Referenz auf unvollstaendige Dateien.
+3. Vor aktiven Schreibaufrufern Generationen, Annahme/Abschluss laufender Arbeit und Dateileases an Bildcacheleerung, Serverwechsel und Shutdown anbinden. Tests beweisen getrennte Bereichs-Leerung, geschlossene Handles und ausbleibende Wiederbevoelkerung durch alte Ergebnisse.
+4. Den gemeinsamen Proxybildladepfad anschliessen: lokale Anzeige vor verzoegertem Server, deduplizierte priorisierte Abrufe, Varianten, Offlineanzeige, Refresh, Quelleninvalidierung und unterscheidbare negative Ergebnisse. Inlinebilder und Icons werden an derselben Eingangsgrenze sicher normalisiert, ohne zweiten Cachepfad.
+5. Private Playlistcover daran anschliessen: frische Serverbestaetigung gezielt und sitzungsgesichert als Metadaten publizieren, ueber die gemeinsamen Owner persistieren und vorhandene Trackinhalte/Nachbarbereiche erhalten. Keine Base64-Bildkopien in der Mediendatenbank; Cachefehler bleiben getrennt vom erfolgreichen Serverergebnis.
+6. Anschliessend die verbleibenden Medienmutationen und aktiven Verbraucher vervollstaendigen und die gemeinsamen Abnahmegates aus Abschnitt 10 schliessen.
+
+### Weitere offene Arbeiten fuer den vollstaendigen Umfang
+
+- Playlisttracks hinzufuegen und entfernen: Serverabschluss und erforderlichen Readback bestaetigen, betroffene Inhaltsauswahl gezielt aktualisieren und atomar persistieren, ohne pauschalen Bibliotheksrefresh.
+- Providerinformationen: beobachtete Manifeste, Instanzen, Icons und Verfuegbarkeit dauerhaft speichern; kanonische Medien und Provider-Mappings ersetzen diese Informationen nicht.
+- Cachecommands und Ansichten: vorhandene interne Leerungsmechanik ueber aktive Bindings bereitstellen, betroffene Ansichten gezielt benachrichtigen und regulaer neu laden. Durch diesen Schritt wird keine neue Einstellungsseite beauftragt.
+- Durchgaengige Lifecycle- und Fehlerabnahme: Seitenende, letzter Verbraucher, Benutzer-/Serverwechsel, laufende Writes/Downloads, Abbruch, wiederholte Leerung, Loeschfehler und Shutdown ueber die aktiven Verbraucher pruefen.
+- UI-Abnahme: bei Refresh und Mutationen nur fachlich geaenderte Bereiche aktualisieren; unveraenderte Header, Nachbarsektionen, Scrollposition, Auswahl und Interaktionen erhalten.
+- Plattform- und Leistungsabnahme: aktive Rust-, Dart-, Kotlin- und native Verbraucher auf Android und Windows pruefen; Referenzgeraet/Datensatz festhalten und Queue, SQL, Modellbildung, Bildlesen/Dekodierung und UI-Uebergabe getrennt messen. Die p95-Ziele sind noch nicht insgesamt nachgewiesen; der urspruengliche 45-Sekunden-Haengefall ist weiterhin nicht reproduziert.
+
+Radio, Hoerbuecher, Podcasts, Podcastfolgen und Soundeffekte bleiben ausserhalb des aktuellen eigenstaendigen Cacheumfangs. Ihre bestehende Onlineunterstuetzung bleibt erhalten; ihre Nichtimplementierung erweitert diesen offenen Arbeitsplan nicht stillschweigend.
