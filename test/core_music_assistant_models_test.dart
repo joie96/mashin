@@ -123,6 +123,113 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 
 void main() {
   test(
+    'server read success preserves a separate cache persistence failure',
+    () {
+      final change = CatalogReadChange.fromJson({
+        'query': {
+          'Album': {'item_id': '44', 'provider': 'library'},
+        },
+        'snapshot': {
+          'phase': 'ready',
+          'source': 'server',
+          'knowledge': 'observed_response',
+          'freshness': 'fresh',
+          'observed_at': 1700000000,
+          'error': null,
+          'cache_error': 'synthetic write failure',
+        },
+      });
+      expect(change.kind, CatalogQueryKind.album);
+      expect(change.phase, CatalogLoadPhase.ready);
+      expect(change.source, CatalogDataSource.server);
+      expect(change.error, isNull);
+      expect(change.cacheError, 'synthetic write failure');
+    },
+  );
+
+  test(
+    'catalog read states preserve unknown, partial, empty and invalidated observations',
+    () {
+      for (final phase in [
+        'reading_local',
+        'refreshing',
+        'ready',
+        'failed',
+        'invalidated',
+      ]) {
+        for (final knowledge in ['unknown', 'partial', 'observed_response']) {
+          final change = CatalogReadChange.fromJson({
+            'query': {
+              'Artist': {'item_id': '007', 'provider': 'source-a'},
+            },
+            'snapshot': {
+              'phase': phase,
+              'knowledge': knowledge,
+              'freshness': 'unknown',
+              'observed_at': null,
+              'error': phase == 'failed' ? 'offline' : null,
+            },
+          });
+          expect(change.kind, CatalogQueryKind.artist);
+          expect(change.observedAt, isNull);
+          expect(
+            change.knowledge,
+            knowledge == 'observed_response'
+                ? CatalogReadKnowledge.observedResponse
+                : CatalogReadKnowledge.values.byName(knowledge),
+          );
+        }
+      }
+      final empty = CatalogUpdate.fromJson({
+        'query': {
+          'SimilarArtists': {
+            'item_id': '007',
+            'provider': 'source-a',
+            'limit': 25,
+          },
+        },
+        'value': {'Artists': []},
+      });
+      expect(empty.artists, isEmpty);
+      expect(empty.limit, 25);
+      expect(
+        () => CatalogReadChange.fromJson({
+          'query': {
+            'Artist': {'item_id': '007', 'provider': 'source-a'},
+          },
+          'snapshot': {
+            'phase': 'ready',
+            'knowledge': 'complete',
+            'freshness': 'fresh',
+          },
+        }),
+        throwsFormatException,
+      );
+    },
+  );
+
+  test(
+    'provider item artist events preserve the requested and canonical identities',
+    () {
+      final update = CatalogUpdate.fromJson({
+        'query': {
+          'ProviderItem': {
+            'item_id': '007',
+            'provider': 'source-a',
+            'media_type': 'artist',
+          },
+        },
+        'value': {'Item': _mediaJson('artist')},
+      });
+      expect(update.kind, CatalogQueryKind.providerItem);
+      expect(update.itemId, '007');
+      expect(update.provider, 'source-a');
+      expect(update.item, isA<Artist>());
+      expect(update.item!.provider, 'library');
+    },
+  );
+
+  test(
     'home and explore apply changed and empty recommendations without refresh loops',
     () async {
       for (final view in RecommendationView.values) {

@@ -29,6 +29,7 @@ enum AlbumType { album, single, live, soundtrack, compilation, ep, unknown }
 enum RecommendationView { home, explore }
 
 enum CatalogQueryKind {
+  providerItem,
   artist,
   album,
   playlist,
@@ -36,12 +37,98 @@ enum CatalogQueryKind {
   playlistTracks,
   artistAlbums,
   artistTopTracks,
+  artistTracks,
   similarArtists,
   similarTracks,
   trackVersions,
   recentlyPlayed,
   search,
   other,
+}
+
+enum CatalogLoadPhase { readingLocal, refreshing, ready, failed, invalidated }
+
+enum CatalogReadKnowledge { unknown, partial, observedResponse }
+
+enum CatalogFreshness { unknown, stale, fresh }
+
+enum CatalogDataSource { cache, server }
+
+class CatalogReadChange {
+  const CatalogReadChange({
+    required this.kind,
+    required this.phase,
+    required this.knowledge,
+    required this.freshness,
+    this.itemId,
+    this.provider,
+    this.limit,
+    this.allowDynamicTracks,
+    this.observedAt,
+    this.error,
+    this.source,
+    this.cacheError,
+  });
+
+  final CatalogQueryKind kind;
+  final CatalogLoadPhase phase;
+  final CatalogReadKnowledge knowledge;
+  final CatalogFreshness freshness;
+  final String? itemId;
+  final String? provider;
+  final int? limit;
+  final bool? allowDynamicTracks;
+  final int? observedAt;
+  final String? error;
+  final CatalogDataSource? source;
+  final String? cacheError;
+
+  // Decode missing data as unknown state, never as a synthetic empty response.
+  factory CatalogReadChange.fromJson(Map<String, dynamic> json) {
+    final query = Map<String, dynamic>.from(json['query'] as Map);
+    if (query.length != 1) throw const FormatException('invalid catalog query');
+    final arguments = Map<String, dynamic>.from(query.values.single as Map);
+    final snapshot = Map<String, dynamic>.from(json['snapshot'] as Map);
+    return CatalogReadChange(
+      kind: CatalogQueryKind.values.firstWhere(
+        (kind) => kind.name.toLowerCase() == query.keys.single.toLowerCase(),
+        orElse: () => CatalogQueryKind.other,
+      ),
+      phase: switch (snapshot['phase']) {
+        'reading_local' => CatalogLoadPhase.readingLocal,
+        'refreshing' => CatalogLoadPhase.refreshing,
+        'ready' => CatalogLoadPhase.ready,
+        'failed' => CatalogLoadPhase.failed,
+        'invalidated' => CatalogLoadPhase.invalidated,
+        _ => throw const FormatException('invalid catalog phase'),
+      },
+      knowledge: switch (snapshot['knowledge']) {
+        'unknown' => CatalogReadKnowledge.unknown,
+        'partial' => CatalogReadKnowledge.partial,
+        'observed_response' => CatalogReadKnowledge.observedResponse,
+        _ => throw const FormatException('invalid catalog knowledge'),
+      },
+      freshness: CatalogFreshness.values.byName(
+        snapshot['freshness'] as String,
+      ),
+      itemId: arguments['item_id'] as String?,
+      provider: arguments['provider'] as String?,
+      limit: arguments['limit'] as int?,
+      allowDynamicTracks: arguments['allow_dynamic_tracks'] as bool?,
+      observedAt: snapshot['observed_at'] as int?,
+      error: snapshot['error'] as String?,
+      source: switch (snapshot['source']) {
+        null => null,
+        'cache' => CatalogDataSource.cache,
+        'server' => CatalogDataSource.server,
+        _ => throw const FormatException('invalid catalog data source'),
+      },
+      cacheError: snapshot['cache_error'] as String?,
+    );
+  }
+
+  bool matches(CatalogQueryKind expected, String itemId, String provider) =>
+      kind == expected && this.itemId == itemId && this.provider == provider;
 }
 
 class CatalogUpdate {
@@ -106,6 +193,7 @@ class CatalogUpdate {
           .where((type) => type.name == arguments['media_type'])
           .firstOrNull,
       item: switch (resultKind) {
+        'Item' => mediaItemFromJson(Map<String, dynamic>.from(result as Map)),
         'Artist' => Artist.fromJson(Map<String, dynamic>.from(result as Map)),
         'Album' => Album.fromJson(Map<String, dynamic>.from(result as Map)),
         'Playlist' => Playlist.fromJson(
@@ -293,6 +381,46 @@ MediaItem mediaItemFromJson(Map<String, dynamic> json) {
         'Unknown Music Assistant media type: ${json['media_type']}',
       );
   }
+}
+
+// Compare normalized model fields, not object identity or raw response shape.
+bool hasSameMediaContent(MediaItem? previous, MediaItem? incoming) {
+  if (identical(previous, incoming)) return true;
+  if (previous == null || incoming == null) return false;
+  return _hasSameModelValue(
+    createMusicAssistantMediaItemPayload(previous),
+    createMusicAssistantMediaItemPayload(incoming),
+  );
+}
+
+bool hasSameMediaListContent(
+  List<MediaItem> previous,
+  List<MediaItem> incoming,
+) =>
+    previous.length == incoming.length &&
+    List<bool>.generate(
+      previous.length,
+      (index) => hasSameMediaContent(previous[index], incoming[index]),
+    ).every((isEqual) => isEqual);
+
+bool _hasSameModelValue(Object? previous, Object? incoming) {
+  if (identical(previous, incoming) || previous == incoming) return true;
+  if (previous is Map && incoming is Map) {
+    return previous.length == incoming.length &&
+        previous.keys.every(
+          (key) =>
+              incoming.containsKey(key) &&
+              _hasSameModelValue(previous[key], incoming[key]),
+        );
+  }
+  if (previous is List && incoming is List) {
+    return previous.length == incoming.length &&
+        List<bool>.generate(
+          previous.length,
+          (index) => _hasSameModelValue(previous[index], incoming[index]),
+        ).every((isEqual) => isEqual);
+  }
+  return false;
 }
 
 Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {

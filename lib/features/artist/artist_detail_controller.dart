@@ -1,9 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
-import 'dart:ui' as ui;
 
 import 'package:flutter/foundation.dart';
-import 'package:http/http.dart' as http;
 
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
@@ -16,13 +13,12 @@ import '../shared/detail_provider_selection.dart';
 /// used by the desktop and mobile artist detail pages.
 class ArtistDetailController extends ChangeNotifier {
   static const int descriptionCollapsedMaxLines = 4;
-  http.Client _deezerHttpClient = http.Client();
-
   final MashinCoreBridgeApi coreBridge;
   final String itemId;
   final String providerInstanceIdOrDomain;
   final UserData? userDataController;
   final ChangeNotifier _metadataNotifier = ChangeNotifier();
+  final ChangeNotifier _readStatusNotifier = ChangeNotifier();
   final ChangeNotifier _albumsNotifier = ChangeNotifier();
   final ChangeNotifier _similarArtistsNotifier = ChangeNotifier();
   final ChangeNotifier _topTracksNotifier = ChangeNotifier();
@@ -37,10 +33,18 @@ class ArtistDetailController extends ChangeNotifier {
          provider: providerInstanceIdOrDomain,
        ) {
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+    _readSubscription = coreBridge.catalogReadChanges.listen(
+      _onCatalogReadChange,
+    );
   }
 
   final DetailProviderSelection sectionProvider;
   StreamSubscription<CatalogUpdate>? _catalogSubscription;
+  StreamSubscription<CatalogReadChange>? _readSubscription;
+  Completer<Artist?>? _firstMetadata;
+  (String, String)? _sectionContext;
+  CatalogReadChange? _metadataReadState;
+  final Map<CatalogQueryKind, CatalogReadChange> _sectionReadStates = {};
   bool _isSelectingProvider = false;
 
   Artist? _artist;
@@ -52,6 +56,9 @@ class ArtistDetailController extends ChangeNotifier {
   bool _isLoadingAlbums = true;
   bool _isLoadingSimilarArtists = true;
   bool _isLoadingTopTracks = true;
+  bool _hasObservedAlbums = false;
+  bool _hasObservedTopTracks = false;
+  bool _hasObservedSimilarArtists = false;
 
   bool _isArtistFavorite = false;
   final Map<String, bool> _favoriteOverrides = <String, bool>{};
@@ -61,6 +68,7 @@ class ArtistDetailController extends ChangeNotifier {
   bool _requiresReload = false;
   int _visibilityGeneration = 0;
   CoreQueryScope _queryScope = CoreQueryScope();
+  CoreQueryScope _sectionsQueryScope = CoreQueryScope();
   Future<void>? _loadingFuture;
 
   bool get _isLoadCanceled =>
@@ -76,8 +84,8 @@ class ArtistDetailController extends ChangeNotifier {
       _requiresReload =
           _loadingFuture != null || _isLoadingMetadata || isLoadingSections;
       _queryScope.cancel();
+      _sectionsQueryScope.cancel();
       _loadingFuture = null;
-      _deezerHttpClient.close();
       _logSection('page', 'hidden; read requests canceled');
       return;
     }
@@ -87,7 +95,8 @@ class ArtistDetailController extends ChangeNotifier {
       return;
     }
     _queryScope = CoreQueryScope();
-    _deezerHttpClient = http.Client();
+    _sectionsQueryScope = CoreQueryScope();
+    _isSelectingProvider = false;
     final requiresReload = _requiresReload;
     _requiresReload = false;
     _logSection('page', 'visible reload=$requiresReload');
@@ -105,10 +114,12 @@ class ArtistDetailController extends ChangeNotifier {
   void dispose() {
     _isControllerDisposed = true;
     unawaited(_catalogSubscription?.cancel());
+    unawaited(_readSubscription?.cancel());
     _queryScope.cancel();
-    _deezerHttpClient.close();
+    _sectionsQueryScope.cancel();
     _logSection('page', 'disposed; pending results will be ignored');
     _metadataNotifier.dispose();
+    _readStatusNotifier.dispose();
     _albumsNotifier.dispose();
     _similarArtistsNotifier.dispose();
     _topTracksNotifier.dispose();
@@ -121,9 +132,15 @@ class ArtistDetailController extends ChangeNotifier {
   List<Track> get topTracks => _topTracks;
 
   bool get isLoadingMetadata => _isLoadingMetadata;
+  CatalogReadChange? get metadataReadState => _metadataReadState;
+  CatalogReadChange? sectionReadState(CatalogQueryKind kind) =>
+      _sectionReadStates[kind];
   bool get isLoadingAlbums => _isLoadingAlbums;
+  bool get hasObservedAlbums => _hasObservedAlbums;
   bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
+  bool get hasObservedSimilarArtists => _hasObservedSimilarArtists;
   bool get isLoadingTopTracks => _isLoadingTopTracks;
+  bool get hasObservedTopTracks => _hasObservedTopTracks;
   bool get isLoadingSections =>
       _isSelectingProvider ||
       _isLoadingAlbums ||
@@ -150,11 +167,18 @@ class ArtistDetailController extends ChangeNotifier {
   int get descriptionMaxLines =>
       _isDescriptionExpanded ? 1000 : descriptionCollapsedMaxLines;
   Listenable get metadataListenable => _metadataNotifier;
+  Listenable get readStatusListenable => _readStatusNotifier;
   Listenable get albumsListenable => _albumsNotifier;
   Listenable get similarArtistsListenable => _similarArtistsNotifier;
   Listenable get topTracksListenable => _topTracksNotifier;
 
-  // Data Loading
+  // Page and provider commands.
+  Future<void> loadArtist() => _runLoad(_loadArtist);
+
+  Future<void> selectProvider(ProviderMapping mapping) =>
+      _queryScope.run(() => _selectProvider(mapping));
+
+  // Catalog observations for the original header and selected section context.
   void _onCatalogUpdate(CatalogUpdate update) {
     if (_isLoadCanceled || !_isPageVisible) return;
     if (update.matches(
@@ -164,37 +188,55 @@ class ArtistDetailController extends ChangeNotifier {
         ) &&
         update.item is Artist) {
       final artist = update.item! as Artist;
-      _artist = userDataController?.withFavoriteStatus(artist) ?? artist;
+      final incoming = userDataController?.withFavoriteStatus(artist) ?? artist;
+      if (hasSameMediaContent(_artist, incoming) && !_isLoadingMetadata) return;
+      _artist = incoming;
       _isArtistFavorite = isItemFavorite(_artist!);
+      _isLoadingMetadata = false;
+      if (_firstMetadata case final pending? when !pending.isCompleted) {
+        pending.complete(_artist);
+      }
       _metadataNotifier.notifyListeners();
     } else if (update.itemId == sectionProvider.selectedItemId &&
         update.provider == sectionProvider.selectedProvider) {
       switch (update.kind) {
         case CatalogQueryKind.artistAlbums:
-          _albums = update.albums
-              .map(
-                (album) =>
-                    userDataController?.withFavoriteStatus(album) ?? album,
-              )
-              .toList(growable: false);
+          final incoming = _mapAlbums(update.albums);
+          if (hasSameMediaListContent(_albums, incoming) && !_isLoadingAlbums)
+            return;
+          _albums = incoming;
+          _hasObservedAlbums = true;
+          _isLoadingAlbums = false;
           _albumsNotifier.notifyListeners();
         case CatalogQueryKind.artistTopTracks:
-          _topTracks = update.tracks
+          final incoming = update.tracks
               .map(_withAlbumYear)
               .map(
                 (track) =>
                     userDataController?.withFavoriteStatus(track) ?? track,
               )
               .toList(growable: false);
+          if (hasSameMediaListContent(_topTracks, incoming) &&
+              !_isLoadingTopTracks)
+            return;
+          _topTracks = incoming;
+          _hasObservedTopTracks = true;
+          _isLoadingTopTracks = false;
           _topTracksNotifier.notifyListeners();
         case CatalogQueryKind.similarArtists:
           if (update.limit != 25) return;
-          _similarArtists = update.artists
+          final incoming = update.artists
               .map(
                 (artist) =>
                     userDataController?.withFavoriteStatus(artist) ?? artist,
               )
               .toList(growable: false);
+          if (hasSameMediaListContent(_similarArtists, incoming) &&
+              !_isLoadingSimilarArtists)
+            return;
+          _similarArtists = incoming;
+          _hasObservedSimilarArtists = true;
+          _isLoadingSimilarArtists = false;
           _similarArtistsNotifier.notifyListeners();
         default:
           return;
@@ -205,30 +247,103 @@ class ArtistDetailController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> loadArtist() => _runLoad(_loadArtist);
+  void _onCatalogReadChange(CatalogReadChange change) {
+    if (_isLoadCanceled || !_isPageVisible) return;
+    if (change.matches(
+      CatalogQueryKind.artist,
+      itemId,
+      providerInstanceIdOrDomain,
+    )) {
+      _metadataReadState = change;
+    } else if (change.itemId == sectionProvider.selectedItemId &&
+        change.provider == sectionProvider.selectedProvider &&
+        (change.kind == CatalogQueryKind.artistAlbums ||
+            change.kind == CatalogQueryKind.artistTopTracks ||
+            (change.kind == CatalogQueryKind.similarArtists &&
+                change.limit == 25))) {
+      _sectionReadStates[change.kind] = change;
+    } else {
+      return;
+    }
+    _readStatusNotifier.notifyListeners();
+    if (change.phase == CatalogLoadPhase.invalidated) {
+      _invalidateServerContext();
+      notifyListeners();
+    }
+  }
+
+  // Metadata and section load coordination.
+  void _invalidateServerContext() {
+    _queryScope.cancel();
+    _sectionsQueryScope.cancel();
+    _requiresReload = true;
+    _artist = null;
+    _isArtistFavorite = false;
+    _albums = const [];
+    _topTracks = const [];
+    _similarArtists = const [];
+    _sectionContext = null;
+    _hasObservedAlbums = false;
+    _hasObservedTopTracks = false;
+    _hasObservedSimilarArtists = false;
+    _isLoadingMetadata = false;
+    _isLoadingAlbums = false;
+    _isLoadingTopTracks = false;
+    _isLoadingSimilarArtists = false;
+    _isSelectingProvider = false;
+    _metadataNotifier.notifyListeners();
+    _albumsNotifier.notifyListeners();
+    _topTracksNotifier.notifyListeners();
+    _similarArtistsNotifier.notifyListeners();
+  }
 
   Future<void> _loadArtist() async {
     if (_isLoadCanceled) return;
     _logSection('page', 'load started');
-    _isLoadingMetadata = true;
-    _isLoadingAlbums = true;
-    _isLoadingTopTracks = true;
-    _isLoadingSimilarArtists = true;
+    _isLoadingMetadata = _artist == null;
+    _isLoadingAlbums = !_hasObservedAlbums;
+    _isLoadingTopTracks = !_hasObservedTopTracks;
+    _isLoadingSimilarArtists = !_hasObservedSimilarArtists;
     notifyListeners();
 
-    await _loadArtistMetadata();
-    if (_isLoadCanceled) return;
-    final Artist? originalArtist = _artist;
-    if (originalArtist != null) {
-      await sectionProvider.initialize(originalArtist);
+    final firstMetadata = Completer<Artist?>();
+    _firstMetadata = firstMetadata;
+    final metadataLoading = _loadArtistMetadata();
+    try {
+      final originalArtist = await Future.any<Artist?>([
+        firstMetadata.future,
+        metadataLoading.then((_) => _artist),
+      ]);
+      if (_isLoadCanceled) return;
+      if (originalArtist != null)
+        await sectionProvider.initialize(originalArtist);
+      if (_isLoadCanceled) return;
+      await _loadSections();
+      await metadataLoading;
+      if (_isLoadCanceled) return;
+      final refreshedArtist = _artist;
+      if (refreshedArtist != null &&
+          !identical(originalArtist, refreshedArtist)) {
+        final previousContext = (
+          sectionProvider.selectedItemId,
+          sectionProvider.selectedProvider,
+        );
+        await sectionProvider.initialize(refreshedArtist);
+        if (_isLoadCanceled) return;
+        _metadataNotifier.notifyListeners();
+        notifyListeners();
+        if (previousContext !=
+            (
+              sectionProvider.selectedItemId,
+              sectionProvider.selectedProvider,
+            )) {
+          await _loadSections();
+        }
+      }
+    } finally {
+      if (identical(_firstMetadata, firstMetadata)) _firstMetadata = null;
     }
-    if (_isLoadCanceled) return;
-    await _loadSections();
   }
-
-  // Switching only reloads section data; metadata and library identity stay intact.
-  Future<void> selectProvider(ProviderMapping mapping) =>
-      _runLoad(() => _selectProvider(mapping));
 
   Future<void> _selectProvider(ProviderMapping mapping) async {
     if (_isLoadCanceled || isLoadingSections) return;
@@ -239,29 +354,50 @@ class ArtistDetailController extends ChangeNotifier {
       if (_isLoadCanceled) return;
       await _loadSections();
     } finally {
-      _isSelectingProvider = false;
-      notifyListeners();
+      if (!_isLoadCanceled) {
+        _isSelectingProvider = false;
+        notifyListeners();
+      }
     }
   }
 
   Future<void> _loadSections() async {
-    _albums = const <Album>[];
-    _topTracks = const <Track>[];
-    _similarArtists = const <Artist>[];
-    _isLoadingAlbums = true;
-    _isLoadingTopTracks = true;
-    _isLoadingSimilarArtists = true;
+    _sectionsQueryScope.cancel();
+    final sectionScope = CoreQueryScope();
+    _sectionsQueryScope = sectionScope;
+    final context = (
+      sectionProvider.selectedItemId,
+      sectionProvider.selectedProvider,
+    );
+    final hasSameContext = context == _sectionContext;
+    if (!hasSameContext) {
+      _albums = const <Album>[];
+      _topTracks = const <Track>[];
+      _similarArtists = const <Artist>[];
+      _sectionReadStates.clear();
+      _hasObservedAlbums = false;
+      _hasObservedTopTracks = false;
+      _hasObservedSimilarArtists = false;
+      _sectionContext = context;
+    }
+    _isLoadingAlbums = !_hasObservedAlbums;
+    _isLoadingTopTracks = !_hasObservedTopTracks;
+    _isLoadingSimilarArtists = !_hasObservedSimilarArtists;
     _albumsNotifier.notifyListeners();
     _topTracksNotifier.notifyListeners();
     _similarArtistsNotifier.notifyListeners();
     notifyListeners();
-    await Future.wait([_loadAlbums(), _loadTopTracks(), _loadSimilarArtists()]);
+    await sectionScope.run(
+      () =>
+          Future.wait([_loadAlbums(), _loadTopTracks(), _loadSimilarArtists()]),
+    );
   }
 
   Future<void> _loadArtistMetadata() async {
     final timer = Stopwatch()..start();
+    var hasNewMetadata = false;
     _logSection('metadata', 'started');
-    _isLoadingMetadata = true;
+    _isLoadingMetadata = _artist == null;
     notifyListeners();
     try {
       final Artist loaded = await coreBridge.getArtist(
@@ -269,13 +405,11 @@ class ArtistDetailController extends ChangeNotifier {
         providerInstanceIdOrDomain,
       );
       if (_isLoadCanceled) return;
-      _artist = userDataController?.withFavoriteStatus(loaded) ?? loaded;
+      final incoming = userDataController?.withFavoriteStatus(loaded) ?? loaded;
+      hasNewMetadata = !hasSameMediaContent(_artist, incoming);
+      if (hasNewMetadata) _artist = incoming;
       final Artist? artist = _artist;
       _isArtistFavorite = artist != null && isItemFavorite(artist);
-      await _queryScope.execute(
-        _loadDeezerBiographyIfNeeded,
-        onCancel: _deezerHttpClient.close,
-      );
       if (_isLoadCanceled) return;
       _logSection('metadata', 'loaded elapsed_ms=${timer.elapsedMilliseconds}');
     } catch (error) {
@@ -285,18 +419,23 @@ class ArtistDetailController extends ChangeNotifier {
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
         level: LogLevelPreference.warn,
       );
-      _artist = null;
     } finally {
-      _isLoadingMetadata = false;
-      if (!_isLoadCanceled) _metadataNotifier.notifyListeners();
-      notifyListeners();
+      if (!_isLoadCanceled) {
+        final shouldNotify = _isLoadingMetadata || hasNewMetadata;
+        _isLoadingMetadata = false;
+        if (shouldNotify) {
+          _metadataNotifier.notifyListeners();
+        }
+        notifyListeners();
+      }
     }
   }
 
   Future<void> _loadAlbums() async {
     final timer = Stopwatch()..start();
+    var hasNewAlbums = false;
     _logSection('albums', 'started');
-    _isLoadingAlbums = true;
+    _isLoadingAlbums = !_hasObservedAlbums;
     notifyListeners();
     try {
       final List<Album> albums = await coreBridge.getArtistAlbums(
@@ -304,17 +443,10 @@ class ArtistDetailController extends ChangeNotifier {
         sectionProvider.selectedProvider,
       );
       if (_isLoadCanceled) return;
-      _albums = List<Album>.unmodifiable(
-        albums
-            .map(
-              (Album album) =>
-                  userDataController?.withFavoriteStatus(album) ?? album,
-            )
-            .toList(growable: false)
-          ..sort((Album left, Album right) {
-            return (right.year ?? 0).compareTo(left.year ?? 0);
-          }),
-      );
+      final incoming = _mapAlbums(albums);
+      hasNewAlbums = !hasSameMediaListContent(_albums, incoming);
+      if (hasNewAlbums) _albums = incoming;
+      _hasObservedAlbums = true;
       _logSection(
         'albums',
         'loaded count=${_albums.length} elapsed_ms=${timer.elapsedMilliseconds}',
@@ -326,31 +458,30 @@ class ArtistDetailController extends ChangeNotifier {
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
         level: LogLevelPreference.warn,
       );
-      _albums = const <Album>[];
     } finally {
-      _isLoadingAlbums = false;
-      if (!_isLoadCanceled) _albumsNotifier.notifyListeners();
-      notifyListeners();
+      if (!_isLoadCanceled) {
+        final shouldNotify = _isLoadingAlbums || hasNewAlbums;
+        _isLoadingAlbums = false;
+        if (shouldNotify) _albumsNotifier.notifyListeners();
+        notifyListeners();
+      }
     }
   }
 
   Future<void> _loadSimilarArtists() async {
     final timer = Stopwatch()..start();
+    var hasNewArtists = false;
     _logSection('similar_artists', 'started');
-    _isLoadingSimilarArtists = true;
+    _isLoadingSimilarArtists = !_hasObservedSimilarArtists;
     notifyListeners();
     try {
-      List<Artist> artists = await coreBridge.getSimilarArtists(
+      final List<Artist> artists = await coreBridge.getSimilarArtists(
         sectionProvider.selectedItemId,
         sectionProvider.selectedProvider,
         limit: 25,
       );
       if (_isLoadCanceled) return;
-      if (artists.isEmpty) {
-        artists = await _loadSimilarArtistsFromTracks();
-      }
-      if (_isLoadCanceled) return;
-      _similarArtists = List<Artist>.unmodifiable(
+      final incoming = List<Artist>.unmodifiable(
         artists
             .map(
               (Artist artist) =>
@@ -358,6 +489,9 @@ class ArtistDetailController extends ChangeNotifier {
             )
             .toList(growable: false),
       );
+      hasNewArtists = !hasSameMediaListContent(_similarArtists, incoming);
+      if (hasNewArtists) _similarArtists = incoming;
+      _hasObservedSimilarArtists = true;
       _logSection(
         'similar_artists',
         'loaded count=${_similarArtists.length} elapsed_ms=${timer.elapsedMilliseconds}',
@@ -369,18 +503,21 @@ class ArtistDetailController extends ChangeNotifier {
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
         level: LogLevelPreference.warn,
       );
-      _similarArtists = const <Artist>[];
     } finally {
-      _isLoadingSimilarArtists = false;
-      if (!_isLoadCanceled) _similarArtistsNotifier.notifyListeners();
-      notifyListeners();
+      if (!_isLoadCanceled) {
+        final shouldNotify = _isLoadingSimilarArtists || hasNewArtists;
+        _isLoadingSimilarArtists = false;
+        if (shouldNotify) _similarArtistsNotifier.notifyListeners();
+        notifyListeners();
+      }
     }
   }
 
   Future<void> _loadTopTracks() async {
     final timer = Stopwatch()..start();
+    var hasNewTracks = false;
     _logSection('top_tracks', 'started');
-    _isLoadingTopTracks = true;
+    _isLoadingTopTracks = !_hasObservedTopTracks;
     notifyListeners();
     try {
       final List<Track> tracks = await coreBridge.getArtistTopTracks(
@@ -388,7 +525,7 @@ class ArtistDetailController extends ChangeNotifier {
         sectionProvider.selectedProvider,
       );
       if (_isLoadCanceled) return;
-      _topTracks = List<Track>.unmodifiable(
+      final incoming = List<Track>.unmodifiable(
         tracks
             .map(_withAlbumYear)
             .map(
@@ -397,6 +534,9 @@ class ArtistDetailController extends ChangeNotifier {
             )
             .toList(growable: false),
       );
+      hasNewTracks = !hasSameMediaListContent(_topTracks, incoming);
+      if (hasNewTracks) _topTracks = incoming;
+      _hasObservedTopTracks = true;
       _logSection(
         'top_tracks',
         'loaded count=${_topTracks.length} elapsed_ms=${timer.elapsedMilliseconds}',
@@ -408,66 +548,17 @@ class ArtistDetailController extends ChangeNotifier {
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
         level: LogLevelPreference.warn,
       );
-      _topTracks = const <Track>[];
     } finally {
-      _isLoadingTopTracks = false;
-      if (!_isLoadCanceled) _topTracksNotifier.notifyListeners();
-      notifyListeners();
+      if (!_isLoadCanceled) {
+        final shouldNotify = _isLoadingTopTracks || hasNewTracks;
+        _isLoadingTopTracks = false;
+        if (shouldNotify) _topTracksNotifier.notifyListeners();
+        notifyListeners();
+      }
     }
   }
 
-  Future<void> _loadDeezerBiographyIfNeeded() async {
-    final Artist? currentArtist = _artist;
-    if (currentArtist == null ||
-        !providerInstanceIdOrDomain.toLowerCase().startsWith('deezer') ||
-        (currentArtist.metadata?.description?.trim().isNotEmpty ?? false)) {
-      return;
-    }
-
-    final String language = ui.PlatformDispatcher.instance.locale.languageCode
-        .trim();
-    final String? biography = await _getDeezerArtistBio(
-      itemId,
-      language.isEmpty ? 'de' : language,
-    );
-    if (_isLoadCanceled || biography == null || biography.isEmpty) {
-      return;
-    }
-
-    final MediaItemMetadata previousMetadata =
-        currentArtist.metadata ??
-        const MediaItemMetadata(images: <MediaItemImage>[], genres: <String>[]);
-    _artist = Artist(
-      itemId: currentArtist.itemId,
-      provider: currentArtist.provider,
-      name: currentArtist.name,
-      version: currentArtist.version,
-      sortName: currentArtist.sortName,
-      uri: currentArtist.uri,
-      externalIds: currentArtist.externalIds,
-      isPlayable: currentArtist.isPlayable,
-      available: currentArtist.available,
-      providerMappings: currentArtist.providerMappings,
-      favorite: currentArtist.favorite,
-      position: currentArtist.position,
-      dateAdded: currentArtist.dateAdded,
-      artistType: currentArtist.artistType,
-      metadata: MediaItemMetadata(
-        description: biography,
-        descriptionLanguage: previousMetadata.descriptionLanguage,
-        images: previousMetadata.images,
-        genres: previousMetadata.genres,
-        label: previousMetadata.label,
-        popularity: previousMetadata.popularity,
-        cacheChecksum: previousMetadata.cacheChecksum,
-        explicit: previousMetadata.explicit,
-        lyrics: previousMetadata.lyrics,
-        transcript: previousMetadata.transcript,
-      ),
-    );
-  }
-
-  // A single load generation owns all sequential and parallel section requests.
+  // Deduplicates page metadata loads without blocking an independent provider selection.
   Future<void> _runLoad(Future<void> Function() load) {
     if (_isLoadCanceled) return Future<void>.value();
     if (_loadingFuture case final pending?) return pending;
@@ -491,93 +582,13 @@ class ArtistDetailController extends ChangeNotifier {
     );
   }
 
-  Future<String?> _getDeezerArtistBio(String artistId, String language) async {
-    try {
-      final http.Response loginResponse = await _deezerHttpClient.get(
-        Uri.parse('https://auth.deezer.com/login/anonymous?jo=p&rto=c'),
-        headers: <String, String>{
-          'accept': 'application/json',
-          'accept-language': language.toLowerCase(),
-          'referer': 'https://www.deezer.com/',
-          'user-agent': 'Mozilla/5.0',
-        },
-      );
-      if (_isLoadCanceled ||
-          loginResponse.statusCode < 200 ||
-          loginResponse.statusCode >= 300) {
-        return null;
-      }
-
-      final Object? loginPayload = jsonDecode(loginResponse.body);
-      final String? token = loginPayload is Map<String, dynamic>
-          ? loginPayload['jwt'] as String?
-          : null;
-      if (token == null || token.trim().isEmpty) {
-        return null;
-      }
-
-      final http.Response biographyResponse = await _deezerHttpClient.post(
-        Uri.parse('https://pipe.deezer.com/api'),
-        headers: <String, String>{
-          'authorization': 'Bearer ${token.trim()}',
-          'content-type': 'application/json',
-          'origin': 'https://www.deezer.com',
-          'referer': 'https://www.deezer.com/',
-          'accept-language': language.toLowerCase(),
-        },
-        body: jsonEncode(<String, Object>{
-          'operationName': 'ArtistBio',
-          'variables': <String, String>{'artistId': artistId},
-          'query':
-              'query ArtistBio(\$artistId: String!) { artist(artistId: \$artistId) { id name bio { full } } }',
-        }),
-      );
-      if (biographyResponse.statusCode < 200 ||
-          biographyResponse.statusCode >= 300) {
-        return null;
-      }
-
-      final Object? payload = jsonDecode(biographyResponse.body);
-      final Object? data = payload is Map<String, dynamic>
-          ? payload['data']
-          : null;
-      final Object? artist = data is Map<String, dynamic>
-          ? data['artist']
-          : null;
-      final Object? biography = artist is Map<String, dynamic>
-          ? artist['bio']
-          : null;
-      final String? rawText = biography is Map<String, dynamic>
-          ? biography['full'] as String?
-          : null;
-      return _cleanDeezerBiography(rawText);
-    } catch (_) {
-      return null;
-    }
-  }
-
-  String? _cleanDeezerBiography(String? rawText) {
-    if (rawText == null || rawText.trim().isEmpty) {
-      return null;
-    }
-
-    String text = rawText
-        .replaceAll(RegExp(r'<\s*br\s*/?\s*>', caseSensitive: false), '\n')
-        .replaceAll(RegExp(r'<\s*/\s*p\s*>', caseSensitive: false), '\n\n')
-        .replaceAll(RegExp(r'<\s*p[^>]*>', caseSensitive: false), '')
-        .replaceAll(RegExp(r'<[^>]+>'), '')
-        .replaceAll('&amp;', '&')
-        .replaceAll('&quot;', '"')
-        .replaceAll('&apos;', "'")
-        .replaceAll('&lt;', '<')
-        .replaceAll('&gt;', '>')
-        .replaceAll('\r\n', '\n')
-        .replaceAll('\r', '\n');
-    text = text
-        .replaceAll(RegExp(r'[ \t]+\n'), '\n')
-        .replaceAll(RegExp(r'\n{3,}'), '\n\n')
-        .trim();
-    return text.isEmpty ? null : text;
+  // Bounded display projections never change the persisted server result order.
+  List<Album> _mapAlbums(List<Album> albums) {
+    final visible = albums
+        .map((album) => userDataController?.withFavoriteStatus(album) ?? album)
+        .toList();
+    visible.sort((left, right) => (right.year ?? 0).compareTo(left.year ?? 0));
+    return List<Album>.unmodifiable(visible);
   }
 
   Track _withAlbumYear(Track track) {
@@ -587,12 +598,10 @@ class ArtistDetailController extends ChangeNotifier {
     }
 
     final Album? matchingAlbum = _albums.cast<Album?>().firstWhere(
-      (Album? album) => album?.itemId == trackAlbum.itemId,
-      orElse: () => _albums.cast<Album?>().firstWhere(
-        (Album? album) =>
-            album?.name.toLowerCase() == trackAlbum.name.toLowerCase(),
-        orElse: () => null,
-      ),
+      (Album? album) =>
+          album?.provider == trackAlbum.provider &&
+          album?.itemId == trackAlbum.itemId,
+      orElse: () => null,
     );
     if (matchingAlbum?.year == null) {
       return track;
@@ -639,73 +648,6 @@ class ArtistDetailController extends ChangeNotifier {
       discNumber: track.discNumber,
       trackNumber: track.trackNumber,
     );
-  }
-
-  Future<List<Artist>> _loadSimilarArtistsFromTracks() async {
-    final Track? topTrack = _topTracks.isEmpty ? null : _topTracks.first;
-    if (topTrack == null) {
-      return const <Artist>[];
-    }
-
-    List<Track> similarTracks = await coreBridge.getSimilarTracks(
-      topTrack.itemId,
-      topTrack.provider,
-      limit: 50,
-      allowLookup: true,
-    );
-    if (_isLoadCanceled) return const <Artist>[];
-    if (similarTracks.isEmpty) {
-      final List<Track> versions = await coreBridge.getTrackVersions(
-        topTrack.itemId,
-        topTrack.provider,
-      );
-      if (_isLoadCanceled) return const <Artist>[];
-      if (versions.isNotEmpty) {
-        final Track fallbackVersion = versions.firstWhere(
-          (Track version) => version.provider != topTrack.provider,
-          orElse: () => versions.first,
-        );
-        similarTracks = await coreBridge.getSimilarTracks(
-          fallbackVersion.itemId,
-          fallbackVersion.provider,
-          limit: 50,
-          allowLookup: true,
-        );
-        if (_isLoadCanceled) return const <Artist>[];
-      }
-    }
-
-    final Set<String> seen = <String>{};
-    final List<Artist> fallbackArtists = <Artist>[];
-    for (final Track track in similarTracks) {
-      for (final Artist candidate in track.artists) {
-        final String key = '${candidate.provider}|${candidate.itemId}';
-        if (candidate.itemId == itemId || !seen.add(key)) {
-          continue;
-        }
-        fallbackArtists.add(candidate);
-        if (fallbackArtists.length == 25) {
-          break;
-        }
-      }
-      if (fallbackArtists.length == 25) {
-        break;
-      }
-    }
-
-    final List<Artist> enriched = await Future.wait<Artist>(
-      fallbackArtists.map((Artist candidate) async {
-        try {
-          return await coreBridge.getArtist(
-            candidate.itemId,
-            candidate.provider,
-          );
-        } catch (_) {
-          return candidate;
-        }
-      }),
-    );
-    return enriched;
   }
 
   // Favorites

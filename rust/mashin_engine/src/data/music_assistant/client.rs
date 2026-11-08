@@ -1,4 +1,4 @@
-use super::request_scheduler::RequestScheduler;
+use super::request_scheduler::{command_read_key, RequestScheduler};
 use crate::application::repositories::{with_request_priority, RequestPriority};
 
 use crate::domain::identifiers::UserId;
@@ -112,6 +112,11 @@ impl MusicAssistantClient {
         self.request_scheduler.create_read_group()
     }
 
+    #[cfg(test)]
+    pub(crate) fn pending_read_count(&self) -> usize {
+        self.request_scheduler.pending_read_count()
+    }
+
     // HTTP command transport.
     pub(crate) async fn execute_command<Response>(
         &self,
@@ -141,15 +146,7 @@ impl MusicAssistantClient {
         let client = self.http_client.clone();
         let endpoint = self.endpoint.clone();
         let access_token = self.access_token.clone();
-        let key = if arguments
-            .get("allow_dynamic_tracks")
-            .and_then(Value::as_bool)
-            == Some(true)
-        {
-            format!("{command}:{arguments}:{}", uuid::Uuid::new_v4())
-        } else {
-            format!("{command}:{arguments}")
-        };
+        let key = command_read_key(command, &arguments);
         let owned_command = command.to_owned();
         let operation = async move {
             send_http_command(
@@ -318,8 +315,8 @@ pub(crate) mod tests {
         let address = listener.local_addr().unwrap();
         let worker = std::thread::spawn(move || {
             let mut requests = Vec::new();
-            let mut responses = responses.into_iter().peekable();
-            while responses.peek().is_some() {
+            let mut responses = responses;
+            while !responses.is_empty() {
                 let (mut stream, _) = listener.accept().unwrap();
                 stream
                     .set_read_timeout(Some(Duration::from_secs(5)))
@@ -352,7 +349,11 @@ pub(crate) mod tests {
                 let request: Value =
                     serde_json::from_slice(&bytes[body_start..body_start + length]).unwrap();
                 let response = {
-                    let (expected, response) = responses.next().unwrap();
+                    let position = responses
+                        .iter()
+                        .position(|(command, _)| request["command"] == *command)
+                        .expect("unexpected test server command");
+                    let (expected, response) = responses.remove(position);
                     assert_eq!(request["command"], expected);
                     handle_request(&request);
                     requests.push(request);

@@ -164,6 +164,10 @@ typedef _NativeJsonCommandFn = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _DartJsonCommandFn = int Function(ffi.Pointer<Utf8>);
 
 extension CatalogUpdates on MashinCoreBridgeApi {
+  Stream<CatalogReadChange> get catalogReadChanges => events
+      .where((event) => event['type'] == 'catalog_read_changed')
+      .map(CatalogReadChange.fromJson);
+
   Stream<CatalogUpdate> get catalogUpdates => events
       .where((event) => event['type'] == 'catalog_updated')
       .map(CatalogUpdate.fromJson);
@@ -983,9 +987,11 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   @override
   Future<UpdateChannel> getUpdateChannel({
     required UpdateChannel defaultChannel,
-  }) => _submitOperation<UpdateChannel>('getUpdateChannel', <String, Object?>{
-    'defaultChannel': defaultChannel.name,
-  }, (Object? result) => UpdateChannel.values.byName(result as String));
+  }) => _submitOperation<UpdateChannel>(
+    'getUpdateChannel',
+    <String, Object?>{'defaultChannel': defaultChannel.name},
+    (Object? result) => UpdateChannel.values.byName(result as String),
+  );
 
   @override
   Future<void> saveUpdateChannel(UpdateChannel channel) => _submitVoidOperation(

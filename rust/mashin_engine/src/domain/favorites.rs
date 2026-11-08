@@ -149,7 +149,26 @@ impl FavoriteIntents {
         work
     }
 
+    // Removal retires aliases and their in-flight workers without inventing a new rating.
+    pub(crate) fn retire_removed_item(&mut self, item: &MediaItem) {
+        self.revision = self.revision.saturating_add(1);
+        let retired = self
+            .pending
+            .iter()
+            .filter(|(_, pending)| has_same_media_identity(&pending.item, item))
+            .map(|(identity, _)| identity.clone())
+            .collect::<Vec<_>>();
+        self.pending
+            .retain(|identity, _| !retired.contains(identity));
+        self.retired_workers
+            .retain(|worker, survivor| !retired.contains(worker) && !retired.contains(survivor));
+    }
+
     // Queries and read projections never write into the confirmed input.
+    pub(crate) fn has_active_worker(&self, identity: &str) -> bool {
+        self.pending.contains_key(identity) || self.retired_workers.contains_key(identity)
+    }
+
     pub(crate) fn work(&self, identity: &str) -> FavoriteWork {
         let Some(pending) = self
             .pending
@@ -244,6 +263,36 @@ pub(crate) fn has_same_media_identity(left: &MediaItem, right: &MediaItem) -> bo
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn playlist_removal_retires_aliased_workers_and_preserves_other_media_types() {
+        let removed: MediaItem = serde_json::from_value(serde_json::json!({"media_type":"playlist","provider":"library","item_id":"42","name":"Removed",
+            "provider_mappings":[{"provider_domain":"source","provider_instance":"source-a","item_id":"remote"}]})).unwrap();
+        let alias: MediaItem = serde_json::from_value(serde_json::json!({"media_type":"playlist","provider":"source-a","item_id":"remote","name":"Alias"})).unwrap();
+        let mut unlinked = removed.clone();
+        unlinked.fields_mut().provider_mappings.clear();
+        let mut intents = FavoriteIntents::default();
+        let snapshot = UserDataSnapshot::default();
+        let (alias_worker, _, _) = intents.submit(&snapshot.favorites, alias, true);
+        intents.begin_work(&alias_worker);
+        let (library_worker, _, _) = intents.submit(&snapshot.favorites, unlinked, true);
+        intents.begin_work(&library_worker);
+        assert!(!intents.finish(&library_worker, true, Some(&removed)));
+        let unrelated = track("library", "42", serde_json::json!([]));
+        let (other_worker, _, _) = intents.submit(&snapshot.favorites, unrelated, true);
+        let revision = intents.revision();
+        intents.retire_removed_item(&removed);
+        assert!(intents.revision() > revision);
+        for identity in [&alias_worker, &library_worker] {
+            assert!(!intents.has_active_worker(identity));
+            assert_eq!(intents.work(identity), FavoriteWork::Finished);
+        }
+        assert!(intents.has_active_worker(&other_worker));
+        assert!(intents.finish(&alias_worker, true, Some(&removed)));
+        let projection = intents.project(&snapshot);
+        assert!(projection.favorites.playlists.is_empty());
+        assert_eq!(projection.favorites.tracks.len(), 1);
+    }
 
     fn track(provider: &str, item_id: &str, mappings: serde_json::Value) -> MediaItem {
         MediaItem::Track(

@@ -30,6 +30,19 @@ pub(crate) fn current_priority() -> RequestPriority {
 }
 
 pub(crate) trait CatalogClient: Send + Sync {
+    /// Persists only a server-confirmed media readback after an online mutation.
+    fn commit_confirmed_media(&self, _item: MediaItem) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
+    /// Retires a playlist only after its server library removal was confirmed.
+    fn commit_confirmed_playlist_removal(
+        &self,
+        _playlist: Playlist,
+    ) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
     // Startup reservations and online catalog queries.
     fn begin_startup(&self) -> Box<dyn Send>;
     fn load_catalog(
@@ -37,6 +50,42 @@ pub(crate) trait CatalogClient: Send + Sync {
         query: CatalogQuery,
         force_refresh: bool,
     ) -> BoxFuture<'_, Result<CatalogValue, String>>;
+    fn observe_catalog(
+        &self,
+        query: CatalogQuery,
+        force_refresh: bool,
+    ) -> futures_util::stream::BoxStream<'_, crate::domain::catalog::CatalogLoadSnapshot> {
+        use crate::domain::catalog::{
+            CatalogFreshness, CatalogLoadPhase, CatalogLoadSnapshot, CatalogReadKnowledge,
+        };
+        use futures_util::StreamExt;
+        Box::pin(
+            futures_util::stream::once(self.load_catalog(query, force_refresh)).map(|result| {
+                match result {
+                    Ok(value) => CatalogLoadSnapshot {
+                        value: Some(value),
+                        source: Some(crate::domain::catalog::CatalogDataSource::Server),
+                        cache_error: None,
+                        phase: CatalogLoadPhase::Ready,
+                        knowledge: CatalogReadKnowledge::ObservedResponse,
+                        freshness: CatalogFreshness::Fresh,
+                        observed_at: None,
+                        error: None,
+                    },
+                    Err(error) => CatalogLoadSnapshot {
+                        value: None,
+                        source: None,
+                        cache_error: None,
+                        phase: CatalogLoadPhase::Failed,
+                        knowledge: CatalogReadKnowledge::Unknown,
+                        freshness: CatalogFreshness::Unknown,
+                        observed_at: None,
+                        error: Some(error),
+                    },
+                }
+            }),
+        )
+    }
 }
 pub(crate) trait ProviderClient: Send + Sync {
     // Provider metadata and icon queries.
@@ -74,6 +123,7 @@ pub(crate) enum InitialUserDataUpdate {
     UserIdentity(UserId),
     Favorites(Favorites),
     FavoritePage(Favorites),
+    PlaylistPage(Vec<PrivatePlaylist>),
     Playlists(Vec<PrivatePlaylist>),
     PlaylistTracks { item_id: MediaId, items: Vec<Track> },
 }
@@ -93,16 +143,25 @@ pub(crate) trait LibraryClient: Send + Sync {
     fn get_current_user_id(&self) -> BoxFuture<'_, Result<UserId, String>>;
     fn load_library_user_data<'request>(
         &'request self,
+        catalog: &'request dyn CatalogClient,
         user_id: &'request str,
     ) -> BoxFuture<'request, Result<UserDataSnapshot, String>>;
-    fn load_favorites(&self) -> BoxFuture<'_, Result<Favorites, String>>;
+    fn load_favorites<'request>(
+        &'request self,
+        catalog: &'request dyn CatalogClient,
+    ) -> BoxFuture<'request, Result<Favorites, String>>;
     fn load_favorite_pages<'request>(
         &'request self,
+        catalog: &'request dyn CatalogClient,
+        force_refresh: bool,
         publisher: &'request mut dyn UserDataPublisher,
     ) -> BoxFuture<'request, Result<Favorites, String>>;
     fn load_private_playlists<'request>(
         &'request self,
+        catalog: &'request dyn CatalogClient,
         user_id: &'request str,
+        force_refresh: bool,
+        publisher: &'request mut dyn UserDataPublisher,
     ) -> BoxFuture<'request, Result<Vec<PrivatePlaylist>, String>>;
     fn load_private_playlist<'request>(
         &'request self,
@@ -130,13 +189,13 @@ pub(crate) trait LibraryClient: Send + Sync {
     ) -> BoxFuture<'request, Result<Playlist, String>>;
     fn rename_private_playlist<'request>(
         &'request self,
-        playlist: &'request Playlist,
+        item_id: &'request str,
         name: &'request str,
-    ) -> BoxFuture<'request, Result<(), String>>;
-    fn delete_private_playlist<'request>(
+    ) -> BoxFuture<'request, Result<Playlist, String>>;
+    fn remove_private_playlist<'request>(
         &'request self,
         item_id: &'request str,
-    ) -> BoxFuture<'request, Result<(), String>>;
+    ) -> BoxFuture<'request, Result<Playlist, String>>;
     fn add_playlist_tracks<'request>(
         &'request self,
         item_id: &'request str,

@@ -14,7 +14,19 @@ class ExploreController extends ChangeNotifier {
     math.Random? random,
   }) : _random = random ?? math.Random() {
     _eventSubscription = coreBridge.events.listen((event) {
-      if (_hasStartedLoading && event['type'] == 'recommendations_changed') {
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'recommendations_updated' &&
+          event['view'] == 'explore') {
+        _applySnapshot(
+          RecommendationSnapshot.fromJson(
+            event['snapshot'] as Map<String, dynamic>,
+          ),
+        );
+      }
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'recommendations_changed') {
         unawaited(load(refresh: false));
       }
     });
@@ -95,16 +107,20 @@ class ExploreController extends ChangeNotifier {
       if (!_isDisposed) {
         _hasLoadError = true;
         _snapshot = RecommendationSnapshot(folders: _snapshot.folders);
-      }
-    } finally {
-      if (!_isDisposed) {
-        _isLoading = _snapshot.isLoading;
+        _isLoading = false;
         notifyListeners();
       }
     }
   }
 
   void _applySnapshot(RecommendationSnapshot snapshot) {
+    if (_isDisposed) return;
+    final previous = _snapshot;
+    final exploration = _weeklyExploration;
+    final albums = _weeklyAlbums;
+    final jam = _similarUsersJam;
+    final tracks = _weeklyTracks;
+    final artists = _weeklyArtists;
     _snapshot = snapshot;
     _isLoading = snapshot.isLoading;
     _hasLoadError = snapshot.hasLoadError;
@@ -115,29 +131,95 @@ class ExploreController extends ChangeNotifier {
         folders,
         'user_exploration_weekly',
       );
-      if (!_hasLoadedExploration) _weeklyExploration.shuffle(_random);
+      if (!_hasLoadedExploration) {
+        _weeklyExploration.shuffle(_random);
+      } else {
+        _preserveSelectedOrder(exploration, _weeklyExploration);
+      }
       _hasLoadedExploration = true;
     }
-    _weeklyAlbums = _itemsFromFolders<Album>(
-      folders,
-      'sitewide_top_albums_weekly',
-    );
+    if (_canApplyFolder(snapshot, 'sitewide_top_albums_weekly')) {
+      _weeklyAlbums = _itemsFromFolders<Album>(
+        folders,
+        'sitewide_top_albums_weekly',
+      );
+    }
     if (!snapshot.isFolderLoading('similarusers_jam_weekly') &&
         !snapshot.hasFolderLoadError('similarusers_jam_weekly')) {
       _similarUsersJam = _tracksFromPlaylistFolders(
         folders,
         'similarusers_jam_weekly',
       );
-      if (!_hasLoadedSimilarUsersJam) _similarUsersJam.shuffle(_random);
+      if (!_hasLoadedSimilarUsersJam) {
+        _similarUsersJam.shuffle(_random);
+      } else {
+        _preserveSelectedOrder(jam, _similarUsersJam);
+      }
       _hasLoadedSimilarUsersJam = true;
     }
-    _weeklyTracks = _itemsFromFolders<Track>(
-      folders,
-      'sitewide_top_tracks_weekly',
-    );
-    _weeklyArtists = _itemsFromFolders<Artist>(
-      folders,
-      'sitewide_top_artists_weekly',
+    if (_canApplyFolder(snapshot, 'sitewide_top_tracks_weekly')) {
+      _weeklyTracks = _itemsFromFolders<Track>(
+        folders,
+        'sitewide_top_tracks_weekly',
+      );
+    }
+    if (_canApplyFolder(snapshot, 'sitewide_top_artists_weekly')) {
+      _weeklyArtists = _itemsFromFolders<Artist>(
+        folders,
+        'sitewide_top_artists_weekly',
+      );
+    }
+    _weeklyExploration = _retainMediaList(exploration, _weeklyExploration);
+    _weeklyAlbums = _retainMediaList(albums, _weeklyAlbums);
+    _similarUsersJam = _retainMediaList(jam, _similarUsersJam);
+    _weeklyTracks = _retainMediaList(tracks, _weeklyTracks);
+    _weeklyArtists = _retainMediaList(artists, _weeklyArtists);
+    final hasChangedStatus =
+        previous.isLoading != snapshot.isLoading ||
+        previous.hasLoadError != snapshot.hasLoadError ||
+        previous.folders.length != snapshot.folders.length ||
+        List.generate(
+          snapshot.folders.length,
+          (index) =>
+              index >= previous.folders.length ||
+              previous.folders[index].itemId !=
+                  snapshot.folders[index].itemId ||
+              previous.folders[index].provider !=
+                  snapshot.folders[index].provider ||
+              previous.folders[index].isLoading !=
+                  snapshot.folders[index].isLoading ||
+              previous.folders[index].hasLoadError !=
+                  snapshot.folders[index].hasLoadError,
+        ).any((hasChanged) => hasChanged);
+    if (hasChangedStatus ||
+        !identical(exploration, _weeklyExploration) ||
+        !identical(albums, _weeklyAlbums) ||
+        !identical(jam, _similarUsersJam) ||
+        !identical(tracks, _weeklyTracks) ||
+        !identical(artists, _weeklyArtists)) {
+      notifyListeners();
+    }
+  }
+
+  // Preserve unchanged sections and the existing one-time shuffle selection.
+  bool _canApplyFolder(RecommendationSnapshot snapshot, String itemId) =>
+      !snapshot.isFolderLoading(itemId) && !snapshot.hasFolderLoadError(itemId);
+
+  List<T> _retainMediaList<T extends MediaItem>(
+    List<T> previous,
+    List<T> incoming,
+  ) => hasSameMediaListContent(previous, incoming) ? previous : incoming;
+
+  void _preserveSelectedOrder(List<Track> previous, List<Track> incoming) {
+    final order = {
+      for (var index = 0; index < previous.length; index++)
+        (previous[index].provider, previous[index].itemId): index,
+    };
+    incoming.sort(
+      (first, second) =>
+          (order[(first.provider, first.itemId)] ?? previous.length).compareTo(
+            order[(second.provider, second.itemId)] ?? previous.length,
+          ),
     );
   }
 

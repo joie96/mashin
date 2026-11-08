@@ -69,7 +69,35 @@ pub(crate) struct ReadGroup {
     id: u64,
 }
 
+// Dynamic selections must be isolated before joining the shared network queue.
+pub(super) fn command_read_key(command: &str, arguments: &Value) -> String {
+    let requires_independent_read = arguments
+        .get("allow_dynamic_tracks")
+        .and_then(Value::as_bool)
+        == Some(true)
+        || matches!(
+            command,
+            "music/playlists/playlist_tracks" | "music/recommendations/items"
+        )
+        || (command == "music/tracks/similar_tracks"
+            && arguments.get("allow_lookup").and_then(Value::as_bool) == Some(true))
+        || (matches!(
+            arguments.get("sort_field").and_then(Value::as_str),
+            Some("random" | "random_play_count")
+        ) && arguments.get("random_seed").is_none_or(Value::is_null));
+    if requires_independent_read {
+        format!("{command}:{arguments}:{}", uuid::Uuid::new_v4())
+    } else {
+        format!("{command}:{arguments}")
+    }
+}
+
 impl ReadGroup {
+    #[cfg(test)]
+    pub(crate) fn effective_priority(&self) -> RequestPriority {
+        self.inner.state.lock().unwrap().read_groups[&self.id]
+    }
+
     // A repository refresh propagates its group through mapping and all associated technical reads.
     pub(crate) async fn scope<T>(&self, operation: impl Future<Output = T>) -> T {
         READ_GROUP_ID.scope(self.id, operation).await
@@ -113,6 +141,11 @@ impl Drop for ReadGroup {
 }
 
 impl RequestScheduler {
+    #[cfg(test)]
+    pub(crate) fn pending_read_count(&self) -> usize {
+        self.inner.state.lock().unwrap().jobs.len()
+    }
+
     pub(crate) fn create_read_group(&self) -> Arc<ReadGroup> {
         let mut state = self
             .inner

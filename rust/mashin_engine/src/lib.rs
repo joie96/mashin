@@ -26,6 +26,10 @@ mod architecture_tests {
             .split("\n#[cfg(test)]\npub(super) mod ")
             .next()
             .unwrap();
+        let production = production
+            .split("\n#[cfg(test)]\npub(in crate::application) mod ")
+            .next()
+            .unwrap();
         for dependency in forbidden {
             assert!(
                 !production.contains(dependency),
@@ -45,6 +49,15 @@ mod architecture_tests {
     }
 
     #[test]
+    fn application_visible_test_modules_are_outside_production_boundary() {
+        assert_boundary(
+            "probe",
+            "fn production() {}\n#[cfg(test)]\npub(in crate::application) mod tests { use forbidden; }",
+            &["forbidden"],
+        );
+    }
+
+    #[test]
     fn source_tree_has_no_obsolete_module_roots() {
         let source_root = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
         for name in ["core", "ffi", "jni", "music_assistant"] {
@@ -59,7 +72,7 @@ mod architecture_tests {
                 );
             }
         }
-        for name in ["data/cache", "data/repositories", "data/image_loader.rs"] {
+        for name in ["data/repositories", "data/image_loader.rs"] {
             assert!(
                 !source_root.join(name).exists(),
                 "removed cache path remains: {name}"
@@ -285,9 +298,28 @@ mod architecture_tests {
             include_str!("application/recommendations.rs"),
             &[
                 "CachedPlaylistTracks",
-                "HashMap",
                 "Mutex<Option<Vec<Track>>>",
                 "folders: Vec<RecommendationFolder>",
+            ],
+        );
+        let recommendations = include_str!("application/recommendations.rs").replace("\r\n", "\n");
+        let service_fields = recommendations
+            .split("pub(crate) struct Recommendations {")
+            .nth(1)
+            .expect("recommendation service must remain explicit")
+            .split("\n}")
+            .next()
+            .unwrap();
+        assert_boundary(
+            "retained recommendation inventory",
+            service_fields,
+            &[
+                "HashMap",
+                "Vec<",
+                "RecommendationSnapshot",
+                "RecommendationFolder",
+                "CatalogValue",
+                "Track",
             ],
         );
         assert_boundary(

@@ -1,13 +1,13 @@
 //! One UI session projection of server-confirmed favorites and playlists, never a media inventory.
 use super::errors::ApplicationError;
-use super::events::ApplicationEvent;
+use super::events::{ApplicationEvent, EventPublisher};
 use super::repositories::{InitialUserDataUpdate, LibraryClient, UserDataPublisher};
 use super::Application;
 use crate::domain::catalog::{CatalogQuery, CatalogValue};
 use crate::domain::favorites::FavoriteIntents;
 use crate::domain::identifiers::MediaId;
 use crate::domain::library::UserDataSnapshot;
-use crate::domain::media::Track;
+use crate::domain::media::{MediaItem, Playlist, Track};
 use std::sync::Arc;
 pub(crate) struct LibraryState {
     pub(crate) repository: Arc<dyn LibraryClient>,
@@ -72,7 +72,7 @@ pub(crate) enum UserDataRefresh {
     Playlist(String),
 }
 impl Application {
-    // Commands wait for the server before requesting the visible playlist projection again.
+    // Playlist commands publish only server-confirmed changes.
     pub(crate) fn add_playlist_tracks(
         &self,
         item_id: String,
@@ -111,51 +111,24 @@ impl Application {
         &self,
         name: String,
     ) -> Result<UserDataSnapshot, ApplicationError> {
-        if name.trim().is_empty() {
-            return Err(ApplicationError::command_failed("playlist name required"));
-        }
-        let (client, generation) = self.library_repository()?;
         self.runtime
-            .block_on(async {
-                let user_id = self
-                    .current_session_user_id(client.as_ref(), generation)
-                    .await?;
-                client
-                    .create_private_playlist(name.trim(), user_id.as_str())
-                    .await
-            })
-            .map_err(ApplicationError::command_failed)?;
-        self.refresh_for_session(generation)
+            .block_on(self.create_private_playlist_for_session(&name))
     }
     pub(crate) fn rename_private_playlist(
         &self,
         item_id: &str,
         name: String,
     ) -> Result<UserDataSnapshot, ApplicationError> {
-        if name.trim().is_empty() {
-            return Err(ApplicationError::command_failed("playlist name required"));
-        }
-        let (client, generation) = self.library_repository()?;
         self.runtime
-            .block_on(async {
-                let playlist = client.get_private_playlist(item_id).await?;
-                client.rename_private_playlist(&playlist, name.trim()).await
-            })
-            .map_err(ApplicationError::command_failed)?;
-        self.refresh_for_session(generation)
+            .block_on(self.rename_private_playlist_for_session(item_id, &name))
     }
+
     pub(crate) fn remove_private_playlist(
         &self,
         item_id: &str,
     ) -> Result<UserDataSnapshot, ApplicationError> {
-        let (client, generation) = self.library_repository()?;
         self.runtime
-            .block_on(async {
-                client.get_private_playlist(item_id).await?;
-                client.delete_private_playlist(item_id).await
-            })
-            .map_err(ApplicationError::command_failed)?;
-        self.refresh_for_session(generation)
+            .block_on(self.remove_private_playlist_for_session(item_id))
     }
     pub(crate) fn refresh_private_playlist_cover(
         &self,
@@ -325,10 +298,12 @@ impl Application {
             .map_err(ApplicationError::command_failed)?;
         let publisher = ApplicationUserDataPublisher::new(self.clone(), generation)
             .map_err(ApplicationError::command_failed)?;
+        let catalog = self.catalog_repository(generation)?;
         let result = self
             .runtime
             .block_on(super::startup::load_initial_user_data(
                 client.as_ref(),
+                catalog.as_ref(),
                 publisher,
             ));
         self.complete_initial_user_data(generation, result.clone())
@@ -371,14 +346,21 @@ impl Application {
                 let user_id = self
                     .current_session_user_id(client.as_ref(), generation)
                     .await?;
-                let snapshot = client.load_library_user_data(user_id.as_str()).await?;
+                let catalog = self.catalog_repository(generation)?;
+                let mut snapshot = client
+                    .load_library_user_data(catalog.as_ref(), user_id.as_str())
+                    .await?;
                 self.publish_initial_user_data(generation, |data| {
+                    data.snapshot
+                        .apply_playlist_metadata(std::mem::take(&mut snapshot.playlists), true);
+                    snapshot.playlists = std::mem::take(&mut data.snapshot.playlists);
                     data.snapshot = snapshot;
                     data.intents.reconcile_complete_read(intent_revision);
                 })?;
             }
             UserDataRefresh::Favorites => {
-                let favorites = client.load_favorites().await?;
+                let catalog = self.catalog_repository(generation)?;
+                let favorites = client.load_favorites(catalog.as_ref()).await?;
                 self.publish_initial_user_data(generation, |data| {
                     data.snapshot.favorites = favorites;
                     data.snapshot.has_loaded_favorites = true;
@@ -390,9 +372,19 @@ impl Application {
                 let user_id = self
                     .current_session_user_id(client.as_ref(), generation)
                     .await?;
-                let playlists = client.load_private_playlists(user_id.as_str()).await?;
+                let catalog = self.catalog_repository(generation)?;
+                let mut publisher =
+                    |update| self.apply_initial_user_data_update(generation, update);
+                let playlists = client
+                    .load_private_playlists(
+                        catalog.as_ref(),
+                        user_id.as_str(),
+                        true,
+                        &mut publisher,
+                    )
+                    .await?;
                 self.publish_initial_user_data(generation, |data| {
-                    data.snapshot.playlists = playlists
+                    data.snapshot.apply_playlist_metadata(playlists, true)
                 })?;
             }
             UserDataRefresh::Playlist(item_id) => {
@@ -481,9 +473,11 @@ impl Application {
                     data.snapshot.favorites.set_item(item, true);
                 }
             }
+            InitialUserDataUpdate::PlaylistPage(playlists) => {
+                data.snapshot.apply_playlist_metadata(playlists, false)
+            }
             InitialUserDataUpdate::Playlists(playlists) => {
-                data.snapshot.playlists = playlists;
-                data.snapshot.is_loading_playlists = false;
+                data.snapshot.apply_playlist_metadata(playlists, true)
             }
             InitialUserDataUpdate::PlaylistTracks { item_id, items } => {
                 if let Some(playlist) = data
@@ -581,6 +575,135 @@ impl Application {
             .map(|_| ())
             .map_err(|error| error.message)
     }
+    // Private session-bound playlist commands.
+    async fn create_private_playlist_for_session(
+        &self,
+        name: &str,
+    ) -> Result<UserDataSnapshot, ApplicationError> {
+        if name.trim().is_empty() {
+            return Err(ApplicationError::command_failed("playlist name required"));
+        }
+        let (client, generation) = self.library_repository()?;
+        let user_id = self
+            .current_session_user_id(client.as_ref(), generation)
+            .await
+            .map_err(ApplicationError::command_failed)?;
+        let confirmed = client
+            .create_private_playlist(name.trim(), user_id.as_str())
+            .await
+            .map_err(ApplicationError::command_failed)?;
+        let snapshot = self
+            .publish_and_persist_playlist_for_session(generation, user_id.as_str(), confirmed)
+            .await?;
+        self.schedule_playlist_hydration(generation)
+            .map_err(ApplicationError::command_failed)?;
+        Ok(snapshot)
+    }
+
+    async fn rename_private_playlist_for_session(
+        &self,
+        item_id: &str,
+        name: &str,
+    ) -> Result<UserDataSnapshot, ApplicationError> {
+        if name.trim().is_empty() {
+            return Err(ApplicationError::command_failed("playlist name required"));
+        }
+        let (client, generation) = self.library_repository()?;
+        let user_id = self
+            .current_session_user_id(client.as_ref(), generation)
+            .await
+            .map_err(ApplicationError::command_failed)?;
+        let confirmed = client
+            .rename_private_playlist(item_id, name.trim())
+            .await
+            .map_err(ApplicationError::command_failed)?;
+        self.publish_and_persist_playlist_for_session(generation, user_id.as_str(), confirmed)
+            .await
+    }
+
+    async fn remove_private_playlist_for_session(
+        &self,
+        item_id: &str,
+    ) -> Result<UserDataSnapshot, ApplicationError> {
+        let (client, generation) = self.library_repository()?;
+        self.current_session_user_id(client.as_ref(), generation)
+            .await
+            .map_err(ApplicationError::command_failed)?;
+        let removed = client
+            .remove_private_playlist(item_id)
+            .await
+            .map_err(ApplicationError::command_failed)?;
+        let catalog = self.catalog_repository(generation)?;
+        self.publish_initial_user_data(generation, |data| {
+            data.snapshot.record_playlist_removal(&removed);
+            data.intents
+                .retire_removed_item(&MediaItem::Playlist(removed.clone()));
+            data.favorite_changes.notify_waiters();
+        })
+        .map_err(ApplicationError::command_failed)?;
+        let events = self
+            .coordinator
+            .lock()
+            .map_err(|_| ApplicationError::internal("coordinator lock poisoned"))?
+            .session_events();
+        let persistence = catalog.commit_confirmed_playlist_removal(removed).await;
+        self.finish_playlist_persistence_for_session(generation, events, persistence)
+    }
+
+    // Server metadata is visible before persistence; cache errors do not fail the server command.
+    async fn publish_and_persist_playlist_for_session(
+        &self,
+        generation: u64,
+        user_id: &str,
+        confirmed: Playlist,
+    ) -> Result<UserDataSnapshot, ApplicationError> {
+        let catalog = self.catalog_repository(generation)?;
+        self.publish_initial_user_data(generation, |data| {
+            data.snapshot
+                .record_playlist_metadata(confirmed.clone(), user_id)
+        })
+        .map_err(ApplicationError::command_failed)?;
+        let events = self
+            .coordinator
+            .lock()
+            .map_err(|_| ApplicationError::internal("coordinator lock poisoned"))?
+            .session_events();
+        let persistence = catalog
+            .commit_confirmed_media(MediaItem::Playlist(confirmed))
+            .await;
+        self.finish_playlist_persistence_for_session(generation, events, persistence)
+    }
+
+    fn finish_playlist_persistence_for_session(
+        &self,
+        generation: u64,
+        events: EventPublisher,
+        persistence: Result<(), String>,
+    ) -> Result<UserDataSnapshot, ApplicationError> {
+        let coordinator = self
+            .coordinator
+            .lock()
+            .map_err(|_| ApplicationError::internal("coordinator lock poisoned"))?;
+        if coordinator.session_generation != generation {
+            return Err(ApplicationError::command_failed(
+                "session changed during playlist confirmation",
+            ));
+        }
+        let data = coordinator
+            .user_data
+            .as_ref()
+            .ok_or_else(|| ApplicationError::command_failed("library not initialized"))?;
+        let snapshot = data.project_snapshot();
+        drop(coordinator);
+        if let Err(error) = persistence {
+            events.publish(ApplicationEvent::Error {
+                error: ApplicationError::command_failed(format!(
+                    "playlist cache persistence failed: {error}"
+                )),
+            });
+        }
+        Ok(snapshot)
+    }
     // Private session identity and refresh helpers.
     async fn current_session_user_id(
         &self,
@@ -594,9 +717,355 @@ impl Application {
             .remember_current_user_id(generation, user_id.clone())?;
         Ok(user_id)
     }
-    fn refresh_for_session(&self, generation: u64) -> Result<UserDataSnapshot, ApplicationError> {
-        self.runtime.block_on(
-            self.refresh_user_data_for_session(Some(generation), UserDataRefresh::Playlists),
-        )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::application::events::EventPublisher;
+    use crate::application::favorites::tests::RecordingCatalog;
+    use crate::data::music_assistant::client::tests::server;
+    use crate::domain::identifiers::UserId;
+    use crate::domain::library::PrivatePlaylist;
+    use serde_json::json;
+    use std::sync::Mutex;
+    use std::time::Duration;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn private_playlist_commands_publish_before_commit_retain_cache_failure_and_reject_invalid_confirmation_or_session(
+    ) {
+        for (should_create_playlist, should_remove_playlist) in
+            [(false, false), (true, false), (false, true)]
+        {
+            for (should_fail_commit, should_change_session, should_fail_confirmation) in [
+                (false, false, false),
+                (true, false, false),
+                (false, true, false),
+                (true, true, false),
+                (false, false, true),
+            ] {
+                let original = json!({"media_type":"playlist","provider":"library","item_id":"42","name":"Original","favorite":true,"metadata":{"description":"Old description"},"access":{"owner":"user","sharing":"private"}});
+                let response = if should_fail_confirmation {
+                    json!({"test_http_status":403})
+                } else if should_remove_playlist {
+                    serde_json::Value::Null
+                } else {
+                    json!({"media_type":"playlist","provider":"library","item_id":"42","name":"Server name","favorite":null,"metadata":{"description":"Server description"},"access":{"owner":"user","sharing":"private"}})
+                };
+                let (first_command, confirmation_command) = if should_create_playlist {
+                    (
+                        "music/playlists/create_playlist",
+                        "music/playlists/set_access",
+                    )
+                } else if should_remove_playlist {
+                    ("music/playlists/get", "music/library/remove_item")
+                } else {
+                    ("music/playlists/get", "music/playlists/update")
+                };
+                let mut responses = vec![
+                    (first_command, original.clone()),
+                    (confirmation_command, response),
+                ];
+                if should_create_playlist && !should_change_session && !should_fail_confirmation {
+                    responses.push(("music/playlists/playlist_tracks", json!([])));
+                }
+                let (client, worker) = server(responses);
+                client
+                    .initialize_current_user_id(UserId("user".into()))
+                    .unwrap();
+                let client = Arc::new(client);
+                let release = Arc::new(tokio::sync::Notify::new());
+                let catalog = Arc::new(RecordingCatalog {
+                    online: client.clone(),
+                    writes: Default::default(),
+                    entered: Default::default(),
+                    release: Some(release.clone()),
+                    should_fail_commit,
+                });
+                let events = Arc::new(Mutex::new(Vec::new()));
+                let published = events.clone();
+                let changed = Arc::new(tokio::sync::Notify::new());
+                let published_change = changed.clone();
+                let application = Application::new(
+                    crate::application::tests::environment(),
+                    tokio::runtime::Handle::current(),
+                    EventPublisher::new(move |event| {
+                        published.lock().unwrap().push(event);
+                        published_change.notify_one();
+                    }),
+                    Box::new(crate::application::tests::EmptySessionStorage),
+                );
+                let mut services = crate::bootstrap::session::online_services(client);
+                services.catalog = catalog.clone();
+                let mut data = LibraryState::new(services.library.clone());
+                let original: crate::domain::media::Playlist =
+                    serde_json::from_value(original).unwrap();
+                let old_tracks: Vec<Track> = serde_json::from_value(
+                    json!([{"provider":"library","item_id":"track","name":"Track"}]),
+                )
+                .unwrap();
+                let owned = PrivatePlaylist {
+                    playlist: original.clone(),
+                    items: old_tracks.clone(),
+                    is_loading_tracks: false,
+                };
+                let mut other = owned.clone();
+                other.playlist.media.item_id = MediaId("other".into());
+                other.playlist.media.name = "Other".into();
+                data.snapshot.playlists = if should_create_playlist {
+                    vec![other.clone()]
+                } else {
+                    vec![owned, other.clone()]
+                };
+                if !should_create_playlist {
+                    data.snapshot.favorites.playlists = vec![original.clone()];
+                }
+                let removed_worker = if should_remove_playlist {
+                    let item = MediaItem::Playlist(original.clone());
+                    data.snapshot.favorite_overrides.push(
+                        crate::domain::favorites::FavoriteOverride {
+                            item: item.clone(),
+                            is_favorite: true,
+                        },
+                    );
+                    let (identity, _, _) =
+                        data.intents.submit(&data.snapshot.favorites, item, true);
+                    data.intents.begin_work(&identity);
+                    Some(identity)
+                } else {
+                    None
+                };
+                let previous = data.snapshot.clone();
+                let expected_tracks = if should_create_playlist {
+                    Vec::new()
+                } else {
+                    old_tracks.clone()
+                };
+                let updated_index = usize::from(should_create_playlist);
+                {
+                    let mut coordinator = application.coordinator.lock().unwrap();
+                    coordinator.repositories = Some(services);
+                    coordinator.user_data = Some(data);
+                    coordinator.session_configuration = Some(
+                        serde_json::from_value(json!({
+                            "musicAssistantUrl":"http://127.0.0.1:8095", "accessToken":null,
+                            "userId":"user", "username":"User", "selectedOutput":"local",
+                            "local":{"deviceId":"test","clientName":"Mashin test","cacheBytes":0},
+                            "volume":70
+                        }))
+                        .unwrap(),
+                    );
+                }
+                let operation = application.clone();
+                let mut loading = tokio::spawn(async move {
+                    if should_create_playlist {
+                        operation
+                            .create_private_playlist_for_session(" Requested name ")
+                            .await
+                    } else if should_remove_playlist {
+                        operation.remove_private_playlist_for_session("42").await
+                    } else {
+                        operation
+                            .rename_private_playlist_for_session("42", " Requested name ")
+                            .await
+                    }
+                });
+                if should_fail_confirmation {
+                    assert!(tokio::time::timeout(Duration::from_secs(2), loading)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_err());
+                    assert_eq!(
+                        application
+                            .coordinator
+                            .lock()
+                            .unwrap()
+                            .user_data
+                            .as_ref()
+                            .unwrap()
+                            .snapshot,
+                        previous
+                    );
+                    assert!(events.lock().unwrap().is_empty());
+                    assert!(catalog.writes.lock().unwrap().is_empty());
+                    assert_eq!(worker.join().unwrap().len(), 2);
+                    continue;
+                }
+                tokio::select! {
+                    result = &mut loading => panic!("playlist command ended before cache commit: {result:?}"),
+                    result = tokio::time::timeout(Duration::from_secs(2), catalog.entered.notified()) => result.unwrap(),
+                }
+                {
+                    let coordinator = application.coordinator.lock().unwrap();
+                    let data = coordinator.user_data.as_ref().unwrap();
+                    let snapshot = &data.snapshot;
+                    if should_remove_playlist {
+                        assert_eq!(snapshot.playlists, vec![other.clone()]);
+                        assert!(snapshot.favorites.playlists.is_empty());
+                        assert!(snapshot.favorite_overrides.is_empty());
+                        let identity = removed_worker.as_ref().unwrap();
+                        assert!(!data.intents.has_active_worker(identity));
+                        assert_eq!(
+                            data.intents.work(identity),
+                            crate::domain::favorites::FavoriteWork::Finished
+                        );
+                        assert!(data.project_snapshot().favorites.playlists.is_empty());
+                    } else {
+                        assert_eq!(
+                            snapshot.playlists[updated_index].playlist.media.name,
+                            "Server name"
+                        );
+                        assert_eq!(snapshot.playlists[updated_index].items, expected_tracks);
+                        assert_eq!(
+                            snapshot.playlists[updated_index].is_loading_tracks,
+                            should_create_playlist
+                        );
+                        assert_eq!(
+                            snapshot.playlists[usize::from(!should_create_playlist)],
+                            other
+                        );
+                        if should_create_playlist {
+                            assert!(snapshot.favorites.playlists.is_empty());
+                        } else {
+                            assert_eq!(snapshot.favorites.playlists[0].media.name, "Server name");
+                        }
+                    }
+                }
+                assert_eq!(
+                    events
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|event| matches!(event, ApplicationEvent::UserDataChanged))
+                        .count(),
+                    1
+                );
+                assert!(!loading.is_finished());
+                if should_change_session {
+                    let mut coordinator = application.coordinator.lock().unwrap();
+                    coordinator.session_generation += 1;
+                    coordinator.user_data.as_mut().unwrap().snapshot.playlists =
+                        vec![other.clone()];
+                }
+                release.notify_one();
+                let result = tokio::time::timeout(Duration::from_secs(2), loading)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                if should_change_session {
+                    assert!(result.is_err());
+                    assert_eq!(
+                        application
+                            .coordinator
+                            .lock()
+                            .unwrap()
+                            .user_data
+                            .as_ref()
+                            .unwrap()
+                            .snapshot
+                            .playlists,
+                        vec![other]
+                    );
+                    assert!(!events
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .any(|event| matches!(event, ApplicationEvent::Error { .. })));
+                } else {
+                    let snapshot = result.unwrap();
+                    if should_remove_playlist {
+                        assert_eq!(snapshot.playlists, vec![other.clone()]);
+                        assert!(snapshot.favorites.playlists.is_empty());
+                        assert!(snapshot.favorite_overrides.is_empty());
+                    } else {
+                        assert_eq!(
+                            snapshot.playlists[updated_index].playlist.media.name,
+                            "Server name"
+                        );
+                        assert_eq!(snapshot.playlists[updated_index].items, expected_tracks);
+                    }
+                    if should_create_playlist {
+                        tokio::time::timeout(Duration::from_secs(2), async {
+                            loop {
+                                let notification = changed.notified();
+                                let has_loaded_tracks = !application
+                                    .coordinator
+                                    .lock()
+                                    .unwrap()
+                                    .user_data
+                                    .as_ref()
+                                    .unwrap()
+                                    .snapshot
+                                    .playlists[updated_index]
+                                    .is_loading_tracks;
+                                if has_loaded_tracks {
+                                    break;
+                                }
+                                notification.await;
+                            }
+                        })
+                        .await
+                        .unwrap();
+                        let coordinator = application.coordinator.lock().unwrap();
+                        let hydrated = &coordinator.user_data.as_ref().unwrap().snapshot;
+                        assert!(hydrated.playlists[updated_index].items.is_empty());
+                        assert_eq!(hydrated.playlists[0], other);
+                        assert!(hydrated.favorites.playlists.is_empty());
+                    }
+                    assert_eq!(
+                        events
+                            .lock()
+                            .unwrap()
+                            .iter()
+                            .filter(|event| matches!(event, ApplicationEvent::Error { .. }))
+                            .count(),
+                        usize::from(should_fail_commit)
+                    );
+                }
+                assert_eq!(catalog.writes.lock().unwrap().len(), 1);
+                assert_eq!(
+                    catalog.writes.lock().unwrap()[0].fields().name,
+                    if should_remove_playlist {
+                        "Original"
+                    } else {
+                        "Server name"
+                    }
+                );
+                assert_eq!(
+                    events
+                        .lock()
+                        .unwrap()
+                        .iter()
+                        .filter(|event| matches!(event, ApplicationEvent::UserDataChanged))
+                        .count(),
+                    if should_create_playlist && !should_change_session {
+                        2
+                    } else {
+                        1
+                    }
+                );
+                let requests = worker.join().unwrap();
+                assert_eq!(
+                    requests.len(),
+                    if should_create_playlist && !should_change_session {
+                        3
+                    } else {
+                        2
+                    }
+                );
+                if should_create_playlist {
+                    assert_eq!(requests[0]["args"]["name"], "Requested name");
+                    assert_eq!(requests[1]["args"]["owner"], "user");
+                } else if should_remove_playlist {
+                    assert_eq!(
+                        requests[1]["args"],
+                        json!({"media_type":"playlist","library_item_id":"42"})
+                    );
+                } else {
+                    assert_eq!(requests[1]["args"]["update"]["name"], "Requested name");
+                }
+            }
+        }
     }
 }

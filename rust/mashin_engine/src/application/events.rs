@@ -15,10 +15,18 @@ pub(crate) enum ApplicationEvent {
         player_state: PlayerState,
     },
     RecommendationsChanged,
+    RecommendationsUpdated {
+        view: crate::domain::recommendations::RecommendationView,
+        snapshot: crate::domain::recommendations::RecommendationSnapshot,
+    },
     UserDataChanged,
     CatalogUpdated {
         query: crate::domain::catalog::CatalogQuery,
         value: crate::domain::catalog::CatalogValue,
+    },
+    CatalogReadChanged {
+        query: crate::domain::catalog::CatalogQuery,
+        snapshot: crate::domain::catalog::CatalogLoadSnapshot,
     },
     #[serde(rename = "core_error")]
     Error {

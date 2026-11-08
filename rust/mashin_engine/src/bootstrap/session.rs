@@ -8,17 +8,27 @@ use std::path::PathBuf;
 
 // Session configuration and online capability composition.
 pub(crate) fn environment() -> crate::application::session::SessionEnvironment {
+    let cache_owner=std::sync::Arc::new(crate::data::cache::catalog::CatalogCacheOwner::new(application_data_directory));
+    let shutdown_owner=cache_owner.clone();
     crate::application::session::SessionEnvironment {
         authenticate: |login| Box::pin(crate::data::music_assistant::session::authenticate(login)),
         client_name: local_client_name,
         connect: crate::data::music_assistant::connection::MusicAssistantConnection::new,
         app_settings: std::sync::Arc::new(ConfigurationFile::new(configuration_path)),
-        repositories: |client, server, user| {
+        repositories: std::sync::Arc::new(move |client, _server, user, generation| {
+            let cache_owner=cache_owner.clone();
             Box::pin(async move {
-                let _ = (server, user);
-                Ok(online_services(client))
+                let catalog=cache_owner.session(client.clone(),user,generation);
+                let mut services=online_services(client);
+                services.catalog=std::sync::Arc::new(catalog);
+                services.recommendations=std::sync::Arc::new(crate::application::recommendations::Recommendations::new(services.catalog.clone()));
+                Ok(services)
             })
-        },
+        }),
+        shutdown_repositories: std::sync::Arc::new(move |generation| {
+            let owner=shutdown_owner.clone();
+            Box::pin(async move {owner.shutdown(generation).await})
+        }),
     }
 }
 

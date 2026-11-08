@@ -39,7 +39,7 @@ pub(crate) async fn load_initial_session_data(
     );
     let user_load = with_request_priority(
         RequestPriority::Startup,
-        load_initial_user_data(library, user_data_publisher),
+        load_initial_user_data(library, catalog, user_data_publisher),
     );
     let (recommendation_data, mut user_data) = tokio::join!(recommendation_load, user_load);
     if let Some(error) = publication_error {
@@ -54,17 +54,22 @@ pub(crate) async fn load_initial_session_data(
 // The phase order is independent of UI subscriptions and optional track/image downloads.
 pub(crate) async fn load_initial_user_data(
     library: &dyn LibraryClient,
+    catalog: &dyn CatalogClient,
     mut publisher: impl UserDataPublisher,
 ) -> Result<(), String> {
     let user_id = library.get_current_user_id().await?;
     publisher
         .publish(InitialUserDataUpdate::UserIdentity(user_id.clone()))
         .await?;
-    let playlists = library.load_private_playlists(user_id.as_str()).await?;
+    let playlists = library
+        .load_private_playlists(catalog, user_id.as_str(), false, &mut publisher)
+        .await?;
     publisher
         .publish(InitialUserDataUpdate::Playlists(playlists))
         .await?;
-    let favorites = library.load_favorite_pages(&mut publisher).await?;
+    let favorites = library
+        .load_favorite_pages(catalog, false, &mut publisher)
+        .await?;
     publisher
         .publish(InitialUserDataUpdate::Favorites(favorites))
         .await

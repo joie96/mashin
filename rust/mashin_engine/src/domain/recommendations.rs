@@ -4,7 +4,7 @@ use super::identifiers::{MediaId, ProviderInstanceId};
 use super::media::{MediaItem, Track};
 use serde::{Deserialize, Serialize};
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum RecommendationView {
     Home,

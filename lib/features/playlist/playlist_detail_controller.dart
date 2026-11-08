@@ -23,6 +23,9 @@ class PlaylistDetailController extends ChangeNotifier {
        ) {
     userDataController?.addListener(_onUserDataChanged);
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+    _catalogReadSubscription = coreBridge.catalogReadChanges.listen(
+      _onCatalogReadChange,
+    );
   }
 
   final MashinCoreBridgeApi coreBridge;
@@ -31,6 +34,9 @@ class PlaylistDetailController extends ChangeNotifier {
   final UserData? userDataController;
   final DetailProviderSelection sectionProvider;
   StreamSubscription<CatalogUpdate>? _catalogSubscription;
+  StreamSubscription<CatalogReadChange>? _catalogReadSubscription;
+  final ChangeNotifier _readStatusNotifier = ChangeNotifier();
+  CatalogReadChange? _tracksReadState;
   bool _isSelectingProvider = false;
 
   Playlist? _playlist;
@@ -88,6 +94,8 @@ class PlaylistDetailController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     unawaited(_catalogSubscription?.cancel());
+    unawaited(_catalogReadSubscription?.cancel());
+    _readStatusNotifier.dispose();
     _queryScope.cancel();
     _loadGeneration++;
     userDataController?.removeListener(_onUserDataChanged);
@@ -96,6 +104,8 @@ class PlaylistDetailController extends ChangeNotifier {
 
   Playlist? get playlist => _playlist;
   List<Track> get tracks => _tracks;
+  CatalogReadChange? get tracksReadState => _tracksReadState;
+  Listenable get readStatusListenable => _readStatusNotifier;
 
   bool get isLoadingMetadata => _isLoadingMetadata;
   bool get isLoadingTracks => _isLoadingTracks;
@@ -157,15 +167,40 @@ class PlaylistDetailController extends ChangeNotifier {
       sectionProvider.selectedItemId,
       sectionProvider.selectedProvider,
     )) {
-      _tracks = update.tracks
-          .map(
-            (track) => userDataController?.withFavoriteStatus(track) ?? track,
-          )
-          .toList(growable: false);
+      final incoming = List<Track>.unmodifiable(
+        update.tracks.map(
+          (track) => userDataController?.withFavoriteStatus(track) ?? track,
+        ),
+      );
+      final hasChangedTracks = !hasSameMediaListContent(_tracks, incoming);
+      if (!hasChangedTracks && !_isLoadingTracks) return;
+      if (hasChangedTracks) _tracks = incoming;
+      _isLoadingTracks = false;
     } else {
       return;
     }
     notifyListeners();
+  }
+
+  void _onCatalogReadChange(CatalogReadChange change) {
+    if (_isLoadCanceled || !_isPageVisible || change.allowDynamicTracks == true)
+      return;
+    if (!change.matches(
+      CatalogQueryKind.playlistTracks,
+      sectionProvider.selectedItemId,
+      sectionProvider.selectedProvider,
+    )) return;
+    _tracksReadState = change;
+    _readStatusNotifier.notifyListeners();
+    if (change.phase == CatalogLoadPhase.invalidated) {
+      _loadGeneration++;
+      _queryScope.cancel();
+      _loadingFuture = null;
+      _tracks = const <Track>[];
+      _isLoadingTracks = false;
+      _requiresReload = true;
+      super.notifyListeners();
+    }
   }
 
   Future<void> loadPlaylist() {
@@ -392,7 +427,7 @@ class PlaylistDetailController extends ChangeNotifier {
         return;
       }
 
-      _tracks = List<Track>.unmodifiable(
+      final incoming = List<Track>.unmodifiable(
         loaded
             .map((Track track) {
               final Track withFavorite =
@@ -402,12 +437,11 @@ class PlaylistDetailController extends ChangeNotifier {
             })
             .toList(growable: false),
       );
-      unawaited(_loadTrackAlbums(loadGeneration, _tracks));
-    } catch (_) {
-      if (!_isDisposed && loadGeneration == _loadGeneration) {
-        _tracks = const <Track>[];
+      if (!hasSameMediaListContent(_tracks, incoming)) {
+        _tracks = incoming;
+        unawaited(_loadTrackAlbums(loadGeneration, _tracks));
       }
-    }
+    } catch (_) {}
   }
 
   // Enriches online tracks without delaying the initial playlist display.

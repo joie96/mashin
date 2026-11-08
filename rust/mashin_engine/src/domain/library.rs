@@ -96,6 +96,107 @@ impl PrivatePlaylist {
 }
 
 impl UserDataSnapshot {
+    // Confirmed removal clears only the deleted library identity from visible projections.
+    pub(crate) fn record_playlist_removal(&mut self, playlist: &Playlist) {
+        let matches = |item: &Playlist| {
+            item.media.provider == playlist.media.provider
+                && item.media.item_id == playlist.media.item_id
+        };
+        self.playlists.retain(|entry| !matches(&entry.playlist));
+        self.favorites.playlists.retain(|entry| !matches(entry));
+        self.favorite_overrides
+            .retain(|entry| !matches!(&entry.item, MediaItem::Playlist(item) if matches(item)));
+    }
+
+    // Metadata confirmations preserve track hydration and separately owned favorite intent.
+    pub(crate) fn record_playlist_metadata(&mut self, mut playlist: Playlist, user_id: &str) {
+        let mut metadata = playlist.clone();
+        metadata.media.favorite = FieldKnowledge::Unknown;
+        for favorite in &mut self.favorites.playlists {
+            if favorite.media.provider == metadata.media.provider
+                && favorite.media.item_id == metadata.media.item_id
+            {
+                let mut merged = MediaItem::Playlist(favorite.clone());
+                merged.merge_known(MediaItem::Playlist(metadata.clone()));
+                if let MediaItem::Playlist(updated) = merged {
+                    *favorite = updated;
+                }
+            }
+        }
+        for entry in &mut self.favorite_overrides {
+            if entry.item.fields().provider == metadata.media.provider
+                && entry.item.fields().item_id == metadata.media.item_id
+            {
+                entry
+                    .item
+                    .merge_known(MediaItem::Playlist(metadata.clone()));
+            }
+        }
+        let existing = self.playlists.iter().position(|entry| {
+            entry.playlist.media.provider == metadata.media.provider
+                && entry.playlist.media.item_id == metadata.media.item_id
+        });
+        if let Some(index) = existing {
+            let mut merged = MediaItem::Playlist(self.playlists[index].playlist.clone());
+            merged.merge_known(MediaItem::Playlist(metadata));
+            if let MediaItem::Playlist(updated) = merged {
+                playlist = updated;
+            }
+        }
+        let is_owned_private = playlist.access.as_ref().is_some_and(|access| {
+            access.owner.as_deref() == Some(user_id)
+                && access.sharing == super::media::PlaylistSharing::Private
+        });
+        match (existing, is_owned_private) {
+            (Some(index), true) => self.playlists[index].playlist = playlist,
+            (Some(index), false) => {
+                self.playlists.remove(index);
+            }
+            (None, true) => self.playlists.push(PrivatePlaylist {
+                playlist,
+                items: Vec::new(),
+                is_loading_tracks: true,
+            }),
+            (None, false) => {}
+        }
+    }
+
+    // Metadata pages preserve hydrated tracks; only a complete read removes unseen playlists.
+    pub(crate) fn apply_playlist_metadata(
+        &mut self,
+        mut playlists: Vec<PrivatePlaylist>,
+        has_observed_all_pages: bool,
+    ) {
+        for playlist in &mut playlists {
+            if let Some(previous) = self.playlists.iter().find(|previous| {
+                previous.playlist.media.provider == playlist.playlist.media.provider
+                    && previous.playlist.media.item_id == playlist.playlist.media.item_id
+            }) {
+                let mut merged = MediaItem::Playlist(previous.playlist.clone());
+                merged.merge_known(MediaItem::Playlist(playlist.playlist.clone()));
+                if let MediaItem::Playlist(metadata) = merged {
+                    playlist.playlist = metadata;
+                }
+                if playlist.is_loading_tracks {
+                    playlist.items = previous.items.clone();
+                    playlist.is_loading_tracks = previous.is_loading_tracks;
+                }
+            }
+        }
+        if !has_observed_all_pages {
+            for previous in &self.playlists {
+                if !playlists.iter().any(|playlist| {
+                    playlist.playlist.media.provider == previous.playlist.media.provider
+                        && playlist.playlist.media.item_id == previous.playlist.media.item_id
+                }) {
+                    playlists.push(previous.clone());
+                }
+            }
+        }
+        self.playlists = playlists;
+        self.is_loading_playlists = !has_observed_all_pages;
+    }
+
     // Command knowledge remains visible while a complete favorite listing is unavailable.
     pub(crate) fn record_favorite_state(&mut self, item: MediaItem, is_favorite: bool) {
         self.favorites.set_item(item.clone(), is_favorite);
@@ -109,6 +210,78 @@ impl UserDataSnapshot {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn confirmed_playlist_metadata_preserves_hydrated_contents_and_favorite_intent() {
+        let mut snapshot: UserDataSnapshot = serde_json::from_value(serde_json::json!({"playlists":[
+            {"provider":"library","item_id":"owned","name":"Old","favorite":true,"access":{"owner":"user","sharing":"private"},"items":[{"provider":"library","item_id":"track","name":"Track"}],"is_loading_tracks":false},
+            {"provider":"library","item_id":"other","name":"Keep","items":[],"is_loading_tracks":false}
+        ]})).unwrap();
+        let original = snapshot.playlists[0].clone();
+        let other = snapshot.playlists[1].clone();
+        snapshot.favorites.playlists.push(original.playlist.clone());
+        snapshot.favorite_overrides.push(FavoriteOverride {
+            item: MediaItem::Playlist(original.playlist),
+            is_favorite: true,
+        });
+        let confirmed = serde_json::from_value(serde_json::json!({"provider":"library","item_id":"owned","name":"Confirmed","favorite":null,"access":{"owner":"user","sharing":"private"}})).unwrap();
+        snapshot.record_playlist_metadata(confirmed, "user");
+        assert_eq!(snapshot.playlists[0].playlist.media.name, "Confirmed");
+        assert_eq!(snapshot.playlists[0].items, original.items);
+        assert!(!snapshot.playlists[0].is_loading_tracks);
+        assert_eq!(snapshot.playlists[1], other);
+        assert!(!snapshot.is_loading_playlists);
+        assert_eq!(snapshot.favorites.playlists[0].media.name, "Confirmed");
+        assert_eq!(
+            snapshot.favorites.playlists[0].media.favorite,
+            FieldKnowledge::Known(Some(true))
+        );
+        assert!(snapshot.favorite_overrides[0].is_favorite);
+        assert_eq!(
+            snapshot.favorite_overrides[0].item.fields().name,
+            "Confirmed"
+        );
+    }
+
+    #[test]
+    fn private_playlist_metadata_preserves_tracks_and_removes_unseen_only_after_completion() {
+        let mut snapshot: UserDataSnapshot = serde_json::from_value(serde_json::json!({"playlists":[
+            {"provider":"library","item_id":"owned","name":"Old","metadata":{"description":"Details"},"items":[{"provider":"library","item_id":"track","name":"Track"}],"is_loading_tracks":false},
+            {"provider":"library","item_id":"empty","name":"Empty","items":[],"is_loading_tracks":false},
+            {"provider":"library","item_id":"unseen","name":"Unseen","items":[],"is_loading_tracks":true}
+        ]})).unwrap();
+        let page: Vec<PrivatePlaylist> = serde_json::from_value(serde_json::json!([
+            {"provider":"library","item_id":"owned","name":"New","is_loading_tracks":true},
+            {"provider":"library","item_id":"empty","name":"Empty","is_loading_tracks":true}
+        ]))
+        .unwrap();
+        snapshot.apply_playlist_metadata(page.clone(), false);
+        assert_eq!(snapshot.playlists.len(), 3);
+        assert!(snapshot.is_loading_playlists);
+        assert_eq!(snapshot.playlists[0].items.len(), 1);
+        assert_eq!(snapshot.playlists[0].playlist.media.name, "New");
+        assert_eq!(
+            snapshot.playlists[0]
+                .playlist
+                .media
+                .metadata
+                .as_ref()
+                .unwrap()
+                .description
+                .as_deref(),
+            Some("Details")
+        );
+        assert!(!snapshot.playlists[0].is_loading_tracks);
+        assert!(!snapshot.playlists[1].is_loading_tracks);
+        snapshot.apply_playlist_metadata(Vec::new(), false);
+        assert_eq!(snapshot.playlists.len(), 3);
+        snapshot.apply_playlist_metadata(page, true);
+        assert_eq!(snapshot.playlists.len(), 2);
+        assert!(!snapshot.is_loading_playlists);
+        assert_eq!(snapshot.playlists[0].items.len(), 1);
+        snapshot.apply_playlist_metadata(Vec::new(), true);
+        assert!(snapshot.playlists.is_empty());
+    }
 
     fn track(favorite: Option<bool>) -> MediaItem {
         MediaItem::Track(

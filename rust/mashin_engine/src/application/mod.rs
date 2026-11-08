@@ -98,9 +98,10 @@ pub(crate) mod tests {
             client_name: || "Mashin (Test)".into(),
             connect: crate::data::music_assistant::connection::MusicAssistantConnection::new,
             app_settings: Arc::new(TestAppSettings::default()),
-            repositories: |client, _server, _user| {
+            repositories: Arc::new(|client, _server, _user, _generation| {
                 Box::pin(async move { Ok(crate::bootstrap::session::online_services(client)) })
-            },
+            }),
+            shutdown_repositories: Arc::new(|_|Box::pin(std::future::ready(Ok(())))),
         }
     }
 

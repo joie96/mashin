@@ -63,7 +63,7 @@ impl Application {
                 ApplicationError::command_failed("a restored session is required")
             })?;
             (
-                coordinator.environment.repositories,
+                coordinator.environment.repositories.clone(),
                 connection.client.clone(),
                 connection.server_url.clone(),
                 coordinator
@@ -72,7 +72,7 @@ impl Application {
                     .and_then(|session| session.user_id.clone()),
             )
         };
-        let repositories = factory(client, server, user)
+        let repositories = factory(client, server, user, expected_generation)
             .await
             .map_err(ApplicationError::command_failed)?;
         let accepted = {
@@ -451,6 +451,9 @@ pub(crate) fn project_catalog_availability(
         CatalogValue::Artist(item) => project_fields_availability(&mut item.media, providers),
         CatalogValue::Album(item) => project_album_availability(item, providers),
         CatalogValue::Playlist(item) => project_fields_availability(&mut item.media, providers),
+        CatalogValue::Playlists(items) => items
+            .iter_mut()
+            .for_each(|item| project_fields_availability(&mut item.media, providers)),
         CatalogValue::Track(item) => project_track_availability(item, providers),
         CatalogValue::Item(item) => project_item_availability(item, providers),
         CatalogValue::Tracks(items) => items

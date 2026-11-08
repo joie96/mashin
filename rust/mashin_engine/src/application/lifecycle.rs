@@ -17,12 +17,18 @@ impl Application {
             .command_serializer
             .lock()
             .map_err(|_| ApplicationError::internal("core command serializer lock poisoned"))?;
-        self.coordinator
-            .lock()
-            .map_err(|_| ApplicationError::internal("core coordinator lock poisoned"))?
-            .shutdown();
+        let (shutdown_repositories,generation)={
+            let mut coordinator=self.coordinator.lock()
+                .map_err(|_|ApplicationError::internal("core coordinator lock poisoned"))?;
+            coordinator.shutdown();
+            (coordinator.environment.shutdown_repositories.clone(),coordinator.session_generation)
+        };
         drop(_command_guard);
-        self.join_retired_session_work()
+        let completion=self.join_retired_session_work();
+        let cache_completion=self.runtime.block_on(shutdown_repositories(generation))
+            .map_err(ApplicationError::command_failed);
+        completion?;
+        cache_completion
     }
 
     pub(crate) fn restore_persisted_session_and_collect_events(

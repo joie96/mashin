@@ -31,7 +31,19 @@ class HomeController extends ChangeNotifier {
           notifyListeners();
         }
       }
-      if (_hasStartedLoading && event['type'] == 'recommendations_changed') {
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'recommendations_updated' &&
+          event['view'] == 'home') {
+        _applyRecommendationSnapshot(
+          RecommendationSnapshot.fromJson(
+            event['snapshot'] as Map<String, dynamic>,
+          ),
+        );
+      }
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'recommendations_changed') {
         unawaited(_refreshRecommendationFolders());
       }
       if (!_isDisposed &&
@@ -232,6 +244,7 @@ class HomeController extends ChangeNotifier {
       if (_isDisposed) return;
       _applyRecommendationSnapshot(snapshot);
     } catch (_) {
+      if (_isDisposed) return;
       _hasLoadError = true;
       _isLoadingRecommendations = false;
       _isLoadingGenrePlaylists = false;
@@ -239,13 +252,28 @@ class HomeController extends ChangeNotifier {
       _isLoadingTopTracks = false;
       _isLoadingTopArtists = false;
       _isLoadingArtistSections = false;
-    } finally {
       _notifyRecommendationSections();
       notifyListeners();
     }
   }
 
   void _applyRecommendationSnapshot(RecommendationSnapshot snapshot) {
+    if (_isDisposed) return;
+    final previousRecommendations = _recommendationItems;
+    final previousGenrePlaylists = _genrePlaylists;
+    final previousArtistPlaylists = _artistPlaylists;
+    final previousTopTracks = _topTracks;
+    final previousTopArtists = _topArtists;
+    final previousArtistSections = _artistSections;
+    final previousLoading = [
+      _isLoadingRecommendations,
+      _isLoadingGenrePlaylists,
+      _isLoadingPlaylists,
+      _isLoadingTopTracks,
+      _isLoadingTopArtists,
+      _isLoadingArtistSections,
+    ];
+    final hadLoadError = _hasLoadError;
     _hasLoadError = snapshot.hasLoadError;
     final List<RecommendationFolder> recommendationFolders = snapshot.folders
         .where((folder) => folder.itemId.trim().isNotEmpty)
@@ -256,28 +284,40 @@ class HomeController extends ChangeNotifier {
     );
     if (!snapshot.isFolderLoading('user_recommendations') &&
         !snapshot.hasFolderLoadError('user_recommendations')) {
-      if (!_hasLoadedRecommendations) _shuffle(recommendations);
+      if (!_hasLoadedRecommendations) {
+        _shuffle(recommendations);
+      } else {
+        _preserveSelectedOrder(_recommendationItems, recommendations);
+      }
       _recommendationItems = _withFavoriteStatuses(recommendations);
       _hasLoadedRecommendations = true;
     }
-    _genrePlaylists = _withFavoriteStatuses(
-      _playlistsFromFolder(
-        recommendationFolders,
-        'user_genre_playlists_monthly',
-      ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
-    );
-    _artistPlaylists = _withFavoriteStatuses(
-      _playlistsFromFolder(
-        recommendationFolders,
-        'user_artist_playlists_monthly',
-      ).map(_withNormalizedPlaylistName).toList(growable: false),
-    );
-    _topTracks = _withFavoriteStatuses(
-      _tracksFromFolder(recommendationFolders, 'user_top_tracks_monthly'),
-    );
-    _topArtists = _withFavoriteStatuses(
-      _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
-    );
+    if (_canApplyFolder(snapshot, 'user_genre_playlists_monthly')) {
+      _genrePlaylists = _withFavoriteStatuses(
+        _playlistsFromFolder(
+          recommendationFolders,
+          'user_genre_playlists_monthly',
+        ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
+      );
+    }
+    if (_canApplyFolder(snapshot, 'user_artist_playlists_monthly')) {
+      _artistPlaylists = _withFavoriteStatuses(
+        _playlistsFromFolder(
+          recommendationFolders,
+          'user_artist_playlists_monthly',
+        ).map(_withNormalizedPlaylistName).toList(growable: false),
+      );
+    }
+    if (_canApplyFolder(snapshot, 'user_top_tracks_monthly')) {
+      _topTracks = _withFavoriteStatuses(
+        _tracksFromFolder(recommendationFolders, 'user_top_tracks_monthly'),
+      );
+    }
+    if (_canApplyFolder(snapshot, 'user_top_artists_monthly')) {
+      _topArtists = _withFavoriteStatuses(
+        _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
+      );
+    }
     final List<HomeArtistSection> genreSections = _artistSectionsFromFolders(
       recommendationFolders,
       'user_genre_artists_',
@@ -286,12 +326,16 @@ class HomeController extends ChangeNotifier {
       recommendationFolders,
       'user_similar_artists_',
     );
-    _artistSections = <HomeArtistSection>[
+    final artistSections = <HomeArtistSection>[
       for (int index = 0; index < 2; index++) ...<HomeArtistSection>[
         if (index < genreSections.length) genreSections[index],
         if (index < similarSections.length) similarSections[index],
       ],
     ];
+    if (artistSections.isNotEmpty ||
+        (!snapshot.isLoading && !snapshot.hasLoadError)) {
+      _artistSections = artistSections;
+    }
     _isLoadingRecommendations = snapshot.isFolderLoading(
       'user_recommendations',
     );
@@ -304,6 +348,83 @@ class HomeController extends ChangeNotifier {
     _isLoadingTopTracks = snapshot.isFolderLoading('user_top_tracks_monthly');
     _isLoadingTopArtists = snapshot.isFolderLoading('user_top_artists_monthly');
     _isLoadingArtistSections = snapshot.isLoading && _artistSections.isEmpty;
+    _recommendationItems = _retainMediaList(
+      previousRecommendations,
+      _recommendationItems,
+    );
+    _genrePlaylists = _retainMediaList(previousGenrePlaylists, _genrePlaylists);
+    _artistPlaylists = _retainMediaList(
+      previousArtistPlaylists,
+      _artistPlaylists,
+    );
+    _topTracks = _retainMediaList(previousTopTracks, _topTracks);
+    _topArtists = _retainMediaList(previousTopArtists, _topArtists);
+    if (previousArtistSections.length == _artistSections.length &&
+        List.generate(
+          _artistSections.length,
+          (index) =>
+              previousArtistSections[index].title ==
+                  _artistSections[index].title &&
+              hasSameMediaListContent(
+                previousArtistSections[index].artists,
+                _artistSections[index].artists,
+              ),
+        ).every((isEqual) => isEqual)) {
+      _artistSections = previousArtistSections;
+    }
+    final changes = [
+      !identical(previousRecommendations, _recommendationItems) ||
+          previousLoading[0] != _isLoadingRecommendations,
+      !identical(previousGenrePlaylists, _genrePlaylists) ||
+          previousLoading[1] != _isLoadingGenrePlaylists,
+      !identical(previousArtistPlaylists, _artistPlaylists) ||
+          previousLoading[2] != _isLoadingPlaylists,
+      !identical(previousTopTracks, _topTracks) ||
+          previousLoading[3] != _isLoadingTopTracks,
+      !identical(previousTopArtists, _topArtists) ||
+          previousLoading[4] != _isLoadingTopArtists,
+      !identical(previousArtistSections, _artistSections) ||
+          previousLoading[5] != _isLoadingArtistSections,
+    ];
+    final notifiers = [
+      _recommendationsNotifier,
+      _genrePlaylistsNotifier,
+      _artistPlaylistsNotifier,
+      _topTracksNotifier,
+      _topArtistsNotifier,
+      _artistSectionsNotifier,
+    ];
+    for (var index = 0; index < changes.length; index++) {
+      if (changes[index]) _notifySection(notifiers[index]);
+    }
+    if (changes.any((hasChanged) => hasChanged) ||
+        hadLoadError != _hasLoadError)
+      notifyListeners();
+  }
+
+  // Retain view selections and unchanged content across cache/server publications.
+  bool _canApplyFolder(RecommendationSnapshot snapshot, String itemId) =>
+      !snapshot.isFolderLoading(itemId) && !snapshot.hasFolderLoadError(itemId);
+
+  List<T> _retainMediaList<T extends MediaItem>(
+    List<T> previous,
+    List<T> incoming,
+  ) => hasSameMediaListContent(previous, incoming) ? previous : incoming;
+
+  void _preserveSelectedOrder<T extends MediaItem>(
+    List<T> previous,
+    List<T> incoming,
+  ) {
+    final order = {
+      for (var index = 0; index < previous.length; index++)
+        (previous[index].provider, previous[index].itemId): index,
+    };
+    incoming.sort(
+      (first, second) =>
+          (order[(first.provider, first.itemId)] ?? previous.length).compareTo(
+            order[(second.provider, second.itemId)] ?? previous.length,
+          ),
+    );
   }
 
   Future<void> _loadRecentListens() async {
@@ -407,23 +528,35 @@ class HomeController extends ChangeNotifier {
     });
     final sections = <HomeArtistSection>[];
     for (final identity in selected) {
-      final folder = candidates.firstWhere(
+      final matches = candidates.where(
         (folder) => (folder.provider, folder.itemId) == identity,
       );
+      if (matches.isEmpty) continue;
+      final folder = matches.first;
       if (folder.isLoading || folder.hasLoadError) continue;
-      final section = _loadedArtistSections.putIfAbsent(identity, () {
-        final artists = folder.items
-            .whereType<Artist>()
-            .where(_isValidPlayable)
-            .toList();
+      final previous = _loadedArtistSections[identity];
+      final artists = folder.items
+          .whereType<Artist>()
+          .where(_isValidPlayable)
+          .toList();
+      if (previous == null) {
         _shuffle(artists);
-        return HomeArtistSection(
-          title: prefix == 'user_similar_artists_'
-              ? _normalizeSimilarArtistSectionTitle(folder.title)
-              : folder.title,
-          artists: artists,
-        );
-      });
+      } else {
+        _preserveSelectedOrder(previous.artists, artists);
+      }
+      final candidate = HomeArtistSection(
+        title: prefix == 'user_similar_artists_'
+            ? _normalizeSimilarArtistSectionTitle(folder.title)
+            : folder.title,
+        artists: artists,
+      );
+      final section =
+          previous != null &&
+              previous.title == candidate.title &&
+              hasSameMediaListContent(previous.artists, candidate.artists)
+          ? previous
+          : candidate;
+      _loadedArtistSections[identity] = section;
       if (section.artists.isNotEmpty) {
         sections.add(
           HomeArtistSection(

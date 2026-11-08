@@ -39,14 +39,16 @@ pub(crate) struct SessionEnvironment {
         )
             -> Result<crate::data::music_assistant::connection::MusicAssistantConnection, String>,
     pub(crate) app_settings: Arc<dyn super::settings::AppSettingsStorage>,
-    pub(crate) repositories: fn(
+    pub(crate) repositories: Arc<dyn Fn(
         Arc<crate::data::music_assistant::client::MusicAssistantClient>,
         crate::domain::session::MusicAssistantServerUrl,
         Option<UserId>,
+        u64,
     ) -> futures_util::future::BoxFuture<
         'static,
         Result<super::repositories::SessionServices, String>,
-    >,
+    > + Send + Sync>,
+    pub(crate) shutdown_repositories: Arc<dyn Fn(u64)->futures_util::future::BoxFuture<'static,Result<(),String>> + Send + Sync>,
 }
 
 pub(crate) struct AuthenticatedIdentity {
