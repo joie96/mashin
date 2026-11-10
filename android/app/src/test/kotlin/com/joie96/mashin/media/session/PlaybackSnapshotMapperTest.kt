@@ -41,11 +41,11 @@ class PlaybackSnapshotMapperTest {
     }
 
     @Test
-    fun proxyArtworkUsesTheProvidedServerWithoutCallingRust() {
+    fun proxyArtworkUsesTheNativeImageRequestWithoutCallingRust() {
         val state = JSONObject("""{"playbackState":"playing","currentQueueItemId":"queue:1"}""")
-        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"proxy_id":"cover","path":"fallback"}}]}""")
-        val snapshot = PlaybackSnapshotMapper.fromPlayerState(state, queue, "http://server:8095/")
-        val expected = com.joie96.mashin.media.artwork.MediaArtworkContentProvider.buildUri("http://server:8095/imageproxy/cover")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"proxy_id":"${"a".repeat(64)}","path":"fallback"}}]}""")
+        val snapshot = PlaybackSnapshotMapper.fromPlayerState(state, queue)
+        val expected = com.joie96.mashin.media.artwork.MediaArtworkContentProvider.buildUri(queue.getJSONArray("items").getJSONObject(0))
         assertEquals(expected, snapshot.mediaItems.single().mediaMetadata.artworkUri.toString())
     }
 
@@ -69,24 +69,48 @@ class PlaybackSnapshotMapperTest {
 
     @Test
     fun albumMetadataCoverHasTheSamePrecedenceAsFlutter() {
-        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"path":"https://images/track.jpg"},"media_item":{"album":{"metadata":{"images":[{"type":"thumb","proxy_id":"album-cover","path":"album.jpg"}]}}}}]}""")
-        val snapshot = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue, "http://server:8095")
-        val source = snapshot.mediaItems.single().mediaMetadata.artworkUri?.getQueryParameter("src")
-        assertEquals("http://server:8095/imageproxy/album-cover", source)
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"path":"https://images/track.jpg"},"media_item":{"album":{"metadata":{"images":[{"type":"thumb","proxy_id":"${"b".repeat(64)}","path":"album.jpg"}]}}}}]}""")
+        val snapshot = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue)
+        val source = JSONObject(snapshot.mediaItems.single().mediaMetadata.artworkUri!!.getQueryParameter("request")!!)
+        assertEquals("b".repeat(64), source.getJSONObject("image").getString("proxy_id"))
     }
 
     @Test
     fun thumbnailIsPreferredOverOtherMetadataImages() {
-        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","media_item":{"metadata":{"images":[{"type":"fanart","path":"https://images/fanart.jpg"},{"type":"thumb","path":"https://images/cover.jpg"}]}}}]}""")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","media_item":{"metadata":{"images":[{"type":"fanart","path":"data:image/png;base64,AQID"},{"type":"thumb","path":"data:image/png;base64,BAUG"}]}}}]}""")
         val snapshot = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue)
-        assertEquals("https://images/cover.jpg", snapshot.mediaItems.single().mediaMetadata.artworkUri?.getQueryParameter("src"))
+        val request = JSONObject(snapshot.mediaItems.single().mediaMetadata.artworkUri!!.getQueryParameter("request")!!)
+        assertEquals("data:image/png;base64,BAUG", request.getJSONObject("image").getString("path"))
+        assertEquals(1, request.getInt("position"))
     }
 
     @Test
     fun unusableAlbumAndQueueImagesDoNotHideTheTrackCover() {
-        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"path":"null"},"media_item":{"album":{"metadata":{"images":[{}, {"path":"provider-only-cover.jpg"}]}},"image":{"path":"https://images/track.jpg"}}}]}""")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"path":"null"},"media_item":{"album":{"metadata":{"images":[{}, {"path":"provider-only-cover.jpg"}]}},"image":{"cached_inline":{"owner_uri":"library://playlist/42","position":0}}}}]}""")
         val snapshot = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue)
-        assertEquals("https://images/track.jpg", snapshot.mediaItems.single().mediaMetadata.artworkUri?.getQueryParameter("src"))
+        val request = JSONObject(snapshot.mediaItems.single().mediaMetadata.artworkUri!!.getQueryParameter("request")!!)
+        assertEquals("library://playlist/42", request.getJSONObject("image").getJSONObject("cached_inline").getString("owner_uri"))
+    }
+
+    @Test
+    fun inlineContentChangesUpdateArtworkUriWithoutChangingItsModelSlot() {
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","image":{"proxy_id":"${"a".repeat(64)}","cached_inline":{"owner_uri":"library://playlist/42","position":0,"content_hash":"old-content"}}}]}""")
+        val previous = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue)
+            .mediaItems.single().mediaMetadata.artworkUri!!
+        val unchanged = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue)
+            .mediaItems.single().mediaMetadata.artworkUri!!
+        assertEquals(previous, unchanged)
+        queue.getJSONArray("items").getJSONObject(0).getJSONObject("image")
+            .getJSONObject("cached_inline").put("content_hash", "new-content")
+        val replacement = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue)
+            .mediaItems.single().mediaMetadata.artworkUri!!
+        assertNotEquals(previous, replacement)
+        val image = JSONObject(replacement.getQueryParameter("request")!!).getJSONObject("image")
+        assertEquals("a".repeat(64), image.getString("proxy_id"))
+        val reference = image.getJSONObject("cached_inline")
+        assertEquals("library://playlist/42", reference.getString("owner_uri"))
+        assertEquals(0, reference.getInt("position"))
+        assertEquals("new-content", reference.getString("content_hash"))
     }
 
     @Test

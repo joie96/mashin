@@ -13,6 +13,7 @@ import androidx.media3.session.MediaConstants
 import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import com.joie96.mashin.core.RustCoreBridge
+import com.joie96.mashin.core.NativeQueryRequests
 import com.joie96.mashin.media.artwork.MediaArtworkContentProvider
 import com.joie96.mashin.media.session.PlaybackCommandKind
 import com.joie96.mashin.media.session.PlaybackRequest
@@ -32,10 +33,21 @@ import org.json.JSONObject
 @UnstableApi
 internal class MediaLibraryBrowser(
     private val context: Context,
-    private val search: MediaLibrarySearch = MediaLibrarySearch { kind, argument -> RustCoreBridge.query(kind, argument) },
+    search: MediaLibrarySearch? = null,
     private val query: (String, String?) -> String? = { kind, argument -> RustCoreBridge.query(kind, argument) },
+    private val queryRequests: NativeQueryRequests = NativeQueryRequests(),
+    private val catalogQuery: (String, String?) -> ListenableFuture<String> = queryRequests::execute,
     private val dispatchCommand: (PlaybackRequest) -> ListenableFuture<*>,
 ) : MediaLibraryService.MediaLibrarySession.Callback {
+    private val search = search ?: MediaLibrarySearch(catalogQuery)
+    private val catalogReads = MediaLibraryReads(catalogQuery)
+    private val parentReads = ConcurrentHashMap<String, LibraryRead>()
+    private val parentConsumers = ConcurrentHashMap<MediaSession.ControllerInfo, MutableSet<String>>()
+    private val subscriptions = ConcurrentHashMap<MediaSession.ControllerInfo, MutableSet<String>>()
+    private val controllerSearches = ConcurrentHashMap<MediaSession.ControllerInfo, String>()
+    private val activeRequests = ConcurrentHashMap<ListenableFuture<*>, Pair<MediaSession.ControllerInfo, String>>()
+    private val deliveredValues = ConcurrentHashMap<String, List<String>>()
+    private val readRevision = AtomicLong()
     private val browseExecutor = MoreExecutors.listeningDecorator(Executors.newSingleThreadExecutor())
     private val mainHandler = Handler(Looper.getMainLooper())
     private var isClosed = false
@@ -43,29 +55,135 @@ internal class MediaLibraryBrowser(
     private val serializedMediaItems = ConcurrentHashMap<String, String>()
     private val serializedTrackLists = ConcurrentHashMap<String, String>()
     private val identifierSequence = AtomicLong()
+    private val deliveredParents = ConcurrentHashMap<String, List<String>>()
+    private var activeSession = java.lang.ref.WeakReference<MediaLibraryService.MediaLibrarySession>(null)
     private data class LibraryChildren(val items: List<MediaItem>, val isLoading: Boolean = false)
     private data class PendingBrowse(
         val parentId: String,
+        val page: Int,
+        val pageSize: Int,
         val params: MediaLibraryService.LibraryParams?,
         val result: SettableFuture<LibraryResult<ImmutableList<MediaItem>>>,
     )
     private val pendingBrowses = ConcurrentHashMap.newKeySet<PendingBrowse>()
 
-    // Browser worker lifecycle.
+    init {
+        catalogReads.onChanged = { read -> updateParents(parentReads.filterValues { it == read }.keys) }
+        catalogReads.onInvalidated = { read ->
+            val revision = readRevision.get()
+            mainHandler.post { if (!isClosed && revision == readRevision.get()) {
+                parentReads.filterValues { it == read }.keys.forEach { parent ->
+                    activeRequests.filterValues { it.second == parent }.keys.toList().forEach { it.cancel(false) }
+                    deliveredValues.remove(parent)
+                    activeSession.get()?.notifyChildrenChanged(parent, 0, null)
+                }
+            } }
+        }
+        this.search.onResultsChanged = { query, category, result, itemCount ->
+            mainHandler.post {
+                if (!isClosed && this.search.isCurrent(query, category, result)) {
+                    activeSession.get()?.notifyChildrenChanged("search:${category.resultKey}?$query",
+                        itemCount + if (category == SearchMediaCategory.Tracks && itemCount > 0) 2 else 0, null)
+                }
+            }
+        }
+        this.search.onSearchInvalidated = { query ->
+            mainHandler.post {
+                if (!isClosed) SearchMediaCategory.entries.forEach { category ->
+                    activeSession.get()?.notifyChildrenChanged("search:${category.resultKey}?$query", 0, null)
+                }
+            }
+        }
+    }
+
+    // Browser and controller lifecycle.
     fun close() {
         isClosed = true
+        readRevision.incrementAndGet()
         pendingBrowses.forEach { it.result.cancel(false) }
         pendingBrowses.clear()
+        deliveredParents.clear()
+        deliveredValues.clear()
+        parentConsumers.clear()
+        subscriptions.clear()
+        controllerSearches.clear()
+        activeRequests.keys.toList().forEach { it.cancel(false) }
+        parentReads.clear()
+        activeSession.clear()
         search.close()
+        catalogReads.close()
+        queryRequests.close()
         browseExecutor.shutdown()
     }
 
+    override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) {
+        subscriptions.remove(controller)
+        parentConsumers[controller]?.toList()?.forEach { releaseParent(controller, it) }
+        controllerSearches.remove(controller)?.let(::releaseSearchIfUnused)
+        activeRequests.filterValues { it.first == controller }.keys.toList().forEach { it.cancel(false) }
+    }
+
+    override fun onSubscribe(session: MediaLibraryService.MediaLibrarySession, browser: MediaSession.ControllerInfo,
+        parentId: String, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<Void>> {
+        if (isClosed) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN))
+        activeSession = java.lang.ref.WeakReference(session)
+        subscriptions.computeIfAbsent(browser) { ConcurrentHashMap.newKeySet() }.add(parentId)
+        retainParent(browser, parentId)
+        return Futures.immediateFuture(LibraryResult.ofVoid(params))
+    }
+
+    override fun onUnsubscribe(session: MediaLibraryService.MediaLibrarySession, browser: MediaSession.ControllerInfo,
+        parentId: String): ListenableFuture<LibraryResult<Void>> {
+        subscriptions[browser]?.remove(parentId)
+        releaseParent(browser, parentId)
+        activeRequests.filterValues { it.first == browser && it.second == parentId }.keys.toList().forEach { it.cancel(false) }
+        return Futures.immediateFuture(LibraryResult.ofVoid(null))
+    }
+
     // Rust events retry only requests that are still waiting for their snapshot data.
-    fun onCoreEvent(eventType: String) {
-        if (isClosed || eventType !in setOf("recommendations_changed", "user_data_changed")) return
-        browseExecutor.execute {
-            pendingBrowses.toList().forEach(::completeBrowse)
+    fun onCoreEvent(eventType: String, proxyId: String? = null, artworkRevision: Long? = null, catalogEvent: JSONObject? = null) {
+        if (isClosed) return
+        if (catalogEvent != null) queryRequests.onCoreEvent(catalogEvent)
+        if (catalogEvent != null) search.onCatalogEvent(catalogEvent)
+        if (catalogEvent != null) catalogReads.onCoreEvent(catalogEvent)
+        if ((eventType == "cache_cleared" && artworkRevision == null) || eventType in setOf("provider_instances_changed", "session_changed")) {
+            readRevision.incrementAndGet()
+            activeRequests.keys.toList().forEach { it.cancel(false) }
+            search.invalidate()
+            catalogReads.invalidate()
+            queryRequests.invalidate()
+            parentReads.clear()
+            deliveredValues.clear()
+            serializedMediaItems.clear()
+            serializedTrackLists.clear()
+            libraryItemsById.clear()
+            deliveredParents.keys.forEach { parent -> activeSession.get()?.notifyChildrenChanged(parent, 0, null) }
+            if (eventType == "session_changed") {
+                controllerSearches.clear()
+                deliveredParents.clear()
+            }
         }
+        if (artworkRevision != null) {
+            val changed = mutableSetOf<String>()
+            libraryItemsById.replaceAll { id, item ->
+                val uri = MediaArtworkContentProvider.reviseUri(item.mediaMetadata.artworkUri, proxyId, artworkRevision)
+                if (uri == null) item else {
+                    changed.add(id)
+                    item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(uri).build()).build()
+                }
+            }
+            deliveredParents.forEach { (parent, children) ->
+                if (children.any(changed::contains)) activeSession.get()?.notifyChildrenChanged(parent, children.size, null)
+            }
+        }
+        if (eventType == "cache_cleared" && artworkRevision == null) {
+            deliveredParents.forEach { (parent, children) -> activeSession.get()?.notifyChildrenChanged(parent, children.size, null) }
+        }
+        if (eventType !in setOf("recommendations_changed", "user_data_changed", "cache_cleared")) return
+        updateParents((pendingBrowses.map { it.parentId } + deliveredParents.keys).filter { parent ->
+            if (eventType == "user_data_changed") parent.startsWith("favorites:") || parent == "node:playlists" || parent.startsWith("browse:playlist:")
+            else parent.startsWith("home:") || parent.startsWith("discover:")
+        }.toSet())
     }
 
     // Controller media selection and canonical playback requests.
@@ -132,19 +250,24 @@ internal class MediaLibraryBrowser(
         pageSize: Int,
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<com.google.common.collect.ImmutableList<MediaItem>>> {
+        if (isClosed || page < 0 || pageSize <= 0) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
+        activeSession = java.lang.ref.WeakReference(session)
+        retainParent(browser, parentId)
         if (parentId in setOf("root", "node:home", "node:discover", "node:favorites") ||
             parentId.startsWith("browse:artist:")) {
-            return Futures.immediateFuture(LibraryResult.ofItemList(libraryItems(parentId).items, params))
+            val items = libraryItems(parentId).items
+            deliveredParents[parentId] = items.map { it.mediaId }
+            return Futures.immediateFuture(LibraryResult.ofItemList(pageItems(items, page, pageSize), params))
         }
         if (parentId.startsWith("search:")) {
-            return searchCategoryItems(parentId, page, pageSize, params)
+            return trackRequest(browser, parentId, searchCategoryItems(parentId, page, pageSize, params))
         }
         val result = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
-        val request = PendingBrowse(parentId, params, result)
+        val request = PendingBrowse(parentId, page, pageSize, params, result)
         pendingBrowses.add(request)
         result.addListener({ pendingBrowses.remove(request) }, MoreExecutors.directExecutor())
         browseExecutor.execute { completeBrowse(request) }
-        return result
+        return trackRequest(browser, parentId, result)
     }
 
     override fun onGetItem(
@@ -162,13 +285,28 @@ internal class MediaLibraryBrowser(
         query: String,
         params: MediaLibraryService.LibraryParams?,
     ): ListenableFuture<LibraryResult<Void>> {
+        activeSession = java.lang.ref.WeakReference(session)
+        controllerSearches.put(browser, query)?.takeIf { it != query }?.let { previous ->
+            parentConsumers[browser]?.toList()?.filter {
+                it.startsWith("search:") && it.substringAfter('?', "") == previous
+            }?.forEach { parent ->
+                subscriptions[browser]?.remove(parent)
+                releaseParent(browser, parent)
+                activeRequests.filterValues { it.first == browser && it.second == parent }.keys.toList().forEach { it.cancel(false) }
+            }
+            releaseSearchIfUnused(previous)
+        }
         val results = search.start(query)
         session.notifySearchResultChanged(browser, query, results.size, params)
         results.forEach { (category, result) ->
             result.addListener({
                 mainHandler.post {
                     if (!isClosed && !result.isCancelled && search.isCurrent(query, category, result)) {
-                        val itemCount = JSONArray(Futures.getDone(result)).length()
+                        val itemCount = try {
+                            JSONArray(Futures.getDone(result)).length()
+                        } catch (_: Exception) {
+                            return@post
+                        }
                         session.notifyChildrenChanged(browser, "search:${category.resultKey}?$query",
                             itemCount + if (category == SearchMediaCategory.Tracks && itemCount > 0) 2 else 0, params)
                     }
@@ -196,14 +334,87 @@ internal class MediaLibraryBrowser(
     // An unfinished future keeps the host's loading UI active without blocking the browse worker.
     private fun completeBrowse(request: PendingBrowse) {
         if (isClosed || request.result.isDone) return
+        val revision = readRevision.get()
         try {
             val children = libraryItems(request.parentId)
-            if (!children.isLoading) {
-                request.result.set(LibraryResult.ofItemList(children.items, request.params))
+            if (revision != readRevision.get()) return
+            if (!children.isLoading || children.items.isNotEmpty()) {
+                deliveredParents[request.parentId] = children.items.map { it.mediaId }
+                deliveredValues[request.parentId] = contentIdentity(children.items)
+                request.result.set(LibraryResult.ofItemList(pageItems(children.items, request.page, request.pageSize), request.params))
             }
         } catch (error: Exception) {
-            request.result.setException(error)
+            request.result.set(LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN))
         }
+    }
+
+    // Owners survive first delivery until unsubscribe, disconnect, replacement or cancellation.
+    private fun retainParent(controller: MediaSession.ControllerInfo, parent: String) {
+        parentConsumers.computeIfAbsent(controller) { ConcurrentHashMap.newKeySet() }.add(parent)
+    }
+
+    private fun releaseParent(controller: MediaSession.ControllerInfo, parent: String) {
+        parentConsumers[controller]?.remove(parent)
+        if (parentConsumers.values.any { parent in it }) return
+        val read = parentReads.remove(parent)
+        if (read != null && read !in parentReads.values) catalogReads.release(read)
+        deliveredParents.remove(parent)
+        deliveredValues.remove(parent)
+        if (parent.startsWith("search:")) releaseSearchIfUnused(parent.substringAfter('?', ""))
+    }
+
+    private fun releaseSearchIfUnused(query: String) {
+        if (query in controllerSearches.values || parentConsumers.values.any { parents ->
+            parents.any { it.startsWith("search:") && it.substringAfter('?', "") == query }
+        }) return
+        search.release(query)
+    }
+
+    private fun <Value> trackRequest(controller: MediaSession.ControllerInfo, parent: String,
+        result: ListenableFuture<Value>): ListenableFuture<Value> {
+        activeRequests[result] = controller to parent
+        result.addListener({
+            activeRequests.remove(result)
+            if (result.isCancelled && subscriptions[controller]?.contains(parent) != true &&
+                activeRequests.values.none { it.first == controller && it.second == parent }) {
+                releaseParent(controller, parent)
+            }
+        }, MoreExecutors.directExecutor())
+        return result
+    }
+
+    private fun updateParents(parents: Set<String>) {
+        if (isClosed) return
+        val revision = readRevision.get()
+        browseExecutor.execute {
+            if (isClosed || revision != readRevision.get()) return@execute
+            pendingBrowses.filter { it.parentId in parents }.forEach(::completeBrowse)
+            parents.filter(deliveredParents::containsKey).forEach { parent ->
+                try {
+                    val children = libraryItems(parent)
+                    if (revision != readRevision.get() || (children.isLoading && children.items.isEmpty())) return@forEach
+                    val identity = contentIdentity(children.items)
+                    if (deliveredValues[parent] == identity) return@forEach
+                    deliveredValues[parent] = identity
+                    deliveredParents[parent] = children.items.map { it.mediaId }
+                    mainHandler.post { if (!isClosed && revision == readRevision.get() && deliveredParents.containsKey(parent)) {
+                        activeSession.get()?.notifyChildrenChanged(parent, children.items.size, null)
+                    } }
+                } catch (_: Exception) { /* A refresh failure retains already delivered media. */ }
+            }
+        }
+    }
+
+    private fun contentIdentity(items: List<MediaItem>): List<String> = items.filterNot { it.mediaId.startsWith("action:") }
+        .map { serializedMediaItems[it.mediaId] ?: it.mediaId }
+
+    private fun pageItems(items: List<MediaItem>, page: Int, pageSize: Int): List<MediaItem> =
+        items.drop((page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize)
+
+    private fun catalogValue(parentId: String, read: LibraryRead): String? {
+        parentReads[parentId] = read
+        val value = catalogReads.results(read)
+        return if (value.isDone) Futures.getDone(value) else null
     }
 
     // Library boundary mapping and serialized playback references.
@@ -250,17 +461,19 @@ internal class MediaLibraryBrowser(
         "node:discover" -> LibraryChildren(discoverItems())
         "node:playlists" -> playlistItems()
         "node:favorites" -> LibraryChildren(favoriteCategoryItems())
-        "home:recommendations" -> recommendationItems("user_recommendations", "track")
-        "home:favoriteGenres" -> recommendationItems("user_genre_playlists_monthly", "playlist", 9, true)
-        "home:playlistSuggestions" -> recommendationItems("user_artist_playlists_monthly", "playlist", normalizePlaylistNames = true)
-        "home:topTracks" -> recommendationItems("user_top_tracks_monthly", "track")
-        "home:topArtists" -> recommendationItems("user_top_artists_monthly", "artist")
-        "home:recent" -> LibraryChildren(mediaItemsFromJson(query("recentlyPlayedTracks", null), true, mediaType = "track"))
-        "discover:exploration" -> discoverRecommendationItems("user_exploration_weekly", "track", true)
-        "discover:albums" -> discoverRecommendationItems("sitewide_top_albums_weekly", "album")
-        "discover:similarUsers" -> discoverRecommendationItems("similarusers_jam_weekly", "track", true)
-        "discover:artists" -> discoverRecommendationItems("sitewide_top_artists_weekly", "artist")
-        "discover:tracks" -> discoverRecommendationItems("sitewide_top_tracks_weekly", "track")
+        "home:recommendations" -> recommendationItems(parentId, "user_recommendations", "track")
+        "home:favoriteGenres" -> recommendationItems(parentId, "user_genre_playlists_monthly", "playlist", 9, true)
+        "home:playlistSuggestions" -> recommendationItems(parentId, "user_artist_playlists_monthly", "playlist", normalizePlaylistNames = true)
+        "home:topTracks" -> recommendationItems(parentId, "user_top_tracks_monthly", "track")
+        "home:topArtists" -> recommendationItems(parentId, "user_top_artists_monthly", "artist")
+        "home:recent" -> catalogValue(parentId, LibraryRead(LibraryReadKind.Recent))?.let {
+            LibraryChildren(mediaItemsFromJson(it, true, mediaType = "track"))
+        } ?: LibraryChildren(emptyList(), true)
+        "discover:exploration" -> discoverRecommendationItems(parentId, "user_exploration_weekly", "track", true)
+        "discover:albums" -> discoverRecommendationItems(parentId, "sitewide_top_albums_weekly", "album")
+        "discover:similarUsers" -> discoverRecommendationItems(parentId, "similarusers_jam_weekly", "track", true)
+        "discover:artists" -> discoverRecommendationItems(parentId, "sitewide_top_artists_weekly", "artist")
+        "discover:tracks" -> discoverRecommendationItems(parentId, "sitewide_top_tracks_weekly", "track")
         "favorites:tracks" -> userDataItems("tracks", "track", true)
         "favorites:albums" -> userDataItems("albums", "album")
         "favorites:playlists" -> userDataItems("playlists", "playlist")
@@ -296,11 +509,12 @@ internal class MediaLibraryBrowser(
 
     // Exploration and similar-user recommendations contain playlists rather than direct tracks.
     private fun discoverRecommendationItems(
+        parentId: String,
         folderId: String,
         mediaType: String,
         expandPlaylistTracks: Boolean = false,
     ): LibraryChildren {
-        val snapshot = JSONObject(query("recommendations", JSONObject().put("view", "explore").toString())
+        val snapshot = JSONObject(catalogValue(parentId, LibraryRead(LibraryReadKind.ExploreRecommendations))
             ?: return LibraryChildren(emptyList(), true))
         val folders = snapshot.getJSONArray("folders")
         val selected = JSONArray()
@@ -326,22 +540,24 @@ internal class MediaLibraryBrowser(
         }
         return LibraryChildren(
             mediaItemsFromJson(selected.toString(), includeTrackListActions = mediaType == "track", mediaType = mediaType),
-            if (hasMatchingFolder) isLoading else snapshot.optBoolean("is_loading"),
+            recommendationIsLoading(parentId, if (hasMatchingFolder) isLoading else snapshot.optBoolean("is_loading"),
+                hasMatchingFolder, selected.length()),
         )
     }
 
     private fun recommendationItems(
+        parentId: String,
         folderId: String,
         mediaType: String,
         limit: Int = Int.MAX_VALUE,
         normalizePlaylistNames: Boolean = false,
     ): LibraryChildren {
-        val snapshot = JSONObject(query("recommendations", JSONObject().put("view", "home").toString())
+        val snapshot = JSONObject(catalogValue(parentId, LibraryRead(LibraryReadKind.HomeRecommendations))
             ?: return LibraryChildren(emptyList(), true))
         val folders = snapshot.getJSONArray("folders")
         val folder = (0 until folders.length()).mapNotNull(folders::optJSONObject).firstOrNull {
             it.optString("item_id").equals(folderId, ignoreCase = true)
-        } ?: return LibraryChildren(emptyList(), snapshot.optBoolean("is_loading"))
+        } ?: return LibraryChildren(emptyList(), recommendationIsLoading(parentId, snapshot.optBoolean("is_loading"), false, 0))
         val items = folder.optJSONArray("items") ?: JSONArray()
         val selected = JSONArray()
         for (index in 0 until items.length()) {
@@ -359,7 +575,13 @@ internal class MediaLibraryBrowser(
             selected.toString(),
             includeTrackListActions = mediaType == "track",
             fallbackIconResource = if (folderId == "user_top_artists_monthly") R.drawable.favorite else null,
-        ), folder.optBoolean("is_loading"))
+        ), recommendationIsLoading(parentId, folder.optBoolean("is_loading"), true, selected.length()))
+    }
+
+    private fun recommendationIsLoading(parentId: String, isLoading: Boolean, hasMatchingFolder: Boolean, count: Int): Boolean {
+        val read = parentReads.getValue(parentId)
+        if (count == 0 && isLoading) catalogReads.failure(read)?.let { throw IllegalStateException("Recommendation read failed", it) }
+        return isLoading && (hasMatchingFolder || !catalogReads.hasObservedFolders(read))
     }
 
     // Private playlist tracks share the session snapshot instead of triggering a second download.
@@ -381,17 +603,17 @@ internal class MediaLibraryBrowser(
                 if (data.optBoolean("is_loading_playlists")) return LibraryChildren(emptyList(), true)
             }
         }
-        return LibraryChildren(dynamicChildren(parentId))
+        return dynamicChildren(parentId)
     }
 
-    private fun dynamicChildren(parentId: String): List<MediaItem> = when {
-        parentId.startsWith("browse:album:") -> referencedItems(parentId, "albumTracks")
-        parentId.startsWith("browse:playlist:") -> referencedItems(parentId, "playlistTracks")
-        parentId.startsWith("browse:artist:") -> artistChildren(parentId)
-        parentId.startsWith("artistAlbums:") -> referencedItems(parentId.removePrefix("artistAlbums:"), "artistAlbums")
-        parentId.startsWith("artistTopTracks:") -> referencedItems(parentId.removePrefix("artistTopTracks:"), "artistTopTracks")
-        parentId.startsWith("similarArtists:") -> referencedItems(parentId.removePrefix("similarArtists:"), "similarArtists")
-        else -> emptyList()
+    private fun dynamicChildren(parentId: String): LibraryChildren = when {
+        parentId.startsWith("browse:album:") -> referencedItems(parentId, parentId, LibraryReadKind.AlbumTracks)
+        parentId.startsWith("browse:playlist:") -> referencedItems(parentId, parentId, LibraryReadKind.PlaylistTracks)
+        parentId.startsWith("browse:artist:") -> LibraryChildren(artistChildren(parentId))
+        parentId.startsWith("artistAlbums:") -> referencedItems(parentId, parentId.removePrefix("artistAlbums:"), LibraryReadKind.ArtistAlbums)
+        parentId.startsWith("artistTopTracks:") -> referencedItems(parentId, parentId.removePrefix("artistTopTracks:"), LibraryReadKind.ArtistTopTracks)
+        parentId.startsWith("similarArtists:") -> referencedItems(parentId, parentId.removePrefix("similarArtists:"), LibraryReadKind.SimilarArtists)
+        else -> LibraryChildren(emptyList())
     }
 
     private fun searchItems(query: String): List<MediaItem> {
@@ -420,11 +642,16 @@ internal class MediaLibraryBrowser(
             ?: return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
         if (page < 0 || pageSize <= 0) return Futures.immediateFuture(LibraryResult.ofError(LibraryResult.RESULT_ERROR_BAD_VALUE))
         val query = parentId.substringAfter('?', "")
-        return Futures.transform(search.results(query, category), { serializedItems ->
+        val result: ListenableFuture<LibraryResult<ImmutableList<MediaItem>>> = Futures.transform(
+            Futures.nonCancellationPropagating(search.results(query, category)), { serializedItems ->
             val items = mediaItemsFromJson(serializedItems,
                 includeTrackListActions = category == SearchMediaCategory.Tracks, mediaType = category.mediaType)
+            if (!isClosed) deliveredParents[parentId] = items.map { it.mediaId }
             LibraryResult.ofItemList(items.drop(
                 (page.toLong() * pageSize).coerceAtMost(Int.MAX_VALUE.toLong()).toInt()).take(pageSize), params)
+        }, MoreExecutors.directExecutor())
+        return Futures.catching(result, Exception::class.java, {
+            LibraryResult.ofError(LibraryResult.RESULT_ERROR_UNKNOWN)
         }, MoreExecutors.directExecutor())
     }
 
@@ -444,24 +671,22 @@ internal class MediaLibraryBrowser(
     private fun userDataSnapshot(): String = query("getUserData", null)
         ?: JSONObject().put("is_loading_favorites", true).put("is_loading_playlists", true).toString()
 
-    private fun referencedItems(referenceId: String, queryKind: String): List<MediaItem> {
-        val reference = serializedMediaItems[referenceId] ?: return emptyList()
+    private fun referencedItems(parentId: String, referenceId: String, kind: LibraryReadKind): LibraryChildren {
+        val reference = serializedMediaItems[referenceId] ?: return LibraryChildren(emptyList())
         val item = JSONObject(reference)
-        val fallbackIconResource = when (queryKind) {
-            "artistAlbums" -> R.drawable.playlist_play
-            "similarArtists" -> R.drawable.favorite
+        val fallbackIconResource = when (kind) {
+            LibraryReadKind.ArtistAlbums -> R.drawable.playlist_play
+            LibraryReadKind.SimilarArtists -> R.drawable.favorite
             else -> null
         }
-        return mediaItemsFromJson(
-            query(queryKind, itemReference(JSONObject(reference))),
-            includeTrackListActions = queryKind != "artistAlbums" && queryKind != "similarArtists",
+        val value = catalogValue(parentId, LibraryRead(kind, item.getString("item_id"), item.getString("provider")))
+            ?: return LibraryChildren(emptyList(), true)
+        return LibraryChildren(mediaItemsFromJson(
+            value,
+            includeTrackListActions = kind.mediaType == "track",
             fallbackIconResource = fallbackIconResource,
-            mediaType = when (queryKind) {
-                "artistAlbums" -> "album"
-                "similarArtists" -> "artist"
-                else -> "track"
-            },
-        )
+            mediaType = kind.mediaType,
+        ))
     }
 
     private fun artistChildren(parentId: String): List<MediaItem> {
@@ -506,7 +731,7 @@ internal class MediaLibraryBrowser(
                             MediaMetadata.Builder()
                                 .setTitle(item.optString("name", itemId))
                                 .setArtist(itemArtists(item))
-                                .setArtworkUri(artworkUri(item)?.let(android.net.Uri::parse) ?: resourceUri(fallbackIconResource ?: when (mediaType) {
+                                .setArtworkUri(MediaArtworkContentProvider.retainRevision(libraryItemsById[mediaId]?.mediaMetadata?.artworkUri, artworkUri(item)?.let(android.net.Uri::parse)) ?: resourceUri(fallbackIconResource ?: when (mediaType) {
                                     "track" -> R.drawable.play_arrow
                                     "album" -> R.drawable.album
                                     "playlist" -> R.drawable.playlist_play
@@ -535,30 +760,13 @@ internal class MediaLibraryBrowser(
         )
     }
 
-    private fun itemReference(item: JSONObject): String = JSONObject()
-        .put("itemId", item.optString("item_id"))
-        .put("provider", item.optString("provider"))
-        .toString()
-
     private fun itemArtists(item: JSONObject): String? = item.optJSONArray("artists")
         ?.let { artists -> (0 until artists.length()).mapNotNull(artists::optJSONObject) }
         ?.joinToString(", ") { artist -> artist.optString("name") }
         ?.takeIf(String::isNotBlank)
 
     private fun artworkUri(item: JSONObject): String? {
-        val image = item.optJSONObject("image")
-            ?: item.optJSONObject("album")?.optJSONObject("image")
-            ?: item.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
-            ?: item.optJSONObject("album")?.optJSONObject("metadata")?.optJSONArray("images")?.optJSONObject(0)
-            ?: return null
-        val proxyId = image.optString("proxy_id").takeUnless { it == "null" }
-        val path = image.optString("path")
-        val source = if (!proxyId.isNullOrEmpty()) {
-            val settings = JSONObject(query("getSessionSettings", null) ?: "{}")
-            val baseUrl = settings.optString("musicAssistantUrl").trimEnd('/')
-            if (baseUrl.isNotEmpty()) "$baseUrl/imageproxy/$proxyId" else path
-        } else path
-        return source.takeIf(String::isNotEmpty)?.let(MediaArtworkContentProvider::buildUri)
+        return MediaArtworkContentProvider.buildUri(item)
     }
 }
 

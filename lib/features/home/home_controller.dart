@@ -23,10 +23,23 @@ class HomeController extends ChangeNotifier {
     _eventSubscription = coreBridge.events.listen((event) {
       if (!_isDisposed &&
           _hasStartedLoading &&
+          event['type'] == 'provider_instances_changed') {
+        unawaited(_loadRecentListens());
+      }
+      if (!_isDisposed &&
+          _hasStartedLoading &&
+          event['type'] == 'cache_cleared' &&
+          event['cache'] == 'database') {
+        unawaited(_refreshRecommendationFolders());
+        unawaited(_loadRecentListens());
+      }
+      if (!_isDisposed &&
+          _hasStartedLoading &&
           event['type'] == 'catalog_updated') {
         final update = CatalogUpdate.fromJson(event);
         if (update.kind == CatalogQueryKind.recentlyPlayed) {
           _recentListens = _withFavoriteStatuses(update.tracks);
+          _isLoadingRecentListens = false;
           _recentListensNotifier.notifyListeners();
           notifyListeners();
         }

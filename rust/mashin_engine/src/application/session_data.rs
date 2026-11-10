@@ -119,7 +119,7 @@ impl Application {
         context.tasks.spawn(&self.runtime, async move {
             let refreshed = crate::application::repositories::with_request_priority(
                 crate::application::repositories::RequestPriority::Background,
-                providers.get_instances(),
+                async { providers.read_instances().await?.resolve().await },
             )
             .await;
             if refreshed.is_ok() {

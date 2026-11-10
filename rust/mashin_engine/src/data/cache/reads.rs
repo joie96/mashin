@@ -14,7 +14,10 @@ pub(crate) struct CatalogReadObservation {
 
 // Query routing and atomic response publication.
 pub(crate) fn supports_cached_read(query: &CatalogQuery) -> bool {
-    artist_reads::supports_artist_read(query)
+    matches!(
+        query,
+        CatalogQuery::ProviderInstances | CatalogQuery::ProviderManifests {}
+    ) || artist_reads::supports_artist_read(query)
         || album_reads::supports_album_read(query)
         || track_reads::supports_track_read(query)
         || playlist_reads::supports_playlist_read(query)
@@ -28,8 +31,33 @@ pub(crate) fn write_cached_read(
     value: &CatalogValue,
     observed_at: i64,
 ) -> Result<(), CacheError> {
-    if recommendation_reads::supports_recommendation_read(query) {
-        recommendation_reads::write_recommendation_read(transaction, query, user_id, value, observed_at)
+    if matches!(query, CatalogQuery::ProviderManifests {}) {
+        let CatalogValue::ProviderManifests(manifests) = value else {
+            return Err(CacheError::InvalidMediaObservation(
+                "provider manifest response required",
+            ));
+        };
+        let stored = manifests
+            .iter()
+            .cloned()
+            .map(super::providers::StoredManifest::from_published_manifest)
+            .collect::<Result<Vec<_>, _>>()?;
+        super::providers::write_manifests(transaction, user_id, &stored, observed_at)
+    } else if matches!(query, CatalogQuery::ProviderInstances) {
+        let CatalogValue::ProviderInstances(instances) = value else {
+            return Err(CacheError::InvalidMediaObservation(
+                "provider instance response required",
+            ));
+        };
+        super::providers::write_instances(transaction, user_id, instances, observed_at)
+    } else if recommendation_reads::supports_recommendation_read(query) {
+        recommendation_reads::write_recommendation_read(
+            transaction,
+            query,
+            user_id,
+            value,
+            observed_at,
+        )
     } else if playlist_reads::supports_playlist_read(query) {
         playlist_reads::write_playlist_read(transaction, query, user_id, value, observed_at)
     } else if track_reads::supports_track_read(query) {
@@ -47,7 +75,20 @@ pub(crate) fn read_cached_read(
     query: &CatalogQuery,
     user_id: &UserId,
 ) -> Result<Option<CatalogReadObservation>, CacheError> {
-    if recommendation_reads::supports_recommendation_read(query) {
+    if matches!(query, CatalogQuery::ProviderManifests {}) {
+        Ok(
+            super::providers::read_manifest_observation(transaction, user_id)?.map(
+                |(stored, observed_at)| CatalogReadObservation {
+                    value: CatalogValue::ProviderManifests(
+                        stored.into_iter().map(|stored| stored.manifest).collect(),
+                    ),
+                    observed_at,
+                },
+            ),
+        )
+    } else if matches!(query, CatalogQuery::ProviderInstances) {
+        super::providers::read_instance_observation(transaction, user_id)
+    } else if recommendation_reads::supports_recommendation_read(query) {
         recommendation_reads::read_recommendation_read(transaction, query, user_id)
     } else if playlist_reads::supports_playlist_read(query) {
         playlist_reads::read_playlist_read(transaction, query, user_id)
@@ -65,7 +106,12 @@ pub(crate) fn read_partial_cached(
     query: &CatalogQuery,
     user_id: &UserId,
 ) -> Result<Option<CatalogValue>, CacheError> {
-    if recommendation_reads::supports_recommendation_read(query) {
+    if matches!(
+        query,
+        CatalogQuery::ProviderInstances | CatalogQuery::ProviderManifests {}
+    ) {
+        Ok(None)
+    } else if recommendation_reads::supports_recommendation_read(query) {
         Ok(None)
     } else if playlist_reads::supports_playlist_read(query) {
         playlist_reads::read_partial_playlist(transaction, query, user_id)

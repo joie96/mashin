@@ -156,15 +156,27 @@ impl Default for ContentType {
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub(crate) struct CachedInlineImage {
+    pub(crate) owner_uri: Option<MediaUri>,
+    pub(crate) position: u32,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) content_hash: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) struct MediaItemImage {
     #[serde(rename = "type")]
     pub(crate) image_type: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
     pub(crate) path: String,
     pub(crate) provider: ProviderInstanceId,
     #[serde(default)]
     pub(crate) remotely_accessible: bool,
     #[serde(default)]
     pub(crate) proxy_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub(crate) cached_inline: Option<CachedInlineImage>,
 }
 
 impl MediaItemFields {
@@ -289,6 +301,28 @@ pub(crate) enum MediaItem {
 }
 
 impl MediaItem {
+    // Typed media identity for catalog queries.
+    pub(crate) fn media_type(&self) -> MediaType {
+        match self {
+            Self::Artist(_) => MediaType::Artist,
+            Self::Album(_) => MediaType::Album,
+            Self::Track(_) => MediaType::Track,
+            Self::Playlist(_) => MediaType::Playlist,
+            Self::Radio(_) => MediaType::Radio,
+            Self::Audiobook(_) => MediaType::Audiobook,
+            Self::Podcast(_) => MediaType::Podcast,
+            Self::PodcastEpisode(_) => MediaType::PodcastEpisode,
+            Self::Folder(_) => MediaType::Folder,
+            Self::Collection(_) => MediaType::Collection,
+            Self::Announcement(_) => MediaType::Announcement,
+            Self::FlowStream(_) => MediaType::FlowStream,
+            Self::PluginSource(_) => MediaType::PluginSource,
+            Self::AudioSource(_) => MediaType::AudioSource,
+            Self::SoundEffect(_) => MediaType::SoundEffect,
+            Self::Genre(_) => MediaType::Genre,
+        }
+    }
+
     // Merge loaded fields only; an external summary cannot undo a library canonical identity.
     pub(crate) fn merge_known(&mut self, mut incoming: Self) {
         match (&*self, &mut incoming) {

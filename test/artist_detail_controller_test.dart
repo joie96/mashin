@@ -8,6 +8,93 @@ import 'package:mashin/features/core/core_models.dart';
 
 void main() {
   test(
+    'late cached albums reproject top track years without waiting for refresh',
+    () async {
+      final bridge = _ArtistBridge(deferSections: true);
+      final controller = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: '007',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadArtist();
+      bridge.emit('007', 'Cached');
+      await Future<void>.delayed(Duration.zero);
+      bridge.emitSection('ArtistTopTracks', 'Tracks', '007', 'library', [
+        {
+          'provider': 'library',
+          'item_id': 'unknown-year',
+          'name': 'Unknown year',
+          'album': {'provider': 'library', 'item_id': 'album', 'name': 'Album'},
+        },
+        {
+          'provider': 'library',
+          'item_id': 'known-year',
+          'name': 'Known year',
+          'album': {
+            'provider': 'library',
+            'item_id': 'album',
+            'name': 'Album',
+            'year': 1999,
+          },
+        },
+      ]);
+      for (final year in [2020, 2024]) {
+        bridge.emitSection('ArtistAlbums', 'Albums', '007', 'library', [
+          {
+            'provider': 'library',
+            'item_id': 'album',
+            'name': 'Album',
+            'year': year,
+          },
+        ]);
+        expect(controller.topTracks.first.album?.year, year);
+        expect(controller.topTracks.last.album?.year, 1999);
+      }
+      bridge.albumRequests['library']!.completeError(
+        StateError('offline albums'),
+      );
+      bridge.trackRequests['library']!.completeError(
+        StateError('offline tracks'),
+      );
+      bridge.similarRequests['library']!.complete([]);
+      bridge.metadata.completeError(StateError('offline metadata'));
+      await loading;
+      expect(controller.topTracks.first.album?.year, 2024);
+    },
+  );
+
+  test(
+    'artist reload starts sections from its existing header before metadata refresh',
+    () async {
+      final bridge = _ArtistBridge();
+      final controller = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: '007',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadArtist();
+      bridge.emit('007', 'Cached');
+      bridge.metadata.complete(controller.artist!);
+      await loading;
+      bridge.metadata = Completer<Artist>();
+      final reloading = controller.loadArtist();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.albumRequestCount, 2);
+      expect(bridge.metadata.isCompleted, isFalse);
+      bridge.metadata.completeError(StateError('offline metadata'));
+      await reloading;
+    },
+  );
+
+  test(
     'identical artist observations retain header identity without content notifications',
     () async {
       PreferredProviderController.instance.initialize(
@@ -434,7 +521,8 @@ class _ArtistBridge implements MashinCoreBridgeApi {
   _ArtistBridge({this.deferSections = false});
   final bool deferSections;
   final updates = StreamController<Map<String, dynamic>>.broadcast(sync: true);
-  final metadata = Completer<Artist>();
+  var metadata = Completer<Artist>();
+  int albumRequestCount = 0;
   final albumRequests = <String, Completer<List<Album>>>{};
   final trackRequests = <String, Completer<List<Track>>>{};
   final similarRequests = <String, Completer<List<Artist>>>{};
@@ -522,8 +610,10 @@ class _ArtistBridge implements MashinCoreBridgeApi {
 
   @override
   Future<List<Album>> getArtistAlbums(String itemId, String provider) {
-    if (deferSections)
+    albumRequestCount++;
+    if (deferSections) {
       return (albumRequests[provider] = Completer<List<Album>>()).future;
+    }
     return Future.value([]);
   }
 

@@ -1,7 +1,7 @@
 //! Serialized cache maintenance with persistent server binding and invalidatable DB access.
 //! Maintenance continues after cancellation of its caller. Blocking file operations and SQL
 //! never run on the async executor. Session catalogs hold generation-bound DB leases;
-//! image maintenance currently owns only the physical image cache area, not image downloads.
+//! image workers drain accepted publications and issued file leases before physical maintenance.
 
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -11,12 +11,18 @@ use rusqlite::Transaction;
 use tokio::sync::{watch, Mutex};
 
 use super::database::{CacheError, CacheFileMetadata};
+use super::image_files::ImagePayload;
+use super::image_index::{ImageRefreshState, ImageVariantLease};
+use super::image_reads::ImageRefreshes;
+use super::image_sources::ImageVariantKey;
+use super::image_workers::ImageWorkers;
 use super::storage::CacheStorage;
 use super::workers::DatabaseWorkers;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub(crate) enum CacheMaintenance {
     ActivateServer,
+    ActivateImages,
     ClearDatabase,
     ClearImages,
     Shutdown,
@@ -28,6 +34,7 @@ pub(crate) struct CacheLifecycleSnapshot {
     pub(crate) database_generation: u64,
     pub(crate) image_generation: u64,
     pub(crate) is_database_active: bool,
+    pub(crate) is_image_active: bool,
     pub(crate) is_shutdown: bool,
     pub(crate) maintenance: Option<CacheMaintenance>,
     pub(crate) last_error: Option<CacheError>,
@@ -41,6 +48,7 @@ pub(crate) struct ServerCache {
 struct CacheState {
     runtime: Mutex<CacheRuntime>,
     published_database: Arc<std::sync::Mutex<Option<DatabaseLease>>>,
+    published_images: Arc<std::sync::Mutex<Option<ImageLease>>>,
     changes: watch::Sender<CacheLifecycleSnapshot>,
 }
 
@@ -48,14 +56,25 @@ struct CacheRuntime {
     storage: Arc<CacheStorage>,
     owner_lock: Option<Arc<std::fs::File>>,
     database: Option<DatabaseLease>,
+    images: Option<ImageLease>,
     snapshot: CacheLifecycleSnapshot,
     published_database: Arc<std::sync::Mutex<Option<DatabaseLease>>>,
+    published_images: Arc<std::sync::Mutex<Option<ImageLease>>>,
 }
 
 #[derive(Clone)]
 pub(crate) struct DatabaseLease {
     workers: DatabaseWorkers,
     is_active: Arc<AtomicBool>,
+}
+
+#[derive(Clone)]
+pub(super) struct ImageLease {
+    workers: ImageWorkers,
+    pub(super) refreshes: Arc<ImageRefreshes>,
+    is_active: Arc<AtomicBool>,
+    invalidation: watch::Sender<bool>,
+    generation_id: uuid::Uuid,
 }
 
 impl ServerCache {
@@ -76,22 +95,27 @@ impl ServerCache {
             database_generation: 0,
             image_generation: 0,
             is_database_active: false,
+            is_image_active: false,
             is_shutdown: false,
             maintenance: None,
             last_error: None,
         };
         let (changes, _) = watch::channel(snapshot.clone());
         let published_database = Arc::new(std::sync::Mutex::new(None));
+        let published_images = Arc::new(std::sync::Mutex::new(None));
         Ok(Self {
             state: Arc::new(CacheState {
                 runtime: Mutex::new(CacheRuntime {
                     storage: Arc::new(storage),
                     owner_lock: Some(Arc::new(owner_lock)),
                     database: None,
+                    images: None,
                     published_database: published_database.clone(),
+                    published_images: published_images.clone(),
                     snapshot,
                 }),
                 published_database,
+                published_images,
                 changes,
             }),
         })
@@ -100,6 +124,11 @@ impl ServerCache {
     /// Accepts the observed server ID, never an address or user ID.
     pub(crate) async fn activate(&self, server_id: String) -> Result<(), CacheError> {
         self.run_maintenance(CacheMaintenance::ActivateServer, Some(server_id))
+            .await
+    }
+
+    pub(super) async fn activate_images(&self, server_id: String) -> Result<(), CacheError> {
+        self.run_maintenance(CacheMaintenance::ActivateImages, Some(server_id))
             .await
     }
 
@@ -113,7 +142,7 @@ impl ServerCache {
             .await
     }
 
-    /// Physical image lifecycle only until the image download/lease owner is connected.
+    /// Invalidates image access and waits for accepted work and file leases before deletion.
     pub(crate) async fn clear_image_cache(&self) -> Result<(), CacheError> {
         self.run_maintenance(CacheMaintenance::ClearImages, None)
             .await
@@ -175,6 +204,21 @@ impl ServerCache {
         self.state.changes.subscribe()
     }
 
+    pub(super) async fn images(&self) -> Result<ImageLease, CacheError> {
+        let images = self
+            .state
+            .published_images
+            .lock()
+            .map_err(|_| CacheError::WorkerUnavailable)?;
+        if self.state.changes.borrow().is_shutdown {
+            return Err(CacheError::ShuttingDown);
+        }
+        images
+            .clone()
+            .filter(|images| images.is_active.load(Ordering::Acquire))
+            .ok_or(CacheError::CacheInactive)
+    }
+
     // Cancellation-independent serialized maintenance.
     async fn run_maintenance(
         &self,
@@ -196,6 +240,7 @@ impl ServerCache {
                 }
                 if runtime.snapshot.server_id.as_ref() == Some(server_id)
                     && runtime.database.is_some()
+                    && runtime.images.is_some()
                 {
                     return Ok(());
                 }
@@ -258,6 +303,92 @@ impl DatabaseLease {
     }
 }
 
+impl ImageLease {
+    // Generation-scoped file/index commands never enter the media writer queue.
+    pub(super) async fn validate_bytes(&self, bytes: Vec<u8>) -> Result<ImagePayload, CacheError> {
+        self.require_active()?;
+        let result = self.workers.validate_bytes(bytes).await;
+        self.require_active()?;
+        result
+    }
+
+    pub(super) async fn validate_inline(&self, source: String) -> Result<ImagePayload, CacheError> {
+        self.require_active()?;
+        let result = self.workers.validate_inline(source).await;
+        self.require_active()?;
+        result
+    }
+
+    pub(super) async fn publish_variant(
+        &self,
+        key: ImageVariantKey,
+        bytes: Vec<u8>,
+        observed_at: i64,
+    ) -> Result<(), CacheError> {
+        self.require_active()?;
+        let result = self.workers.publish_variant(key, bytes, observed_at).await;
+        self.require_active()?;
+        result
+    }
+
+    pub(super) async fn record_not_found(
+        &self,
+        key: ImageVariantKey,
+        expected_source_revision: Option<i64>,
+    ) -> Result<(), CacheError> {
+        self.require_active()?;
+        let result = self
+            .workers
+            .record_not_found(key, expected_source_revision)
+            .await;
+        self.require_active()?;
+        result
+    }
+
+    // File leases and refresh snapshots retain the same generation guard.
+    pub(super) async fn read_variant(
+        &self,
+        key: ImageVariantKey,
+    ) -> Result<Option<ImageVariantLease>, CacheError> {
+        self.require_active()?;
+        let result = self.workers.read_variant(key).await;
+        self.require_active()?;
+        result
+    }
+
+    pub(super) async fn read_refresh_state(
+        &self,
+        key: ImageVariantKey,
+    ) -> Result<ImageRefreshState, CacheError> {
+        self.require_active()?;
+        let result = self.workers.read_refresh_state(key).await;
+        self.require_active()?;
+        result
+    }
+
+    pub(super) fn require_active(&self) -> Result<(), CacheError> {
+        if self.is_active.load(Ordering::Acquire) {
+            Ok(())
+        } else {
+            Err(CacheError::Invalidated)
+        }
+    }
+
+    // Refresh subscribers stop their network futures when this generation is invalidated.
+    pub(super) fn observe_invalidation(&self) -> watch::Receiver<bool> {
+        self.invalidation.subscribe()
+    }
+
+    pub(super) fn generation_id(&self) -> uuid::Uuid {
+        self.generation_id
+    }
+
+    fn invalidate(&self) {
+        self.is_active.store(false, Ordering::Release);
+        self.invalidation.send_replace(true);
+    }
+}
+
 impl CacheRuntime {
     // Worker quiescence, physical maintenance and publication.
     async fn perform(
@@ -267,12 +398,10 @@ impl CacheRuntime {
         changes: &watch::Sender<CacheLifecycleSnapshot>,
     ) -> Result<(), CacheError> {
         match operation {
-            CacheMaintenance::ActivateServer => {
+            CacheMaintenance::ActivateServer | CacheMaintenance::ActivateImages => {
                 let server_id = server_id.ok_or(CacheError::InvalidServerId)?;
-                self.stop_database(changes).await?;
                 if self.snapshot.server_id.as_ref() != Some(&server_id) {
-                    self.snapshot.image_generation += 1;
-                    changes.send_replace(self.snapshot.clone());
+                    self.stop_caches(changes).await?;
                     let storage = self.storage.clone();
                     let next_server_id = server_id.clone();
                     blocking(move || {
@@ -283,7 +412,10 @@ impl CacheRuntime {
                     .await?;
                     self.snapshot.server_id = Some(server_id);
                 }
-                self.start_database().await
+                if operation == CacheMaintenance::ActivateServer {
+                    self.start_database().await?;
+                }
+                self.start_images().await
             }
             CacheMaintenance::ClearDatabase => {
                 self.stop_database(changes).await?;
@@ -292,15 +424,14 @@ impl CacheRuntime {
                 self.start_database().await
             }
             CacheMaintenance::ClearImages => {
-                self.snapshot.image_generation += 1;
-                changes.send_replace(self.snapshot.clone());
+                self.stop_images(changes).await?;
                 let storage = self.storage.clone();
-                blocking(move || storage.clear_image_files()).await
+                blocking(move || storage.clear_image_files()).await?;
+                self.start_images().await
             }
             CacheMaintenance::Shutdown => {
                 self.snapshot.is_shutdown = true;
-                self.snapshot.image_generation += 1;
-                let result = self.stop_database(changes).await;
+                let result = self.stop_caches(changes).await;
                 self.owner_lock.take();
                 result
             }
@@ -311,6 +442,49 @@ impl CacheRuntime {
         &mut self,
         changes: &watch::Sender<CacheLifecycleSnapshot>,
     ) -> Result<(), CacheError> {
+        if let Some(database) = self.invalidate_database(changes) {
+            database.workers.shutdown().await?;
+        }
+        Ok(())
+    }
+
+    async fn stop_images(
+        &mut self,
+        changes: &watch::Sender<CacheLifecycleSnapshot>,
+    ) -> Result<(), CacheError> {
+        if let Some(images) = self.invalidate_images(changes) {
+            images.workers.shutdown().await?;
+        }
+        Ok(())
+    }
+
+    async fn stop_caches(
+        &mut self,
+        changes: &watch::Sender<CacheLifecycleSnapshot>,
+    ) -> Result<(), CacheError> {
+        let database = self.invalidate_database(changes);
+        let images = self.invalidate_images(changes);
+        let (database_result, image_result) = tokio::join!(
+            async {
+                match database {
+                    Some(database) => database.workers.shutdown().await,
+                    None => Ok(()),
+                }
+            },
+            async {
+                match images {
+                    Some(images) => images.workers.shutdown().await,
+                    None => Ok(()),
+                }
+            },
+        );
+        database_result.and(image_result)
+    }
+
+    fn invalidate_database(
+        &mut self,
+        changes: &watch::Sender<CacheLifecycleSnapshot>,
+    ) -> Option<DatabaseLease> {
         self.snapshot.database_generation += 1;
         self.snapshot.is_database_active = false;
         let database = self.database.take();
@@ -322,13 +496,31 @@ impl CacheRuntime {
             .unwrap_or_else(|error| error.into_inner())
             .take();
         changes.send_replace(self.snapshot.clone());
-        if let Some(database) = database {
-            database.workers.shutdown().await?;
+        database
+    }
+
+    fn invalidate_images(
+        &mut self,
+        changes: &watch::Sender<CacheLifecycleSnapshot>,
+    ) -> Option<ImageLease> {
+        self.snapshot.image_generation += 1;
+        self.snapshot.is_image_active = false;
+        let images = self.images.take();
+        if let Some(images) = images.as_ref() {
+            images.invalidate();
         }
-        Ok(())
+        self.published_images
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        changes.send_replace(self.snapshot.clone());
+        images
     }
 
     async fn start_database(&mut self) -> Result<(), CacheError> {
+        if self.database.is_some() {
+            return Ok(());
+        }
         if let Some(server_id) = self.snapshot.server_id.as_ref() {
             let workers =
                 DatabaseWorkers::initialize(self.storage.database_directory(), server_id.clone())
@@ -345,6 +537,32 @@ impl CacheRuntime {
         }
         Ok(())
     }
+
+    async fn start_images(&mut self) -> Result<(), CacheError> {
+        if self.images.is_some() {
+            return Ok(());
+        }
+        if let Some(server_id) = self.snapshot.server_id.clone() {
+            let storage = self.storage.clone();
+            let workers =
+                tokio::task::spawn_blocking(move || ImageWorkers::initialize(storage, server_id))
+                    .await
+                    .map_err(|_| CacheError::WorkerPanicked)??;
+            self.images = Some(ImageLease {
+                refreshes: Arc::new(ImageRefreshes::default()),
+                workers,
+                is_active: Arc::new(AtomicBool::new(true)),
+                invalidation: watch::channel(false).0,
+                generation_id: uuid::Uuid::new_v4(),
+            });
+            *self
+                .published_images
+                .lock()
+                .unwrap_or_else(|error| error.into_inner()) = self.images.clone();
+            self.snapshot.is_image_active = true;
+        }
+        Ok(())
+    }
 }
 
 impl Drop for CacheState {
@@ -355,24 +573,42 @@ impl Drop for CacheState {
             .lock()
             .unwrap_or_else(|error| error.into_inner())
             .take();
-        let Some(database) = runtime.database.take() else {
+        runtime
+            .published_images
+            .lock()
+            .unwrap_or_else(|error| error.into_inner())
+            .take();
+        let database = runtime.database.take();
+        let images = runtime.images.take();
+        if let Some(database) = database.as_ref() {
+            database.is_active.store(false, Ordering::Release);
+        }
+        if let Some(images) = images.as_ref() {
+            images.invalidate();
+        }
+        if database.is_none() && images.is_none() {
             return;
-        };
-        database.is_active.store(false, Ordering::Release);
+        }
         let owner_lock = runtime.owner_lock.take();
         let fallback_lock = owner_lock.clone();
         let storage = runtime.storage.clone();
         let changes = self.changes.clone();
         let mut snapshot = runtime.snapshot.clone();
         snapshot.is_database_active = false;
+        snapshot.is_image_active = false;
         snapshot.is_shutdown = true;
         snapshot.database_generation += 1;
         snapshot.image_generation += 1;
         if std::thread::Builder::new()
             .name("mashin-cache-drop".to_owned())
             .spawn(move || {
-                let result = database.workers.shutdown_blocking();
-                snapshot.last_error = result.err();
+                let database_result = database
+                    .map(|database| database.workers.shutdown_blocking())
+                    .unwrap_or(Ok(()));
+                let image_result = images
+                    .map(|images| images.workers.shutdown_blocking())
+                    .unwrap_or(Ok(()));
+                snapshot.last_error = database_result.and(image_result).err();
                 if let Some(file) = owner_lock.as_ref() {
                     if let Err(error) = file.unlock() {
                         if snapshot.last_error.is_none() {
@@ -437,8 +673,288 @@ mod tests {
             .unwrap()
     }
 
-    fn image_name() -> String {
-        format!("mashin-image-{}.bin", "a".repeat(64))
+    fn image_path(storage: &CacheStorage) -> std::path::PathBuf {
+        let shard = storage.image_directory().join("aa");
+        std::fs::create_dir_all(&shard).unwrap();
+        shard.join(format!("{}.png", "a".repeat(64)))
+    }
+
+    fn image_key() -> ImageVariantKey {
+        use super::super::image_sources::{
+            ImageOutputFormat, ImageSize, ImageSourceKey, ImageVariantParameters,
+        };
+        ImageVariantKey {
+            source: ImageSourceKey::ProxyId("b".repeat(64)),
+            parameters: ImageVariantParameters {
+                size: ImageSize::Pixels80,
+                output_format: ImageOutputFormat::Png,
+            },
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn image_clear_drains_leases_without_blocking_media_and_survives_cancellation() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = initialize(directory.path(), "server-a").await;
+        let database = cache.database().await.unwrap();
+        seed(&database).await;
+        let images = cache.images().await.unwrap();
+        images
+            .publish_variant(image_key(), super::super::image_files::tests::bitmap(3), 1)
+            .await
+            .unwrap();
+        let leased = images.read_variant(image_key()).await.unwrap().unwrap();
+        let before = cache.observe().borrow().clone();
+        let mut changes = cache.observe();
+        let clearing = cache.clone();
+        let clear = tokio::spawn(async move { clearing.clear_image_cache().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while changes.borrow().is_image_active {
+                changes.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            images.require_active(),
+            Err(CacheError::Invalidated)
+        ));
+        assert!(matches!(
+            images
+                .publish_variant(image_key(), super::super::image_files::tests::bitmap(4), 2)
+                .await,
+            Err(CacheError::Invalidated)
+        ));
+        assert!(matches!(
+            tokio::time::timeout(Duration::from_secs(2), cache.images())
+                .await
+                .unwrap(),
+            Err(CacheError::CacheInactive)
+        ));
+        assert!(has_probe(&database).await);
+        assert!(!clear.is_finished());
+        clear.abort();
+        assert!(clear.await.unwrap_err().is_cancelled());
+        drop(leased);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while changes.borrow().maintenance.is_some() {
+                changes.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert!(changes.borrow().last_error.is_none());
+        assert_eq!(
+            changes.borrow().database_generation,
+            before.database_generation
+        );
+        assert_eq!(
+            changes.borrow().image_generation,
+            before.image_generation + 1
+        );
+        assert!(cache
+            .images()
+            .await
+            .unwrap()
+            .read_variant(image_key())
+            .await
+            .unwrap()
+            .is_none());
+        cache.shutdown().await.unwrap();
+        drop(cache);
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn images_survive_database_clear_and_restart_but_not_server_switch() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = initialize(directory.path(), "server-a").await;
+        let images = cache.images().await.unwrap();
+        let bytes = super::super::image_files::tests::bitmap(5);
+        images
+            .publish_variant(image_key(), bytes.clone(), 1)
+            .await
+            .unwrap();
+        let leased = images.read_variant(image_key()).await.unwrap().unwrap();
+        let generation = cache.observe().borrow().image_generation;
+        cache.activate("server-a".to_owned()).await.unwrap();
+        cache.clear_database_cache().await.unwrap();
+        images.require_active().unwrap();
+        assert_eq!(cache.observe().borrow().image_generation, generation);
+        assert_eq!(leased.read.payload.bytes, bytes);
+        drop(leased);
+        cache.shutdown().await.unwrap();
+        drop(cache);
+        assert!(matches!(
+            images.require_active(),
+            Err(CacheError::Invalidated)
+        ));
+        let cache = initialize(directory.path(), "server-a").await;
+        let images = cache.images().await.unwrap();
+        let leased = images.read_variant(image_key()).await.unwrap().unwrap();
+        assert_eq!(leased.read.payload.bytes, bytes);
+        let database = cache.database().await.unwrap();
+        let mut changes = cache.observe();
+        let switching = cache.clone();
+        let switch = tokio::spawn(async move { switching.activate("server-b".to_owned()).await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while changes.borrow().is_image_active {
+                changes.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            database.metadata().await,
+            Err(CacheError::Invalidated)
+        ));
+        assert!(matches!(
+            images.require_active(),
+            Err(CacheError::Invalidated)
+        ));
+        assert!(!switch.is_finished());
+        drop(leased);
+        tokio::time::timeout(Duration::from_secs(2), switch)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(cache
+            .images()
+            .await
+            .unwrap()
+            .read_variant(image_key())
+            .await
+            .unwrap()
+            .is_none());
+        cache.activate("server-a".to_owned()).await.unwrap();
+        assert!(cache
+            .images()
+            .await
+            .unwrap()
+            .read_variant(image_key())
+            .await
+            .unwrap()
+            .is_none());
+        cache.shutdown().await.unwrap();
+        cache.shutdown().await.unwrap();
+        drop(cache);
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn owner_drop_retains_exclusive_lock_until_image_leases_are_released() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = initialize(directory.path(), "server-a").await;
+        let images = cache.images().await.unwrap();
+        images
+            .publish_variant(image_key(), super::super::image_files::tests::bitmap(6), 1)
+            .await
+            .unwrap();
+        let leased = images.read_variant(image_key()).await.unwrap().unwrap();
+        cache
+            .state
+            .runtime
+            .lock()
+            .await
+            .stop_database(&cache.state.changes)
+            .await
+            .unwrap();
+        assert!(matches!(
+            cache.database().await,
+            Err(CacheError::CacheInactive)
+        ));
+        let mut changes = cache.observe();
+        drop(cache);
+        assert!(matches!(
+            images.require_active(),
+            Err(CacheError::Invalidated)
+        ));
+        assert!(ServerCache::initialize(directory.path().to_owned())
+            .await
+            .is_err());
+        assert!(!changes.borrow().is_shutdown);
+        drop(leased);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while !changes.borrow().is_shutdown {
+                changes.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert!(changes.borrow().last_error.is_none());
+        let reopened = initialize(directory.path(), "server-a").await;
+        assert!(reopened
+            .images()
+            .await
+            .unwrap()
+            .read_variant(image_key())
+            .await
+            .unwrap()
+            .is_some());
+        reopened.shutdown().await.unwrap();
+        drop(reopened);
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shutdown_invalidates_both_areas_and_retains_ownership_until_image_release() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = initialize(directory.path(), "server-a").await;
+        let database = cache.database().await.unwrap();
+        let images = cache.images().await.unwrap();
+        images
+            .publish_variant(image_key(), super::super::image_files::tests::bitmap(7), 1)
+            .await
+            .unwrap();
+        let leased = images.read_variant(image_key()).await.unwrap().unwrap();
+        let mut changes = cache.observe();
+        let closing = cache.clone();
+        let shutdown = tokio::spawn(async move { closing.shutdown().await });
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while changes.borrow().is_image_active {
+                changes.changed().await.unwrap();
+            }
+        })
+        .await
+        .unwrap();
+        assert!(matches!(
+            database.metadata().await,
+            Err(CacheError::Invalidated)
+        ));
+        assert!(matches!(
+            images.require_active(),
+            Err(CacheError::Invalidated)
+        ));
+        assert!(matches!(
+            cache.images().await,
+            Err(CacheError::ShuttingDown)
+        ));
+        assert!(ServerCache::initialize(directory.path().to_owned())
+            .await
+            .is_err());
+        assert!(!shutdown.is_finished());
+        shutdown.abort();
+        assert!(shutdown.await.unwrap_err().is_cancelled());
+        drop(leased);
+        tokio::time::timeout(Duration::from_secs(2), cache.shutdown())
+            .await
+            .unwrap()
+            .unwrap();
+        assert!(cache.observe().borrow().maintenance.is_none());
+        drop(cache);
+        let reopened = initialize(directory.path(), "server-a").await;
+        assert!(reopened
+            .images()
+            .await
+            .unwrap()
+            .read_variant(image_key())
+            .await
+            .unwrap()
+            .is_some());
+        reopened.shutdown().await.unwrap();
+        drop(reopened);
+        directory.close().unwrap();
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -465,8 +981,8 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
         let storage = CacheStorage::open(directory.path()).unwrap();
-        let image = storage.image_directory().join(image_name());
-        let index = storage.image_directory().join("mashin-image-cache.sqlite3");
+        let image = image_path(&storage);
+        let index = storage.image_directory().join(super::super::storage::IMAGE_DATABASE_FILE_NAME);
         std::fs::write(&image, b"synthetic image").unwrap();
         std::fs::write(&index, b"synthetic index").unwrap();
         let old = cache.database().await.unwrap();
@@ -509,7 +1025,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
         let storage = CacheStorage::open(directory.path()).unwrap();
-        let image = storage.image_directory().join(image_name());
+        let image = image_path(&storage);
         std::fs::write(&image, b"server-a image").unwrap();
         let old = cache.database().await.unwrap();
         seed(&old).await;
@@ -652,7 +1168,7 @@ mod tests {
         std::fs::write(directory.path().join("config.json"), b"protected settings").unwrap();
         let cache = initialize(directory.path(), "server-a").await;
         let storage = CacheStorage::open(directory.path()).unwrap();
-        let image = storage.image_directory().join(image_name());
+        let image = image_path(&storage);
         std::fs::write(&image, b"synthetic locked image").unwrap();
         let lock = std::fs::OpenOptions::new()
             .read(true)
@@ -694,7 +1210,7 @@ mod tests {
     async fn unidentified_existing_data_is_preserved_and_empty_id_is_rejected() {
         let directory = tempfile::tempdir().unwrap();
         let storage = CacheStorage::open(directory.path()).unwrap();
-        let image = storage.image_directory().join(image_name());
+        let image = image_path(&storage);
         std::fs::write(&image, b"unidentified image").unwrap();
         assert!(matches!(
             ServerCache::initialize(directory.path().to_owned()).await,

@@ -2,7 +2,7 @@
 
 use crate::adapters::jni::{android_context, commands, queries};
 use jni::objects::{JObject, JString};
-use jni::sys::{jboolean, jstring, JNI_FALSE, JNI_TRUE};
+use jni::sys::{jboolean, jlong, jstring, JNI_FALSE, JNI_TRUE};
 use jni::JNIEnv;
 
 // Kotlin-to-Rust JNI entry points.
@@ -89,6 +89,29 @@ pub(crate) extern "system" fn query(
     new_java_string(&mut env, result)
 }
 
+pub(crate) extern "system" fn start_query(
+    mut env: JNIEnv,
+    _native_core_bridge: JObject,
+    request_id: jlong,
+    kind: JString,
+    argument: JString,
+) -> jboolean {
+    let result = read_java_string(&mut env, kind)
+        .and_then(|kind| {
+            read_nullable_java_string(&mut env, argument).map(|argument| (kind, argument))
+        })
+        .and_then(|(kind, argument)| queries::start_query(request_id, &kind, argument.as_deref()));
+    query_status(&mut env, result)
+}
+
+pub(crate) extern "system" fn cancel_query(
+    mut env: JNIEnv,
+    _native_core_bridge: JObject,
+    request_id: jlong,
+) -> jboolean {
+    query_status(&mut env, queries::cancel_query(request_id))
+}
+
 pub(crate) extern "system" fn command(
     mut env: JNIEnv,
     _native_core_bridge: JObject,
@@ -111,6 +134,16 @@ pub(crate) extern "system" fn command(
 }
 
 // Java value conversion and error mapping.
+fn query_status(env: &mut JNIEnv, result: Result<(), String>) -> jboolean {
+    match result {
+        Ok(()) => JNI_TRUE,
+        Err(error) => {
+            throw_core_error(env, &error);
+            JNI_FALSE
+        }
+    }
+}
+
 fn read_java_string(env: &mut JNIEnv, value: JString) -> Result<String, String> {
     env.get_string(&value)
         .map(|value| value.into())

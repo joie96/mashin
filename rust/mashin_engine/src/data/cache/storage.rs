@@ -1,5 +1,5 @@
 //! Blocking ownership checks and handle-relative deletion for cache files only.
-//! Media files live at Cache root, image files in its flat images subdirectory.
+//! Media files live at Cache root, image files in two-character hash shards below images.
 //! Application data, credentials and logs are never deletion targets;
 //! directories, redirects and unknown names are rejected before any cache file is removed.
 //! Callers must quiesce workers, downloads and leases before using the deletion primitives.
@@ -13,13 +13,13 @@ use cap_std::fs::{Dir, OpenOptions};
 use super::database::{validate_directory, validate_file, CacheError, DATABASE_FILE_NAME};
 
 const CACHE_DIRECTORY_NAME: &str = "Cache";
-const FORMAT_FILE_NAME: &str = ".mashin-cache-format";
+const FORMAT_FILE_NAME: &str = ".format";
 const ROOT_FORMAT: &[u8] = b"MASHIN_CACHE_ROOT\n2\n";
 const IMAGE_FORMAT: &[u8] = b"MASHIN_CACHE_IMAGE_FILES\n1\n";
-const IMAGE_DATABASE_FILE_NAME: &str = "mashin-image-cache.sqlite3";
-const SERVER_FILE_NAME: &str = "mashin-cache-server.json";
-const SERVER_TEMP_FILE_NAME: &str = "mashin-cache-server.json.tmp";
-const OWNER_LOCK_FILE_NAME: &str = "mashin-cache-owner.lock";
+pub(super) const IMAGE_DATABASE_FILE_NAME: &str = "index.sqlite3";
+const SERVER_FILE_NAME: &str = "server.json";
+const SERVER_TEMP_FILE_NAME: &str = "server.json.tmp";
+const OWNER_LOCK_FILE_NAME: &str = "owner.lock";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -71,6 +71,17 @@ impl CacheStorage {
         storage.verify_root_entries()?;
         storage.initialize_area(CacheArea::Database)?;
         storage.initialize_area(CacheArea::Images)?;
+        Ok(storage)
+    }
+
+    /// Reopens only a marked existing cache; the caller must keep its runtime ownership quiescent.
+    pub(super) fn open_existing_cache_directory(path: &Path) -> Result<Self, CacheError> {
+        validate_directory(path)?;
+        let path = path.canonicalize()?;
+        let directory = Dir::open_ambient_dir(&path, cap_std::ambient_authority())?;
+        verify_format(&directory, &path, ROOT_FORMAT)?;
+        let storage = Self { directory, path };
+        storage.verify_root_entries()?;
         Ok(storage)
     }
 
@@ -179,6 +190,14 @@ impl CacheStorage {
         self.path.join(CacheArea::Images.directory_name())
     }
 
+    /// Blocking capability access after checking root and image-area ownership.
+    pub(super) fn open_image_directory(&self) -> Result<Dir, CacheError> {
+        validate_directory(&self.path)?;
+        verify_format(&self.directory, &self.path, ROOT_FORMAT)?;
+        self.verify_root_entries()?;
+        self.initialize_area(CacheArea::Images)
+    }
+
     pub(super) fn read_server_id(&self) -> Result<Option<String>, CacheError> {
         Ok(self
             .read_server_identity()?
@@ -260,12 +279,37 @@ impl CacheStorage {
         let directory = self.initialize_area(area)?;
         let area_path = self.path.join(area.directory_name());
         let mut deletion_plan: Vec<OsString> = Vec::new();
+        let mut image_shards = Vec::new();
         for entry in directory.entries()? {
             let name = entry?.file_name();
             if matches!(area, CacheArea::Database) && is_preserved_root_entry(&name) {
                 continue;
             }
             let path = area_path.join(&name);
+            if matches!(area, CacheArea::Images)
+                && name.to_str().is_some_and(is_image_shard)
+            {
+                validate_directory(&path)?;
+                let shard = directory.open_dir(&name)?;
+                let mut files = Vec::new();
+                for entry in shard.entries()? {
+                    let file_name = entry?.file_name();
+                    let file_path = path.join(&file_name);
+                    validate_file(&file_path)?;
+                    if !shard.symlink_metadata(&file_name)?.is_file() {
+                        return Err(CacheError::UnsafePath(file_path));
+                    }
+                    if !file_name.to_str().is_some_and(|file_name| {
+                        is_image_file(file_name)
+                            && file_name.starts_with(name.to_str().unwrap())
+                    }) {
+                        return Err(CacheError::ForeignCacheFile(file_path));
+                    }
+                    files.push(file_name);
+                }
+                image_shards.push((name, shard, files));
+                continue;
+            }
             validate_file(&path)?;
             let metadata = directory.symlink_metadata(&name)?;
             if !metadata.is_file() || metadata.file_type().is_symlink() {
@@ -278,6 +322,11 @@ impl CacheStorage {
                 return Err(CacheError::ForeignCacheFile(path));
             }
             deletion_plan.push(name);
+        }
+        for (name, shard, files) in image_shards {
+            remove_planned_files(&shard, files)?;
+            drop(shard);
+            directory.remove_dir(name)?;
         }
         remove_planned_files(&directory, deletion_plan)
     }
@@ -317,17 +366,26 @@ impl CacheArea {
             return true;
         }
         matches!(self, Self::Images)
-            && (name
-                .strip_prefix("mashin-image-")
-                .and_then(|name| name.strip_suffix(".bin"))
-                .is_some_and(|hash| is_hex(hash, 64))
-                || name
-                    .strip_prefix("mashin-image.tmp-")
-                    .is_some_and(|suffix| is_hex(suffix, 32)))
+            && name
+                .strip_prefix(".tmp-")
+                .is_some_and(|suffix| is_hex(suffix, 32))
     }
 }
 
 // Cache-format publication and validation.
+fn is_image_shard(name: &str) -> bool {
+    name.len() == 2
+        && name.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+}
+
+fn is_image_file(name: &str) -> bool {
+    name.rsplit_once('.').is_some_and(|(hash, extension)| {
+        hash.len() == 64
+            && hash.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+            && matches!(extension, "png" | "jpg" | "webp" | "gif")
+    })
+}
+
 fn is_preserved_root_entry(name: &OsStr) -> bool {
     [
         FORMAT_FILE_NAME,
@@ -412,7 +470,13 @@ mod tests {
     use super::*;
 
     fn image_name() -> String {
-        format!("mashin-image-{}.bin", "a".repeat(64))
+        format!("{}.png", "a".repeat(64))
+    }
+
+    fn image_path(storage: &CacheStorage) -> PathBuf {
+        let shard = storage.image_directory().join("aa");
+        std::fs::create_dir_all(&shard).unwrap();
+        shard.join(image_name())
     }
 
     #[test]
@@ -436,7 +500,7 @@ mod tests {
         storage.write_server_id("observed-server").unwrap();
         let identity = std::fs::read(cache.join(SERVER_FILE_NAME)).unwrap();
         std::fs::write(cache.join(DATABASE_FILE_NAME), b"synthetic database").unwrap();
-        let image = storage.image_directory().join(image_name());
+        let image = image_path(&storage);
         std::fs::write(&image, b"synthetic image").unwrap();
         storage.clear_database_files().unwrap();
         assert!(!cache.join(DATABASE_FILE_NAME).exists());
@@ -463,7 +527,7 @@ mod tests {
     fn reopening_preserves_cache_and_never_adopts_an_unmarked_directory() {
         let application = tempfile::tempdir().unwrap();
         let storage = CacheStorage::open(application.path()).unwrap();
-        let image_path = storage.image_directory().join(image_name());
+        let image_path = image_path(&storage);
         std::fs::write(&image_path, b"synthetic image").unwrap();
         drop(storage);
         let reopened = CacheStorage::open(application.path()).unwrap();
@@ -511,7 +575,7 @@ mod tests {
             .database_directory()
             .join(format!("{DATABASE_FILE_NAME}.tmp-{}", "b".repeat(32)));
         std::fs::write(&temporary, b"synthetic incomplete database").unwrap();
-        let image_path = storage.image_directory().join(image_name());
+        let image_path = image_path(&storage);
         std::fs::write(&image_path, b"synthetic image").unwrap();
         let image_index = storage.image_directory().join(IMAGE_DATABASE_FILE_NAME);
         std::fs::write(&image_index, b"synthetic separate image index").unwrap();
@@ -559,9 +623,9 @@ mod tests {
         let storage = CacheStorage::open(application.path()).unwrap();
         let database = storage.database_directory().join(DATABASE_FILE_NAME);
         std::fs::write(&database, b"synthetic media database").unwrap();
+        std::fs::write(image_path(&storage), b"synthetic image").unwrap();
         for name in [
-            image_name(),
-            format!("mashin-image.tmp-{}", "a".repeat(32)),
+            format!(".tmp-{}", "a".repeat(32)),
             IMAGE_DATABASE_FILE_NAME.to_owned(),
             format!("{IMAGE_DATABASE_FILE_NAME}-wal"),
         ] {
@@ -590,7 +654,7 @@ mod tests {
         for is_directory in [false, true] {
             let application = tempfile::tempdir().unwrap();
             let storage = CacheStorage::open(application.path()).unwrap();
-            let image = storage.image_directory().join(image_name());
+            let image = image_path(&storage);
             std::fs::write(&image, b"keep valid cache file").unwrap();
             let foreign = storage.image_directory().join("protected");
             if is_directory {
@@ -605,6 +669,32 @@ mod tests {
     }
 
     #[test]
+    fn invalid_shard_contents_prevent_deleting_any_cache_files() {
+        for (name, is_directory) in [
+            ("protected.txt".to_owned(), false),
+            (format!("{}.png", "b".repeat(64)), false),
+            (format!("{}.bin", "a".repeat(64)), false),
+            (format!("{}.png", "a".repeat(64)), true),
+        ] {
+            let application = tempfile::tempdir().unwrap();
+            let storage = CacheStorage::open(application.path()).unwrap();
+            let index = storage.image_directory().join(IMAGE_DATABASE_FILE_NAME);
+            std::fs::write(&index, b"keep index").unwrap();
+            let shard = storage.image_directory().join("aa");
+            std::fs::create_dir(&shard).unwrap();
+            let foreign = shard.join(name);
+            if is_directory {
+                std::fs::create_dir(&foreign).unwrap();
+            } else {
+                std::fs::write(&foreign, b"keep foreign content").unwrap();
+            }
+            assert!(storage.clear_image_files().is_err());
+            assert_eq!(std::fs::read(index).unwrap(), b"keep index");
+            assert!(foreign.exists());
+        }
+    }
+
+    #[test]
     fn invalid_root_entries_prevent_deletion_in_both_areas() {
         for name in [
             "protected",
@@ -614,7 +704,7 @@ mod tests {
         ] {
             let application = tempfile::tempdir().unwrap();
             let storage = CacheStorage::open(application.path()).unwrap();
-            let image = storage.image_directory().join(image_name());
+            let image = image_path(&storage);
             std::fs::write(&image, b"keep image").unwrap();
             let sidecar = storage
                 .database_directory()
@@ -634,7 +724,7 @@ mod tests {
     fn changed_area_identity_is_rejected_without_deleting_data() {
         let application = tempfile::tempdir().unwrap();
         let storage = CacheStorage::open(application.path()).unwrap();
-        let image = storage.image_directory().join(image_name());
+        let image = image_path(&storage);
         std::fs::write(&image, b"keep image").unwrap();
         std::fs::write(
             storage.image_directory().join(FORMAT_FILE_NAME),
@@ -682,7 +772,7 @@ mod tests {
         use std::os::windows::fs::OpenOptionsExt;
         let application = tempfile::tempdir().unwrap();
         let storage = CacheStorage::open(application.path()).unwrap();
-        let image = storage.image_directory().join(image_name());
+        let image = image_path(&storage);
         std::fs::write(&image, b"synthetic locked image").unwrap();
         let lock = std::fs::OpenOptions::new()
             .read(true)
@@ -731,7 +821,7 @@ mod tests {
         let protected = tempfile::tempdir().unwrap();
         let image = protected.path().join("protected-image");
         std::fs::write(&image, b"protected external image").unwrap();
-        let redirected = storage.image_directory().join(image_name());
+        let redirected = image_path(&storage);
         std::os::unix::fs::symlink(&image, &redirected).unwrap();
         assert!(storage.clear_image_files().is_err());
         assert_eq!(std::fs::read(image).unwrap(), b"protected external image");

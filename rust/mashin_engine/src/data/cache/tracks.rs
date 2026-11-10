@@ -205,53 +205,6 @@ pub(super) fn write_track_observation(
     Ok(())
 }
 
-/// Replays legacy sections atomically; schema 6 albums already own their latest observations.
-pub(super) fn migrate_section_observations(
-    transaction: &Transaction<'_>,
-    has_canonical_albums: bool,
-) -> Result<(), CacheError> {
-    use crate::domain::catalog::{CatalogQuery, CatalogValue};
-    let observations=transaction.prepare("SELECT user_id,query FROM artist_read_states AS states WHERE
-        EXISTS(SELECT 1 FROM artist_album_read_items AS albums WHERE albums.user_id=states.user_id AND albums.query=states.query)
-        OR EXISTS(SELECT 1 FROM artist_track_read_items AS tracks WHERE tracks.user_id=states.user_id AND tracks.query=states.query)
-        ORDER BY observed_at,user_id,query")?.query_map([],|row|Ok((UserId(row.get(0)?),row.get::<_,String>(1)?)))?.collect::<rusqlite::Result<Vec<_>>>()?;
-    for (user, query_key) in observations {
-        let query: CatalogQuery = serde_json::from_str(&query_key)?;
-        match super::catalog_sections::read_legacy_artist_section(transaction, &query, &user)? {
-            CatalogValue::Albums(albums) => {
-                if !has_canonical_albums {
-                    for album in albums {
-                        write_album_observation(transaction, &album, &user)?;
-                    }
-                }
-            }
-            CatalogValue::Tracks(tracks) => {
-                for mut track in tracks {
-                    if has_canonical_albums {
-                        if let Some(album) = &mut track.album {
-                            if let Some(canonical) = read_album(
-                                transaction,
-                                &album.media.provider,
-                                &album.media.item_id,
-                                &user,
-                            )? {
-                                *album = canonical;
-                            }
-                        }
-                    }
-                    write_track_observation(transaction, &track, &user)?;
-                }
-            }
-            _ => {
-                return Err(CacheError::InvalidMediaObservation(
-                    "track migration requires an artist section",
-                ))
-            }
-        }
-    }
-    Ok(())
-}
-
 // Identity reads hydrate canonical endpoints, not nested media copies.
 pub(super) fn read_track(
     transaction: &Transaction<'_>,

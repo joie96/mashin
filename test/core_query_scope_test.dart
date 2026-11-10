@@ -5,6 +5,69 @@ import 'package:mashin/features/core/core_query_scope.dart';
 
 void main() {
   test(
+    'child cancellation is isolated and parent cancellation reaches descendants',
+    () async {
+      final parent = CoreQueryScope();
+      final child = parent.createChild();
+      final sibling = parent.createChild();
+      final descendant = sibling.createChild();
+      var childAborts = 0;
+      var descendantAborts = 0;
+      final pendingChild = Completer<void>();
+      final pendingDescendant = Completer<void>();
+      final childResult = child.execute(
+        () => pendingChild.future,
+        onCancel: () => childAborts++,
+      );
+      final descendantResult = descendant.execute(
+        () => pendingDescendant.future,
+        onCancel: () => descendantAborts++,
+      );
+      final childCanceled = expectLater(
+        childResult,
+        throwsA(isA<CoreQueryCanceled>()),
+      );
+      final descendantCanceled = expectLater(
+        descendantResult,
+        throwsA(isA<CoreQueryCanceled>()),
+      );
+      child.cancel();
+      await childCanceled;
+      expect(parent.isCanceled, isFalse);
+      expect(sibling.isCanceled, isFalse);
+      expect(descendantAborts, 0);
+      parent.cancel();
+      parent.cancel();
+      await descendantCanceled;
+      expect(sibling.isCanceled, isTrue);
+      expect(descendant.isCanceled, isTrue);
+      expect(childAborts, 1);
+      expect(descendantAborts, 1);
+      pendingChild.completeError(StateError('late child'));
+      pendingDescendant.completeError(StateError('late descendant'));
+    },
+  );
+
+  test(
+    'children of retired scopes start no work and retain their own async zone',
+    () async {
+      final parent = CoreQueryScope();
+      final child = parent.createChild();
+      await child.run(() async {
+        await Future<void>.value();
+        expect(CoreQueryScope.current, same(child));
+      });
+      parent.cancel();
+      final retired = parent.createChild();
+      expect(retired.isCanceled, isTrue);
+      await expectLater(
+        retired.execute(() async => fail('must not start'), onCancel: () {}),
+        throwsA(isA<CoreQueryCanceled>()),
+      );
+    },
+  );
+
+  test(
     'cancel aborts only owned requests and consumes late failures',
     () async {
       final first = CoreQueryScope();

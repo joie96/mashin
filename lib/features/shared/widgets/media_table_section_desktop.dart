@@ -1,10 +1,7 @@
-import 'dart:convert';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'detail_provider_switcher.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_svg/flutter_svg.dart';
 import 'dart:async';
 import 'dart:math' as math;
 
@@ -3403,7 +3400,9 @@ class _MediaProviderIconState extends State<MediaProviderIcon>
   @override
   void didUpdateWidget(covariant MediaProviderIcon oldWidget) {
     super.didUpdateWidget(oldWidget);
-    if (oldWidget.providerId != widget.providerId) _onManifestsChanged();
+    if (oldWidget.providerId != widget.providerId) {
+      _onManifestsChanged(shouldRetainIcon: false);
+    }
   }
 
   @override
@@ -3431,11 +3430,11 @@ class _MediaProviderIconState extends State<MediaProviderIcon>
     _isLoading = false;
   }
 
-  void _onManifestsChanged() {
+  void _onManifestsChanged({bool shouldRetainIcon = true}) {
     _cancelIconRead();
     _queryScope = CoreQueryScope();
     setState(() {
-      _iconData = null;
+      if (!shouldRetainIcon) _iconData = null;
       _hasLoaded = false;
     });
     if (_isVisible) unawaited(_loadIcon());
@@ -3470,7 +3469,7 @@ class _MediaProviderIconState extends State<MediaProviderIcon>
     }
   }
 
-  // Inline normalization and framework-owned image rendering.
+  // Provider icons use the same validated native image path as media artwork.
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
@@ -3489,34 +3488,6 @@ class _MediaProviderIconState extends State<MediaProviderIcon>
       return fallback;
     }
 
-    final String decoded = _inlineSvgClassFillColors(
-      _maybeDecodeSvgPayload(trimmed),
-    );
-    final bool isInlineSvg =
-        decoded.startsWith('<svg') ||
-        decoded.startsWith('<?xml') ||
-        decoded.contains('<svg');
-
-    if (isInlineSvg) {
-      return SvgPicture.string(
-        decoded,
-        width: widget.size,
-        height: widget.size,
-        errorBuilder: (_, _, _) => fallback,
-      );
-    }
-
-    if (_isRasterImageDataUri(trimmed)) {
-      return SizedBox.square(
-        dimension: widget.size,
-        child: MediaImage(
-          source: trimmed,
-          fit: BoxFit.contain,
-          fallback: fallback,
-        ),
-      );
-    }
-
     return SizedBox.square(
       dimension: widget.size,
       child: MediaImage(
@@ -3526,63 +3497,6 @@ class _MediaProviderIconState extends State<MediaProviderIcon>
       ),
     );
   }
-}
-
-String _maybeDecodeSvgPayload(String raw) {
-  final String lowerCase = raw.toLowerCase();
-  if (lowerCase.startsWith('data:image/svg+xml')) {
-    final int separator = raw.indexOf(',');
-    if (separator < 0) {
-      return raw;
-    }
-
-    try {
-      final String header = raw.substring(0, separator).toLowerCase();
-      final String payload = raw.substring(separator + 1);
-      return header.contains(';base64')
-          ? utf8.decode(base64Decode(payload))
-          : Uri.decodeComponent(payload);
-    } on FormatException {
-      return raw;
-    }
-  }
-
-  if (!raw.contains('%')) {
-    return raw;
-  }
-
-  try {
-    return Uri.decodeFull(raw);
-  } catch (_) {
-    return raw;
-  }
-}
-
-bool _isRasterImageDataUri(String value) {
-  final String lowerCase = value.toLowerCase();
-  return lowerCase.startsWith('data:image/') &&
-      !lowerCase.startsWith('data:image/svg+xml');
-}
-
-String _inlineSvgClassFillColors(String svg) {
-  final RegExp classRule = RegExp(
-    r'\.([\w-]+)\s*\{[^}]*fill\s*:\s*([^;}\s]+)[^}]*\}',
-  );
-  String normalized = svg;
-
-  for (final Match rule in classRule.allMatches(svg)) {
-    final String className = rule.group(1)!;
-    final String fillColor = rule.group(2)!;
-    final RegExp classAttribute = RegExp(
-      'class\\s*=\\s*(["\\\'])${RegExp.escape(className)}\\1',
-    );
-    normalized = normalized.replaceAll(classAttribute, 'fill="$fillColor"');
-  }
-
-  return normalized.replaceAll(
-    RegExp(r'<style\b[^>]*>[\s\S]*?</style\s*>'),
-    '',
-  );
 }
 
 // Helper Functions

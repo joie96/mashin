@@ -16,6 +16,12 @@ class ExploreController extends ChangeNotifier {
     _eventSubscription = coreBridge.events.listen((event) {
       if (!_isDisposed &&
           _hasStartedLoading &&
+          event['type'] == 'cache_cleared' &&
+          event['cache'] == 'database') {
+        unawaited(load(refresh: false));
+      }
+      if (!_isDisposed &&
+          _hasStartedLoading &&
           event['type'] == 'recommendations_updated' &&
           event['view'] == 'explore') {
         _applySnapshot(

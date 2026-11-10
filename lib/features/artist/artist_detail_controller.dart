@@ -33,6 +33,9 @@ class ArtistDetailController extends ChangeNotifier {
          provider: providerInstanceIdOrDomain,
        ) {
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+    _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
+      _onMediaReadInvalidated,
+    );
     _readSubscription = coreBridge.catalogReadChanges.listen(
       _onCatalogReadChange,
     );
@@ -40,6 +43,7 @@ class ArtistDetailController extends ChangeNotifier {
 
   final DetailProviderSelection sectionProvider;
   StreamSubscription<CatalogUpdate>? _catalogSubscription;
+  StreamSubscription<void>? _cacheSubscription;
   StreamSubscription<CatalogReadChange>? _readSubscription;
   Completer<Artist?>? _firstMetadata;
   (String, String)? _sectionContext;
@@ -51,6 +55,8 @@ class ArtistDetailController extends ChangeNotifier {
   List<Album> _albums = const <Album>[];
   List<Artist> _similarArtists = const <Artist>[];
   List<Track> _topTracks = const <Track>[];
+  // Observed year knowledge remains separate from the joined display projection.
+  List<Track> _sourceTopTracks = const <Track>[];
 
   bool _isLoadingMetadata = true;
   bool _isLoadingAlbums = true;
@@ -103,6 +109,22 @@ class ArtistDetailController extends ChangeNotifier {
     if (requiresReload) await loadArtist();
   }
 
+  void _onMediaReadInvalidated(void _) {
+    if (_isControllerDisposed) return;
+    _requiresReload = true;
+    _queryScope.cancel();
+    _sectionsQueryScope.cancel();
+    if (_firstMetadata case final pending? when !pending.isCompleted) {
+      pending.complete(null);
+    }
+    _loadingFuture = null;
+    if (!_isPageVisible) return;
+    _queryScope = CoreQueryScope();
+    _sectionsQueryScope = CoreQueryScope();
+    _requiresReload = false;
+    unawaited(loadArtist());
+  }
+
   @override
   void notifyListeners() {
     if (!_isLoadCanceled) {
@@ -114,6 +136,7 @@ class ArtistDetailController extends ChangeNotifier {
   void dispose() {
     _isControllerDisposed = true;
     unawaited(_catalogSubscription?.cancel());
+    unawaited(_cacheSubscription?.cancel());
     unawaited(_readSubscription?.cancel());
     _queryScope.cancel();
     _sectionsQueryScope.cancel();
@@ -202,24 +225,18 @@ class ArtistDetailController extends ChangeNotifier {
       switch (update.kind) {
         case CatalogQueryKind.artistAlbums:
           final incoming = _mapAlbums(update.albums);
-          if (hasSameMediaListContent(_albums, incoming) && !_isLoadingAlbums)
+          if (hasSameMediaListContent(_albums, incoming) && !_isLoadingAlbums) {
             return;
+          }
           _albums = incoming;
+          if (_reprojectTopTracks()) _topTracksNotifier.notifyListeners();
           _hasObservedAlbums = true;
           _isLoadingAlbums = false;
           _albumsNotifier.notifyListeners();
         case CatalogQueryKind.artistTopTracks:
-          final incoming = update.tracks
-              .map(_withAlbumYear)
-              .map(
-                (track) =>
-                    userDataController?.withFavoriteStatus(track) ?? track,
-              )
-              .toList(growable: false);
-          if (hasSameMediaListContent(_topTracks, incoming) &&
-              !_isLoadingTopTracks)
-            return;
-          _topTracks = incoming;
+          _sourceTopTracks = update.tracks;
+          final hasNewTracks = _reprojectTopTracks();
+          if (!hasNewTracks && !_isLoadingTopTracks) return;
           _hasObservedTopTracks = true;
           _isLoadingTopTracks = false;
           _topTracksNotifier.notifyListeners();
@@ -281,6 +298,7 @@ class ArtistDetailController extends ChangeNotifier {
     _isArtistFavorite = false;
     _albums = const [];
     _topTracks = const [];
+    _sourceTopTracks = const [];
     _similarArtists = const [];
     _sectionContext = null;
     _hasObservedAlbums = false;
@@ -308,6 +326,7 @@ class ArtistDetailController extends ChangeNotifier {
 
     final firstMetadata = Completer<Artist?>();
     _firstMetadata = firstMetadata;
+    if (_artist != null) firstMetadata.complete(_artist);
     final metadataLoading = _loadArtistMetadata();
     try {
       final originalArtist = await Future.any<Artist?>([
@@ -315,8 +334,9 @@ class ArtistDetailController extends ChangeNotifier {
         metadataLoading.then((_) => _artist),
       ]);
       if (_isLoadCanceled) return;
-      if (originalArtist != null)
+      if (originalArtist != null) {
         await sectionProvider.initialize(originalArtist);
+      }
       if (_isLoadCanceled) return;
       await _loadSections();
       await metadataLoading;
@@ -373,6 +393,7 @@ class ArtistDetailController extends ChangeNotifier {
     if (!hasSameContext) {
       _albums = const <Album>[];
       _topTracks = const <Track>[];
+      _sourceTopTracks = const <Track>[];
       _similarArtists = const <Artist>[];
       _sectionReadStates.clear();
       _hasObservedAlbums = false;
@@ -446,6 +467,7 @@ class ArtistDetailController extends ChangeNotifier {
       final incoming = _mapAlbums(albums);
       hasNewAlbums = !hasSameMediaListContent(_albums, incoming);
       if (hasNewAlbums) _albums = incoming;
+      if (_reprojectTopTracks()) _topTracksNotifier.notifyListeners();
       _hasObservedAlbums = true;
       _logSection(
         'albums',
@@ -525,17 +547,8 @@ class ArtistDetailController extends ChangeNotifier {
         sectionProvider.selectedProvider,
       );
       if (_isLoadCanceled) return;
-      final incoming = List<Track>.unmodifiable(
-        tracks
-            .map(_withAlbumYear)
-            .map(
-              (Track track) =>
-                  userDataController?.withFavoriteStatus(track) ?? track,
-            )
-            .toList(growable: false),
-      );
-      hasNewTracks = !hasSameMediaListContent(_topTracks, incoming);
-      if (hasNewTracks) _topTracks = incoming;
+      _sourceTopTracks = tracks;
+      hasNewTracks = _reprojectTopTracks();
       _hasObservedTopTracks = true;
       _logSection(
         'top_tracks',
@@ -583,6 +596,19 @@ class ArtistDetailController extends ChangeNotifier {
   }
 
   // Bounded display projections never change the persisted server result order.
+  bool _reprojectTopTracks() {
+    final incoming = List<Track>.unmodifiable(
+      _sourceTopTracks
+          .map(_withAlbumYear)
+          .map(
+            (track) => userDataController?.withFavoriteStatus(track) ?? track,
+          ),
+    );
+    if (hasSameMediaListContent(_topTracks, incoming)) return false;
+    _topTracks = incoming;
+    return true;
+  }
+
   List<Album> _mapAlbums(List<Album> albums) {
     final visible = albums
         .map((album) => userDataController?.withFavoriteStatus(album) ?? album)

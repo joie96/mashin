@@ -28,9 +28,13 @@ class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
 class _RecommendationEventBridge extends _CatalogEventBridge {
   String? trackName = 'Cached';
   final refreshes = <bool>[];
+  var recentReads = 0;
 
   @override
-  Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40}) async => [];
+  Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40}) async {
+    recentReads++;
+    return [];
+  }
 
   @override
   Future<RecommendationSnapshot> getRecommendations({
@@ -59,6 +63,40 @@ class _RecommendationEventBridge extends _CatalogEventBridge {
       ],
     });
   }
+}
+
+class _PendingUserDataBridge extends _CatalogEventBridge {
+  final initial = Completer<Map<String, dynamic>>();
+  final snapshots = <Completer<Map<String, dynamic>>>[];
+  var initialReads = 0;
+
+  @override
+  Future<Map<String, dynamic>> loadUserData() {
+    initialReads++;
+    return initial.future;
+  }
+
+  @override
+  Future<Map<String, dynamic>> getUserData() {
+    final snapshot = Completer<Map<String, dynamic>>();
+    snapshots.add(snapshot);
+    return snapshot.future;
+  }
+
+  Map<String, dynamic> createSnapshot({
+    bool hasItems = true,
+    bool isLoading = false,
+  }) => {
+    'has_loaded_favorites': true,
+    'is_loading_favorites': isLoading,
+    'is_loading_playlists': isLoading,
+    'favorites': {
+      'tracks': [if (hasItems) _mediaJson('track')],
+    },
+    'playlists': [
+      if (hasItems) _mediaJson('playlist')..['is_loading_tracks'] = isLoading,
+    ],
+  };
 }
 
 class _FavoriteSnapshotBridge extends _UnusedCoreBridge {
@@ -123,6 +161,147 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 
 void main() {
   test(
+    'recent tracks decode typed catalog values and tagged completion values',
+    () {
+      final track = <String, dynamic>{
+        'provider': 'source',
+        'item_id': '007',
+        'name': 'Cached track',
+        'image': null,
+        'available': true,
+      };
+      expect(
+        () => mediaItemFromJson(track),
+        throwsA(
+          isA<FormatException>().having(
+            (error) => error.message,
+            'message',
+            'Unknown Music Assistant media type: null',
+          ),
+        ),
+      );
+      for (final item in [
+        track,
+        {...track, 'media_type': 'track'},
+      ]) {
+        final event = <String, dynamic>{
+          'type': 'catalog_updated',
+          'query': {
+            'RecentlyPlayed': {'limit': 40},
+          },
+          'value': {
+            'Tracks': [item],
+          },
+        };
+        final update = CatalogUpdate.fromJson(event);
+        final decoded = tracksFromJson((event['value'] as Map).values.single);
+        expect(update.kind, CatalogQueryKind.recentlyPlayed);
+        expect(update.limit, 40);
+        expect(decoded.single.itemId, '007');
+        expect(decoded.single.provider, 'source');
+        expect(decoded.single.name, 'Cached track');
+        expect(hasSameMediaListContent(decoded, update.tracks), isTrue);
+      }
+      expect(tracksFromJson([]), isEmpty);
+      expect(() => tracksFromJson({}), throwsFormatException);
+    },
+  );
+
+  test(
+    'home and explore separate media invalidations and stop after disposal',
+    () async {
+      for (final view in RecommendationView.values) {
+        final bridge = _RecommendationEventBridge();
+        final home = HomeController(coreBridge: bridge);
+        final explore = ExploreController(coreBridge: bridge);
+        if (view == RecommendationView.home) {
+          await home.load();
+        } else {
+          await explore.load();
+        }
+        await Future<void>.delayed(Duration.zero);
+        List<Track> tracks() => view == RecommendationView.home
+            ? home.recommendationItems
+            : explore.weeklyExploration;
+        expect(tracks().single.name, 'Cached');
+        bridge.updates.add(<String, dynamic>{
+          'type': 'cache_cleared',
+          'cache': 'images',
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(bridge.refreshes, <bool>[true]);
+        bridge.trackName = 'Fresh';
+        bridge.updates.add(<String, dynamic>{
+          'type': 'cache_cleared',
+          'cache': 'database',
+        });
+        expect(tracks().single.name, 'Cached');
+        await Future<void>.delayed(Duration.zero);
+        expect(tracks().single.name, 'Fresh');
+        expect(bridge.refreshes, <bool>[true, false]);
+        final recentReads = bridge.recentReads;
+        bridge.updates.add(<String, dynamic>{
+          'type': 'provider_instances_changed',
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(
+          bridge.recentReads,
+          recentReads + (view == RecommendationView.home ? 1 : 0),
+        );
+        expect(tracks().single.name, 'Fresh');
+        expect(bridge.refreshes, <bool>[true, false]);
+        final readsBeforeDisposal = bridge.recentReads;
+        home.dispose();
+        explore.dispose();
+        bridge.updates.add(<String, dynamic>{
+          'type': 'cache_cleared',
+          'cache': 'database',
+        });
+        bridge.updates.add(<String, dynamic>{
+          'type': 'provider_instances_changed',
+        });
+        await Future<void>.delayed(Duration.zero);
+        expect(bridge.refreshes, <bool>[true, false]);
+        expect(bridge.recentReads, readsBeforeDisposal);
+        await bridge.updates.close();
+      }
+    },
+  );
+  test(
+    'provider updates decode and complete replacements suppress identical notifications',
+    () {
+      ProviderManifestRegistry.clear();
+      final update = CatalogUpdate.fromJson(<String, dynamic>{
+        'query': <String, dynamic>{'ProviderManifests': <String, dynamic>{}},
+        'value': <String, dynamic>{
+          'ProviderManifests': <Map<String, dynamic>>[
+            <String, dynamic>{
+              'domain': 'builtin',
+              'name': 'Built in',
+              'icon_images': <String>['default'],
+            },
+          ],
+        },
+      });
+      expect(update.kind, CatalogQueryKind.providerManifests);
+      ProviderManifestRegistry.replaceAll(update.providerManifests);
+      final revision = ProviderManifestRegistry.changes.value;
+      ProviderManifestRegistry.replaceAll(
+        update.providerManifests.map(
+          (manifest) => ProviderManifest.fromJson(manifest.raw),
+        ),
+      );
+      expect(ProviderManifestRegistry.changes.value, revision);
+      expect(
+        ProviderManifestRegistry.getByProvider('builtin')?.hasDefaultIcon,
+        isTrue,
+      );
+      ProviderManifestRegistry.replaceAll(const <ProviderManifest>[]);
+      expect(ProviderManifestRegistry.getByProvider('builtin'), isNull);
+      ProviderManifestRegistry.clear();
+    },
+  );
+  test(
     'server read success preserves a separate cache persistence failure',
     () {
       final change = CatalogReadChange.fromJson({
@@ -146,6 +325,23 @@ void main() {
       expect(change.cacheError, 'synthetic write failure');
     },
   );
+
+  test('search read states preserve query, category and limit identity', () {
+    final change = CatalogReadChange.fromJson({
+      'query': {
+        'Search': {'query': 'jazz', 'media_type': 'track', 'limit': 50},
+      },
+      'snapshot': {
+        'phase': 'invalidated',
+        'knowledge': 'unknown',
+        'freshness': 'unknown',
+      },
+    });
+    expect(change.kind, CatalogQueryKind.search);
+    expect(change.searchQuery, 'jazz');
+    expect(change.mediaType, MediaType.track);
+    expect(change.limit, 50);
+  });
 
   test(
     'catalog read states preserve unknown, partial, empty and invalidated observations',
@@ -518,6 +714,145 @@ void main() {
       expect(item.imageUriForSize(80), item.mediaItem.imageUriForSize(80));
     }
   });
+
+  test(
+    'user data rejects late startup snapshots and preserves newer loading state',
+    () async {
+      for (final shouldFail in <bool>[false, true]) {
+        final bridge = _PendingUserDataBridge();
+        final userData = UserData(coreBridge: bridge);
+        final loading = userData.loadLibraryData();
+        bridge.updates.add({'type': 'user_data_changed'});
+        await Future<void>.delayed(Duration.zero);
+        bridge.snapshots.single.complete(
+          bridge.createSnapshot(isLoading: true),
+        );
+        await Future<void>.delayed(Duration.zero);
+        final tracks = userData.favoriteTracks;
+        final playlists = userData.playlists;
+        expect(tracks, hasLength(1));
+        expect(playlists, hasLength(1));
+        if (shouldFail) {
+          bridge.initial.completeError(StateError('initial read failed'));
+          await expectLater(loading, throwsStateError);
+        } else {
+          bridge.initial.complete(bridge.createSnapshot(hasItems: false));
+          await loading;
+        }
+        expect(identical(userData.favoriteTracks, tracks), isTrue);
+        expect(identical(userData.playlists, playlists), isTrue);
+        expect(userData.isLoadingFavorites, isTrue);
+        expect(userData.isLoadingPlaylists, isTrue);
+        expect(userData.isLoadingPlaylistTracks('playlist-id'), isTrue);
+        userData.dispose();
+        await bridge.updates.close();
+      }
+    },
+  );
+
+  test(
+    'user data keeps native loading flags until a confirmed empty snapshot',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final loading = userData.loadLibraryData();
+      bridge.initial.complete(bridge.createSnapshot(isLoading: true));
+      await loading;
+      expect(userData.isLoadingLibraryData, isFalse);
+      expect(userData.isLoadingFavorites, isTrue);
+      expect(userData.isLoadingPlaylists, isTrue);
+      final track = userData.favoriteTracks.single;
+      final refresh = userData.refreshLibrarySnapshot();
+      await Future<void>.delayed(Duration.zero);
+      expect(userData.favoriteTracks.single, same(track));
+      bridge.snapshots.single.complete(bridge.createSnapshot(hasItems: false));
+      await refresh;
+      expect(userData.favoriteTracks, isEmpty);
+      expect(userData.playlists, isEmpty);
+      expect(userData.isFavorite(track), isFalse);
+      expect(userData.isLoadingFavorites, isFalse);
+      expect(userData.isLoadingPlaylists, isFalse);
+      expect(userData.isLoadingPlaylistTracks('playlist-id'), isFalse);
+    },
+  );
+
+  test(
+    'user data drains newer snapshot requests after superseded results or errors',
+    () async {
+      for (final shouldFail in <bool>[false, true]) {
+        final bridge = _PendingUserDataBridge();
+        final userData = UserData(coreBridge: bridge);
+        var notifications = 0;
+        userData.addListener(() => notifications++);
+        final refresh = userData.refreshLibrarySnapshot();
+        final completion = expectLater(refresh, completes);
+        await Future<void>.delayed(Duration.zero);
+        expect(userData.refreshLibrarySnapshot(), same(refresh));
+        if (shouldFail) {
+          bridge.snapshots.first.completeError(StateError('superseded read'));
+        } else {
+          bridge.snapshots.first.complete(bridge.createSnapshot());
+        }
+        await Future<void>.delayed(Duration.zero);
+        expect(bridge.snapshots, hasLength(2));
+        expect(notifications, 0);
+        bridge.snapshots.last.complete(bridge.createSnapshot(hasItems: false));
+        await completion;
+        expect(userData.favoriteTracks, isEmpty);
+        expect(userData.playlists, isEmpty);
+        expect(notifications, 1);
+        final lateRefresh = userData.refreshLibrarySnapshot();
+        await Future<void>.delayed(Duration.zero);
+        userData.dispose();
+        if (shouldFail) {
+          bridge.snapshots.last.completeError(StateError('disposed read'));
+        } else {
+          bridge.snapshots.last.complete(bridge.createSnapshot());
+        }
+        await lateRefresh;
+        expect(notifications, 1);
+        expect(userData.favoriteTracks, isEmpty);
+        await userData.refreshLibrarySnapshot();
+        await userData.loadLibraryData();
+        expect(bridge.snapshots, hasLength(3));
+        expect(bridge.initialReads, 0);
+        await bridge.updates.close();
+      }
+    },
+  );
+
+  test(
+    'user data retains confirmed lists on a current read failure and can retry',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final loading = userData.loadLibraryData();
+      bridge.initial.complete(bridge.createSnapshot());
+      await loading;
+      final tracks = userData.favoriteTracks;
+      final playlists = userData.playlists;
+      final failedRefresh = userData.refreshLibrarySnapshot();
+      await Future<void>.delayed(Duration.zero);
+      bridge.snapshots.single.completeError(StateError('current read failed'));
+      await expectLater(failedRefresh, throwsStateError);
+      expect(userData.favoriteTracks, same(tracks));
+      expect(userData.playlists, same(playlists));
+      final retry = userData.refreshLibrarySnapshot();
+      await Future<void>.delayed(Duration.zero);
+      bridge.snapshots.last.complete(bridge.createSnapshot(hasItems: false));
+      await retry;
+      expect(userData.favoriteTracks, isEmpty);
+      expect(userData.playlists, isEmpty);
+    },
+  );
 
   test(
     'provider aliases without a URI use the confirmed library favorite',

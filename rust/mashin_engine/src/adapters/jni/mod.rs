@@ -50,6 +50,16 @@ pub extern "system" fn JNI_OnLoad(java_vm: JavaVM, _: *mut c_void) -> jni::sys::
             sig: "(Ljava/lang/String;Ljava/lang/String;)Z".into(),
             fn_ptr: entry_points::command as *mut c_void,
         },
+        NativeMethod {
+            name: "startQuery".into(),
+            sig: "(JLjava/lang/String;Ljava/lang/String;)Z".into(),
+            fn_ptr: entry_points::start_query as *mut c_void,
+        },
+        NativeMethod {
+            name: "cancelQuery".into(),
+            sig: "(J)Z".into(),
+            fn_ptr: entry_points::cancel_query as *mut c_void,
+        },
     ];
     if env
         .register_native_methods("com/joie96/mashin/core/RustCoreBridge", &methods)

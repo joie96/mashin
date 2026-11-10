@@ -1,9 +1,7 @@
 //! Catalog sections own ordered references and occurrence context, never media metadata.
-//! Retired payloads are decoded only while upgrading older cache schemas.
 //! The enclosing media read owns user/context/time and the writer transaction.
 
 use rusqlite::{params, Transaction};
-use serde_json::{Map, Value};
 
 use crate::domain::catalog::{CatalogQuery, CatalogValue};
 use crate::domain::identifiers::{MediaId, ProviderInstanceId, UserId};
@@ -14,21 +12,6 @@ use crate::domain::media::{
 use super::albums::write_album_observation;
 use super::database::CacheError;
 use super::tracks::{read_track, write_track_observation};
-
-const COMMON_FIELDS: &[&str] = &[
-    "version",
-    "uri",
-    "favorite",
-    "external_ids",
-    "is_playable",
-    "available",
-    "provider_mappings",
-    "metadata",
-    "position",
-    "date_added",
-];
-const ALBUM_FIELDS: &[&str] = &["album_type"];
-const TRACK_FIELDS: &[&str] = &["album", "image", "disc_number", "track_number"];
 
 // Schema and transactional observations.
 pub(super) fn initialize_artist_section_schema(
@@ -74,52 +57,6 @@ struct SectionOccurrence {
     context: TrackOccurrenceContext,
 }
 
-#[cfg(test)]
-pub(super) fn initialize_legacy_artist_section_schema(
-    transaction: &Transaction<'_>,
-) -> Result<(), CacheError> {
-    transaction.execute_batch(
-        "CREATE TABLE artist_album_read_items (
-            user_id TEXT NOT NULL, query TEXT NOT NULL, occurrence INTEGER NOT NULL CHECK(occurrence>=0),
-            provider TEXT NOT NULL, item_id TEXT NOT NULL, name TEXT NOT NULL, sort_name TEXT,
-            sort_name_known INTEGER NOT NULL CHECK(sort_name_known IN (0,1)), year INTEGER,
-            year_known INTEGER NOT NULL CHECK(year_known IN (0,1)),
-            version TEXT, uri TEXT, favorite TEXT, external_ids TEXT, is_playable TEXT, available TEXT,
-            provider_mappings TEXT, metadata TEXT, position TEXT, date_added TEXT,
-            artists_known INTEGER NOT NULL CHECK(artists_known IN (0,1)), album_type TEXT,
-            PRIMARY KEY(user_id,query,occurrence),
-            FOREIGN KEY(user_id,query) REFERENCES artist_read_states(user_id,query) ON DELETE CASCADE
-        ) STRICT, WITHOUT ROWID;
-        CREATE TABLE artist_track_read_items (
-            user_id TEXT NOT NULL, query TEXT NOT NULL, occurrence INTEGER NOT NULL CHECK(occurrence>=0),
-            provider TEXT NOT NULL, item_id TEXT NOT NULL, name TEXT NOT NULL, sort_name TEXT,
-            sort_name_known INTEGER NOT NULL CHECK(sort_name_known IN (0,1)), duration INTEGER,
-            duration_known INTEGER NOT NULL CHECK(duration_known IN (0,1)),
-            version TEXT, uri TEXT, favorite TEXT, external_ids TEXT, is_playable TEXT, available TEXT,
-            provider_mappings TEXT, metadata TEXT, position TEXT, date_added TEXT,
-            artists_known INTEGER NOT NULL CHECK(artists_known IN (0,1)),
-            album TEXT, image TEXT, disc_number TEXT, track_number TEXT,
-            PRIMARY KEY(user_id,query,occurrence),
-            FOREIGN KEY(user_id,query) REFERENCES artist_read_states(user_id,query) ON DELETE CASCADE
-        ) STRICT, WITHOUT ROWID;
-        CREATE TABLE artist_album_read_credits (
-            user_id TEXT NOT NULL, query TEXT NOT NULL, occurrence INTEGER NOT NULL,
-            position INTEGER NOT NULL CHECK(position>=0), artist_provider TEXT NOT NULL, artist_item_id TEXT NOT NULL,
-            PRIMARY KEY(user_id,query,occurrence,position),
-            FOREIGN KEY(user_id,query,occurrence) REFERENCES artist_album_read_items(user_id,query,occurrence) ON DELETE CASCADE,
-            FOREIGN KEY(artist_provider,artist_item_id) REFERENCES artists(provider,item_id)
-        ) STRICT, WITHOUT ROWID;
-        CREATE TABLE artist_track_read_credits (
-            user_id TEXT NOT NULL, query TEXT NOT NULL, occurrence INTEGER NOT NULL,
-            position INTEGER NOT NULL CHECK(position>=0), artist_provider TEXT NOT NULL, artist_item_id TEXT NOT NULL,
-            PRIMARY KEY(user_id,query,occurrence,position),
-            FOREIGN KEY(user_id,query,occurrence) REFERENCES artist_track_read_items(user_id,query,occurrence) ON DELETE CASCADE,
-            FOREIGN KEY(artist_provider,artist_item_id) REFERENCES artists(provider,item_id)
-        ) STRICT, WITHOUT ROWID;",
-    )?;
-    Ok(())
-}
-
 pub(super) fn write_catalog_section(
     transaction: &Transaction<'_>,
     query: &CatalogQuery,
@@ -151,6 +88,7 @@ pub(super) fn write_catalog_section(
             | CatalogQuery::TrackVersions { .. }
             | CatalogQuery::SimilarTracks { .. }
             | CatalogQuery::RecentlyPlayed { .. }
+            | CatalogQuery::LibraryTracks { .. }
             | CatalogQuery::PlaylistTracks { .. },
             CatalogValue::Tracks(tracks),
         ) => tracks
@@ -434,6 +372,7 @@ fn section_table(query: &CatalogQuery) -> Result<&'static str, CacheError> {
         | CatalogQuery::TrackVersions { .. }
         | CatalogQuery::SimilarTracks { .. }
         | CatalogQuery::RecentlyPlayed { .. }
+        | CatalogQuery::LibraryTracks { .. }
         | CatalogQuery::PlaylistTracks { .. } => Ok("track_list_items"),
         _ => Err(CacheError::InvalidMediaObservation(
             "query is not a catalog section",
@@ -548,226 +487,6 @@ fn write_section_occurrence(
 }
 
 // Schema replacement decodes old observations but never replays them into canonical media.
-pub(super) fn migrate_artist_section_references(
-    transaction: &Transaction<'_>,
-) -> Result<(), CacheError> {
-    let mut statement = transaction.prepare(
-        "SELECT user_id,query FROM artist_read_states ORDER BY observed_at,user_id,query",
-    )?;
-    let states = statement
-        .query_map([], |row| {
-            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let original_count:i64 = transaction.query_row("SELECT (SELECT COUNT(*) FROM artist_album_read_items)+(SELECT COUNT(*) FROM artist_track_read_items)",[],|row|row.get(0))?;
-    transaction.execute_batch(
-        "ALTER TABLE artist_album_read_items RENAME TO retired_artist_album_read_items;
-        ALTER TABLE artist_track_read_items RENAME TO retired_artist_track_read_items;",
-    )?;
-    initialize_artist_section_schema(transaction)?;
-    let mut copied_count = 0;
-    for (user, query_key) in states {
-        let query: CatalogQuery = serde_json::from_str(&query_key)?;
-        if !matches!(
-            query,
-            CatalogQuery::ArtistAlbums { .. }
-                | CatalogQuery::ArtistTracks { .. }
-                | CatalogQuery::ArtistTopTracks { .. }
-        ) {
-            continue;
-        }
-        let user = UserId(user);
-        let value = decode_legacy_artist_section(transaction, &query, &user, true)?;
-        let items = match value {
-            CatalogValue::Albums(items) => {
-                items.into_iter().map(MediaItem::Album).collect::<Vec<_>>()
-            }
-            CatalogValue::Tracks(items) => {
-                items.into_iter().map(MediaItem::Track).collect::<Vec<_>>()
-            }
-            _ => unreachable!(),
-        };
-        let mut statement = transaction.prepare(&format!(
-            "SELECT occurrence FROM retired_{} WHERE user_id=?1 AND query=?2 ORDER BY occurrence",
-            section_table(&query)?
-        ))?;
-        let occurrences = statement
-            .query_map(params![user.as_str(), query_key], |row| {
-                row.get::<_, i64>(0)
-            })?
-            .collect::<rusqlite::Result<Vec<_>>>()?;
-        for (occurrence, item) in occurrences.into_iter().zip(items) {
-            let media = item.fields();
-            let context = match &item {
-                MediaItem::Track(track) => TrackOccurrenceContext {
-                    album: if track.knowledge.album {
-                        FieldKnowledge::Known(track.album.as_ref().map(|album| {
-                            (album.media.provider.clone(), album.media.item_id.clone())
-                        }))
-                    } else {
-                        FieldKnowledge::Unknown
-                    },
-                    disc_number: track.knowledge.disc_number.then_some(track.disc_number),
-                    track_number: track.knowledge.track_number.then_some(track.track_number),
-                    image: FieldKnowledge::Unknown,
-                },
-                _ => TrackOccurrenceContext::default(),
-            };
-            write_section_occurrence(
-                transaction,
-                &query,
-                &user,
-                occurrence,
-                &SectionOccurrence {
-                    provider: media.provider.clone(),
-                    item_id: media.item_id.clone(),
-                    position: if media.knowledge.position {
-                        FieldKnowledge::Known(media.position)
-                    } else {
-                        FieldKnowledge::Unknown
-                    },
-                    context,
-                },
-            )?;
-            copied_count += 1;
-        }
-    }
-    if copied_count != original_count {
-        return Err(CacheError::ForeignFormat);
-    }
-    transaction.execute_batch(
-        "DROP TABLE artist_album_read_credits;DROP TABLE artist_track_read_credits;
-        DROP TABLE retired_artist_album_read_items;DROP TABLE retired_artist_track_read_items;",
-    )?;
-    if transaction.query_row("SELECT COUNT(*) FROM pragma_foreign_key_check", [], |row| {
-        row.get::<_, i64>(0)
-    })? != 0
-    {
-        return Err(CacheError::ForeignFormat);
-    }
-    Ok(())
-}
-
-// Historical payload decoder is used only by schema migration, never active reads.
-pub(super) fn read_legacy_artist_section(
-    transaction: &Transaction<'_>,
-    query: &CatalogQuery,
-    user_id: &UserId,
-) -> Result<CatalogValue, CacheError> {
-    decode_legacy_artist_section(transaction, query, user_id, false)
-}
-
-fn decode_legacy_artist_section(
-    transaction: &Transaction<'_>,
-    query: &CatalogQuery,
-    user_id: &UserId,
-    uses_retired_tables: bool,
-) -> Result<CatalogValue, CacheError> {
-    let (table, credits, scalar, extra_fields) = match query {
-        CatalogQuery::ArtistAlbums { .. } => (
-            "artist_album_read_items",
-            "artist_album_read_credits",
-            "year",
-            ALBUM_FIELDS,
-        ),
-        CatalogQuery::ArtistTopTracks { .. } | CatalogQuery::ArtistTracks { .. } => (
-            "artist_track_read_items",
-            "artist_track_read_credits",
-            "duration",
-            TRACK_FIELDS,
-        ),
-        _ => {
-            return Err(CacheError::InvalidMediaObservation(
-                "query is not an artist section",
-            ))
-        }
-    };
-    let table = if uses_retired_tables {
-        format!("retired_{table}")
-    } else {
-        table.to_owned()
-    };
-    let query_key = serde_json::to_string(query)?;
-    let fields = COMMON_FIELDS
-        .iter()
-        .chain(extra_fields)
-        .copied()
-        .collect::<Vec<_>>();
-    let sql=format!("SELECT provider,item_id,name,sort_name,sort_name_known,{scalar},{scalar}_known,{},occurrence,artists_known FROM {table} WHERE user_id=?1 AND query=?2 ORDER BY occurrence",fields.join(","));
-    let mut statement = transaction.prepare(&sql)?;
-    let rows = statement
-        .query_map(params![user_id.as_str(), query_key], |row| {
-            let mut object = Map::new();
-            for (index, field) in ["provider", "item_id", "name"].iter().enumerate() {
-                object.insert((*field).to_owned(), Value::String(row.get(index)?));
-            }
-            if row.get::<_, bool>(4)? {
-                object.insert(
-                    "sort_name".to_owned(),
-                    row.get::<_, Option<String>>(3)?
-                        .map(Value::String)
-                        .unwrap_or(Value::Null),
-                );
-            }
-            if row.get::<_, bool>(6)? {
-                object.insert(
-                    scalar.to_owned(),
-                    row.get::<_, Option<i64>>(5)?
-                        .map(|value| Value::Number(value.into()))
-                        .unwrap_or(Value::Null),
-                );
-            }
-            let mut encoded = Vec::new();
-            for (index, field) in fields.iter().enumerate() {
-                if let Some(value) = row.get::<_, Option<String>>(index + 7)? {
-                    encoded.push(((*field).to_owned(), value));
-                }
-            }
-            Ok((
-                object,
-                encoded,
-                row.get::<_, i64>(7 + fields.len())?,
-                row.get::<_, bool>(8 + fields.len())?,
-            ))
-        })?
-        .collect::<rusqlite::Result<Vec<_>>>()?;
-    let mut values = Vec::new();
-    for (mut object, encoded, occurrence, are_artists_known) in rows {
-        for (field, value) in encoded {
-            object.insert(field, serde_json::from_str(&value)?);
-        }
-        if are_artists_known {
-            let identities=transaction.prepare(&format!("SELECT artist_provider,artist_item_id FROM {credits} WHERE user_id=?1 AND query=?2 AND occurrence=?3 ORDER BY position"))?
-                .query_map(params![user_id.as_str(),query_key,occurrence],|row|Ok((crate::domain::identifiers::ProviderInstanceId(row.get(0)?),crate::domain::identifiers::MediaId(row.get(1)?))))?
-                .collect::<rusqlite::Result<Vec<_>>>()?;
-            let artists = identities
-                .into_iter()
-                .map(|(provider, item_id)| {
-                    super::artists::read_artist_summary(transaction, &provider, &item_id, user_id)?
-                        .ok_or(CacheError::InvalidMediaObservation(
-                            "artist credit is missing",
-                        ))
-                })
-                .collect::<Result<Vec<_>, CacheError>>()?;
-            object.insert("artists".to_owned(), serde_json::to_value(artists)?);
-        }
-        values.push(Value::Object(object));
-    }
-    match query {
-        CatalogQuery::ArtistAlbums { .. } => Ok(CatalogValue::Albums(
-            values
-                .into_iter()
-                .map(serde_json::from_value)
-                .collect::<Result<_, _>>()?,
-        )),
-        _ => Ok(CatalogValue::Tracks(
-            values
-                .into_iter()
-                .map(serde_json::from_value)
-                .collect::<Result<_, _>>()?,
-        )),
-    }
-}
 
 #[cfg(test)]
 mod tests {

@@ -16,6 +16,7 @@ import androidx.media3.session.MediaLibraryService
 import androidx.media3.session.MediaSession
 import androidx.media3.session.SessionResult
 import com.joie96.mashin.core.RustCoreBridge
+import com.joie96.mashin.media.artwork.MediaArtworkContentProvider
 import com.joie96.mashin.media.library.MediaLibraryBrowser
 import com.joie96.mashin.media.notification.PlaybackNotificationProvider
 import com.joie96.mashin.media.session.PlaybackCommandKind
@@ -49,6 +50,7 @@ class PlaybackService : MediaLibraryService() {
     private lateinit var notificationProvider: PlaybackNotificationProvider
     private lateinit var audioFocus: PlaybackAudioFocus
     private var snapshot = PlaybackSnapshot.empty()
+    private var artworkRevision = 0L
     @Volatile private var isDestroyed = false
     private var hasRestoredSession = false
     private var pendingPlaybackStarts = 0
@@ -273,7 +275,6 @@ class PlaybackService : MediaLibraryService() {
     // Snapshots are read off the main thread and projected only on the player looper.
     private fun readSnapshot(): PlaybackSnapshot {
         val state = JSONObject(checkNotNull(RustCoreBridge.query("mediaSessionState", null)))
-        val settings = JSONObject(checkNotNull(RustCoreBridge.query("getSessionSettings", null)))
         val userData = if (state.getJSONObject("queue").optJSONArray("items")?.length()?.let { it > 0 } == true) {
             try {
                 RustCoreBridge.query("getUserData", null)?.let(::JSONObject)
@@ -283,12 +284,18 @@ class PlaybackService : MediaLibraryService() {
             }
         } else null
         return PlaybackSnapshotMapper.fromPlayerState(state.getJSONObject("playerState"), state.getJSONObject("queue"),
-            settings.optString("musicAssistantUrl"), userData)
+            userData)
     }
 
     private fun applySnapshot(nextSnapshot: PlaybackSnapshot) {
-        snapshot = nextSnapshot
-        sessionPlayer?.updateState(nextSnapshot)
+        val previousItems = snapshot.mediaItems.associateBy { it.mediaId }
+        val projected = nextSnapshot.copy(mediaItems = nextSnapshot.mediaItems.map { item ->
+            val previousUri = previousItems[item.mediaId]?.mediaMetadata?.artworkUri
+            val artwork = MediaArtworkContentProvider.retainRevision(previousUri, item.mediaMetadata.artworkUri)
+            item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build()
+        })
+        snapshot = projected
+        sessionPlayer?.updateState(projected)
         mediaLibrarySession?.setMediaButtonPreferences(PlaybackSessionActions.buttons(nextSnapshot))
         if (nextSnapshot.hasPlaybackIntent && nextSnapshot.isLocalPlayback) {
             if (!wakeLock.isHeld) wakeLock.acquire()
@@ -310,9 +317,22 @@ class PlaybackService : MediaLibraryService() {
 
     // Core events only schedule reads; a long Rust operation never blocks Android's main thread.
     private fun applyCoreEvent(payload: String) {
-        val eventType = JSONObject(payload).optString("type")
+        val event = JSONObject(payload)
+        val eventType = event.optString("type")
         if (isDestroyed) return
-        browser?.onCoreEvent(eventType)
+        if (eventType == "image_source_changed" || (eventType == "cache_cleared" && event.optString("cache") == "images")) {
+            artworkRevision++
+            val proxyId = if (eventType == "image_source_changed") event.optString("proxy_id").takeIf { it.isNotBlank() } ?: return else null
+            val refreshed = snapshot.copy(mediaItems = snapshot.mediaItems.map { item ->
+                val uri = MediaArtworkContentProvider.reviseUri(item.mediaMetadata.artworkUri, proxyId, artworkRevision)
+                if (uri == null) item else item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(uri).build()).build()
+            })
+            snapshot = refreshed
+            sessionPlayer?.updateState(refreshed)
+            browser?.onCoreEvent(eventType, proxyId, artworkRevision)
+            return
+        }
+        browser?.onCoreEvent(eventType, catalogEvent = event)
         if (isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed")) return
         isSnapshotRefreshQueued = true
         coreExecutor.execute {

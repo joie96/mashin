@@ -5,9 +5,17 @@ use crate::playback::models::{PlayerState, Queue};
 use serde::Serialize;
 use std::sync::Arc;
 
+#[derive(Debug, Clone, Copy, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum CacheArea {
+    Database,
+    Images,
+}
+
 #[derive(Debug, Clone, Serialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub(crate) enum ApplicationEvent {
+    SessionChanged,
     QueueChanged {
         queue: Queue,
     },
@@ -20,6 +28,13 @@ pub(crate) enum ApplicationEvent {
         snapshot: crate::domain::recommendations::RecommendationSnapshot,
     },
     UserDataChanged,
+    ProviderInstancesChanged,
+    CacheCleared {
+        cache: CacheArea,
+    },
+    ImageSourceChanged {
+        proxy_id: String,
+    },
     CatalogUpdated {
         query: crate::domain::catalog::CatalogQuery,
         value: crate::domain::catalog::CatalogValue,

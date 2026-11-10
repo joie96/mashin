@@ -6,6 +6,8 @@ import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_query_scope.dart';
+import 'package:mashin/features/core/core_userdata.dart';
 import 'package:mashin/features/search/search_controller.dart';
 import 'package:mashin/features/search/search_screen_desktop.dart';
 import 'package:mashin/features/search/search_screen_mobile.dart';
@@ -14,7 +16,368 @@ import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 
 void main() {
   test(
-    'catalog updates respect active search',
+    'search restarts pending reads on provider change without erasing enrichment',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track);
+      bridge.emitAlbums('artist-0', year: 2020);
+      final cached = controller.tracks;
+      final oldRequests = bridge.requests.values.toList();
+      bridge.updates.add({'type': 'provider_instances_changed'});
+      expect(bridge.albumRequests, hasLength(2));
+      expect(identical(controller.tracks, cached), isTrue);
+      bridge.emitSearch('jazz', MediaType.track);
+      expect(identical(controller.tracks, cached), isTrue);
+      expect(bridge.albumRequests, hasLength(2));
+      for (final request in oldRequests) {
+        request.completeError(StateError('late search'));
+      }
+      bridge.albumRequests.first.completeError(StateError('late albums'));
+      bridge.failAll('jazz');
+      await searching;
+      await Future<void>.delayed(Duration.zero);
+      expect(identical(controller.tracks, cached), isTrue);
+    },
+  );
+
+  test(
+    'favorite reprojection remains authoritative during album updates',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final userData = _SearchUserData(coreBridge: bridge);
+      final controller = SearchController(
+        coreBridge: bridge,
+        userDataController: userData,
+      );
+      addTearDown(() async {
+        controller.dispose();
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track);
+      bridge.emitAlbums('artist-0', year: 2020);
+      userData.isTrackFavorite = true;
+      controller.refreshFavoriteStatuses();
+      bridge.emitAlbums('artist-0', year: 2024);
+      expect(controller.tracks.single.favorite, isTrue);
+      expect(controller.tracks.single.album?.year, 2024);
+      bridge.emitSearch('jazz', MediaType.track);
+      expect(controller.tracks.single.favorite, isTrue);
+      expect(controller.tracks.single.album?.year, 2024);
+      expect(bridge.albumRequests, hasLength(1));
+      bridge.failAll('jazz');
+      await searching;
+    },
+  );
+
+  test('explicit search track album years do not start enrichment', () async {
+    final bridge = _ObservedSearchCoreBridge();
+    final controller = SearchController(coreBridge: bridge);
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.updates.close();
+    });
+    final searching = controller.runSearch('jazz');
+    bridge.emitSearch('jazz', MediaType.track, trackYear: 1999);
+    bridge.emitAlbums('artist-0', year: 2024);
+    expect(controller.tracks.single.album?.year, 1999);
+    expect(bridge.albumRequests, isEmpty);
+    bridge.failAll('jazz');
+    await searching;
+  });
+
+  test(
+    'identical search completions preserve enriched list and do not restart reads',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track);
+      final source = controller.tracks;
+      bridge.emitAlbums('artist-0', year: 2024);
+      final cached = controller.tracks;
+      bridge.requests[('jazz', MediaType.track)]!.complete(
+        SearchResults(
+          artists: const [],
+          albums: const [],
+          tracks: source,
+          playlists: const [],
+          radio: const [],
+        ),
+      );
+      await Future<void>.delayed(Duration.zero);
+      expect(identical(controller.tracks, cached), isTrue);
+      expect(bridge.albumRequests, hasLength(1));
+      bridge.failAll('jazz');
+      await searching;
+    },
+  );
+
+  for (final type in [
+    MediaType.track,
+    MediaType.album,
+    MediaType.playlist,
+    MediaType.artist,
+  ]) {
+    for (final isEmpty in [false, true]) {
+      test(
+        'early $type results end first loading and survive failure, empty=$isEmpty',
+        () async {
+          final bridge = _ObservedSearchCoreBridge();
+          final controller = SearchController(coreBridge: bridge);
+          addTearDown(() async {
+            controller.dispose();
+            await bridge.updates.close();
+          });
+          final searching = controller.runSearch('jazz');
+          List<MediaItem> values() => switch (type) {
+            MediaType.track => controller.tracks,
+            MediaType.album => controller.albums,
+            MediaType.playlist => controller.playlists,
+            MediaType.artist => controller.artists,
+            _ => throw ArgumentError.value(type),
+          };
+          bool isLoading() => switch (type) {
+            MediaType.track => controller.isLoadingTracks,
+            MediaType.album => controller.isLoadingAlbums,
+            MediaType.playlist => controller.isLoadingPlaylists,
+            MediaType.artist => controller.isLoadingArtists,
+            _ => throw ArgumentError.value(type),
+          };
+          var changes = 0;
+          controller.addListener(() => changes++);
+          bridge.emitSearch('jazz', type, isEmpty: isEmpty, limit: 1);
+          expect(changes, 0);
+          expect(isLoading(), isTrue);
+          bridge.emitSearch('jazz', type, isEmpty: isEmpty);
+          expect(values(), hasLength(isEmpty ? 0 : 1));
+          expect(isLoading(), isFalse);
+          expect(changes, 1);
+          final cached = values();
+          bridge.emitSearch('jazz', type, isEmpty: isEmpty);
+          expect(changes, 1);
+          expect(identical(values(), cached), isTrue);
+          bridge.failAll('jazz');
+          await searching;
+          expect(identical(values(), cached), isTrue);
+          expect(isLoading(), isFalse);
+        },
+      );
+    }
+  }
+
+  for (final retirement in [
+    'new search',
+    'reset',
+    'dispose',
+    'search invalidated',
+    'albums invalidated',
+  ]) {
+    test(
+      'search cancels owned reads and rejects late values after $retirement',
+      () async {
+        final bridge = _ObservedSearchCoreBridge();
+        final controller = SearchController(coreBridge: bridge);
+        addTearDown(() async {
+          if (retirement != 'dispose') controller.dispose();
+          await bridge.updates.close();
+        });
+        final searching = controller.runSearch('jazz');
+        bridge.emitSearch('jazz', MediaType.track);
+        bridge.emitAlbums('artist-0', year: 2020);
+        expect(controller.tracks.single.album?.year, 2020);
+        Future<void>? next;
+        switch (retirement) {
+          case 'new search':
+            next = controller.runSearch('rock');
+            bridge.emitSearch(
+              'rock',
+              MediaType.track,
+              trackId: 'new',
+              artistCount: 0,
+            );
+          case 'reset':
+            controller.resetResults();
+          case 'dispose':
+            controller.dispose();
+          case 'search invalidated':
+            bridge.emitInvalidated('Search');
+          case 'albums invalidated':
+            bridge.emitInvalidated('ArtistAlbums');
+        }
+        final visible = controller.tracks;
+        var changes = 0;
+        if (retirement != 'dispose') controller.addListener(() => changes++);
+        expect(
+          bridge.canceled,
+          containsAll([
+            'jazz:track',
+            'jazz:album',
+            'jazz:playlist',
+            'jazz:artist',
+            'albums:artist-0',
+          ]),
+        );
+        bridge.emitSearch('jazz', MediaType.track, trackId: 'late');
+        bridge.emitAlbums('artist-0', year: 2040);
+        bridge.albumRequests.first.complete([
+          Album(
+            itemId: 'Album-1',
+            provider: 'library',
+            name: 'Late',
+            year: 2050,
+            artists: const [],
+          ),
+        ]);
+        bridge.failAll('jazz');
+        await searching;
+        await Future<void>.delayed(Duration.zero);
+        expect(identical(controller.tracks, visible), isTrue);
+        expect(changes, 0);
+        if (next != null) {
+          bridge.failAll('rock');
+          await next;
+        }
+      },
+    );
+  }
+
+  test(
+    'search joins all cached artist albums by exact identity and replaces derived years',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track, artistCount: 5);
+      expect(bridge.albumRequests, hasLength(5));
+      bridge.emitAlbums('unrelated', year: 1900);
+      bridge.emitAlbums('artist-4', year: 1901, albumId: 'album-1');
+      expect(controller.tracks.single.album?.year, isNull);
+      bridge.emitAlbums('artist-4', year: 2020);
+      expect(controller.tracks.single.album?.year, 2020);
+      bridge.emitAlbums('artist-4', year: 2024);
+      expect(controller.tracks.single.album?.year, 2024);
+      var changes = 0;
+      controller.addListener(() => changes++);
+      bridge.emitAlbums('artist-4', year: 2024);
+      expect(changes, 0);
+      bridge.emitAlbums('artist-4');
+      expect(controller.tracks.single.album?.year, isNull);
+      bridge.failAll('jazz');
+      await searching;
+    },
+  );
+
+  test(
+    'changed search tracks replace enrichment without waiting for old albums',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track, artistCount: 2);
+      expect(bridge.albumRequests, hasLength(2));
+      bridge.emitSearch('jazz', MediaType.track, trackId: 'new');
+      expect(bridge.albumRequests, hasLength(3));
+      expect(
+        bridge.canceled,
+        containsAll(['albums:artist-0', 'albums:artist-1']),
+      );
+      bridge.emitAlbums('artist-1', year: 1900);
+      expect(controller.tracks.single.album?.year, isNull);
+      bridge.emitAlbums('artist-0', year: 2024);
+      final cached = controller.tracks;
+      bridge.emitSearch('jazz', MediaType.track, trackId: 'new');
+      expect(identical(controller.tracks, cached), isTrue);
+      expect(bridge.albumRequests, hasLength(3));
+      bridge.albumRequests.first.complete([
+        Album(
+          itemId: 'Album-1',
+          provider: 'library',
+          name: 'Old',
+          year: 1901,
+          artists: const [],
+        ),
+      ]);
+      await Future<void>.delayed(Duration.zero);
+      expect(identical(controller.tracks, cached), isTrue);
+      bridge.emitSearch('jazz', MediaType.track, isEmpty: true);
+      bridge.emitAlbums('artist-0', year: 2030);
+      expect(controller.tracks, isEmpty);
+      bridge.failAll('jazz');
+      await searching;
+    },
+  );
+
+  test(
+    'only matching search and active album invalidations retire results',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track);
+      final cached = controller.tracks;
+      bridge.emitInvalidated('Search', query: 'old');
+      bridge.emitInvalidated('Search', limit: 1);
+      bridge.emitInvalidated('Search', mediaType: MediaType.radio);
+      bridge.emitInvalidated('ArtistAlbums', artistId: 'unrelated');
+      expect(identical(controller.tracks, cached), isTrue);
+      expect(bridge.canceled, isEmpty);
+      bridge.failAll('jazz');
+      await searching;
+    },
+  );
+
+  test(
+    'cached search tracks start album reads before either refresh',
+    () async {
+      final bridge = _ObservedSearchCoreBridge();
+      final controller = SearchController(coreBridge: bridge);
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final searching = controller.runSearch('jazz');
+      bridge.emitSearch('jazz', MediaType.track);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.albumRequests, hasLength(1));
+      expect(bridge.requests[('jazz', MediaType.track)]!.isCompleted, isFalse);
+      bridge.emitAlbums('artist-0', year: 2020);
+      expect(controller.tracks.single.album?.year, 2020);
+      expect(controller.isLoadingTracks, isFalse);
+      final cached = controller.tracks;
+      bridge.failAll('jazz');
+      bridge.albumRequests.single.completeError(StateError('offline albums'));
+      await searching;
+      await Future<void>.delayed(Duration.zero);
+      expect(identical(controller.tracks, cached), isTrue);
+    },
+  );
+
+  test(
+    'database clearing reloads active search without clearing visible results',
     () async {
       final bridge = _EventSearchCoreBridge();
       final controller = SearchController(coreBridge: bridge);
@@ -23,32 +386,57 @@ void main() {
         await bridge.updates.close();
       });
       await controller.runSearch('jazz');
-      void emit(String query, List<Map<String, dynamic>> tracks) {
-        bridge.updates.add(<String, dynamic>{
-          'type': 'catalog_updated',
-          'query': <String, dynamic>{
-            'Search': <String, dynamic>{
-              'query': query,
-              'media_type': 'track',
-              'limit': 50,
-            },
-          },
-          'value': <String, dynamic>{
-            'Search': <String, dynamic>{'tracks': tracks},
-          },
-        });
-      }
-
-      emit('old', []);
+      expect(bridge.requestedTypes, hasLength(4));
+      bridge.updates.add({'type': 'cache_cleared', 'cache': 'images'});
+      expect(bridge.requestedTypes, hasLength(4));
+      bridge.updates.add({'type': 'cache_cleared', 'cache': 'database'});
+      expect(bridge.requestedTypes, hasLength(8));
       expect(controller.tracks.single.name, 'Track');
-      emit('jazz', [
-        {'item_id': 'fresh', 'provider': 'library', 'name': 'Fresh'},
-      ]);
-      expect(controller.tracks.single.name, 'Fresh');
-      emit('jazz', []);
-      expect(controller.tracks, isEmpty);
+      expect(controller.isLoadingTracks, isTrue);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isLoadingTracks, isFalse);
+      expect(controller.tracks.single.name, 'Track');
+      bridge.updates.add({'type': 'provider_instances_changed'});
+      expect(bridge.requestedTypes, hasLength(12));
+      expect(controller.tracks.single.name, 'Track');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isLoadingTracks, isFalse);
     },
   );
+
+  test('catalog updates respect active search', () async {
+    final bridge = _EventSearchCoreBridge();
+    final controller = SearchController(coreBridge: bridge);
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.updates.close();
+    });
+    await controller.runSearch('jazz');
+    void emit(String query, List<Map<String, dynamic>> tracks) {
+      bridge.updates.add(<String, dynamic>{
+        'type': 'catalog_updated',
+        'query': <String, dynamic>{
+          'Search': <String, dynamic>{
+            'query': query,
+            'media_type': 'track',
+            'limit': 50,
+          },
+        },
+        'value': <String, dynamic>{
+          'Search': <String, dynamic>{'tracks': tracks},
+        },
+      });
+    }
+
+    emit('old', []);
+    expect(controller.tracks.single.name, 'Track');
+    emit('jazz', [
+      {'item_id': 'fresh', 'provider': 'library', 'name': 'Fresh'},
+    ]);
+    expect(controller.tracks.single.name, 'Fresh');
+    emit('jazz', []);
+    expect(controller.tracks, isEmpty);
+  });
 
   test('loads every search result type through the core bridge', () async {
     final coreBridge = _FakeSearchCoreBridge();
@@ -489,6 +877,155 @@ const SearchResults _emptyResults = SearchResults(
   playlists: <Playlist>[],
   radio: <MediaItem>[],
 );
+
+class _SearchUserData extends UserData {
+  _SearchUserData({required super.coreBridge});
+
+  bool isTrackFavorite = false;
+
+  @override
+  bool isFavorite(MediaItem item) =>
+      item is Track ? isTrackFavorite : item.favorite;
+}
+
+class _ObservedSearchCoreBridge extends _DeferredSearchCoreBridge {
+  final updates = StreamController<Map<String, dynamic>>.broadcast(sync: true);
+  final albumRequests = <Completer<List<Album>>>[];
+  final albumArtists = <String>[];
+  final canceled = <String>[];
+
+  @override
+  Stream<Map<String, dynamic>> get events => updates.stream;
+
+  @override
+  Future<SearchResults> searchMedia(
+    String query,
+    MediaType mediaType, {
+    int limit = 50,
+  }) {
+    final result = super.searchMedia(query, mediaType, limit: limit);
+    return CoreQueryScope.current?.execute(
+          () => result,
+          onCancel: () => canceled.add('$query:${mediaType.name}'),
+        ) ??
+        result;
+  }
+
+  @override
+  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+    final pending = Completer<List<Album>>();
+    albumRequests.add(pending);
+    albumArtists.add(itemId);
+    return CoreQueryScope.current?.execute(
+          () => pending.future,
+          onCancel: () => canceled.add('albums:$itemId'),
+        ) ??
+        pending.future;
+  }
+
+  void emitSearch(
+    String query,
+    MediaType type, {
+    bool isEmpty = false,
+    int artistCount = 1,
+    int limit = 50,
+    String trackId = 'track',
+    String albumId = 'Album-1',
+    int? trackYear,
+  }) {
+    final key = switch (type) {
+      MediaType.track => 'tracks',
+      MediaType.album => 'albums',
+      MediaType.playlist => 'playlists',
+      MediaType.artist => 'artists',
+      _ => throw ArgumentError.value(type),
+    };
+    updates.add({
+      'type': 'catalog_updated',
+      'query': {
+        'Search': {'query': query, 'media_type': type.name, 'limit': limit},
+      },
+      'value': {
+        'Search': {
+          key: [
+            if (!isEmpty)
+              {
+                'provider': 'library',
+                'item_id': type == MediaType.track ? trackId : type.name,
+                'name': 'Cached ${type.name}',
+                if (type == MediaType.track)
+                  'album': {
+                    'provider': 'library',
+                    'item_id': albumId,
+                    'name': 'Album',
+                    'year': ?trackYear,
+                  },
+                if (type == MediaType.track)
+                  'artists': [
+                    for (var index = 0; index < artistCount; index++)
+                      {
+                        'provider': 'library',
+                        'item_id': 'artist-$index',
+                        'name': 'Artist',
+                      },
+                  ],
+              },
+          ],
+        },
+      },
+    });
+  }
+
+  void emitAlbums(String artistId, {int? year, String albumId = 'Album-1'}) {
+    updates.add({
+      'type': 'catalog_updated',
+      'query': {
+        'ArtistAlbums': {'provider': 'library', 'item_id': artistId},
+      },
+      'value': {
+        'Albums': [
+          if (year != null)
+            {
+              'provider': 'library',
+              'item_id': albumId,
+              'name': 'Full album',
+              'year': year,
+            },
+        ],
+      },
+    });
+  }
+
+  void failAll(String query) {
+    for (final entry in requests.entries) {
+      if (entry.key.$1 == query && !entry.value.isCompleted) {
+        entry.value.completeError(StateError('offline search'));
+      }
+    }
+  }
+
+  void emitInvalidated(
+    String kind, {
+    String query = 'jazz',
+    int limit = 50,
+    String artistId = 'artist-0',
+    MediaType mediaType = MediaType.track,
+  }) {
+    updates.add({
+      'type': 'catalog_read_changed',
+      'query': {
+        kind: kind == 'Search'
+            ? {'query': query, 'media_type': mediaType.name, 'limit': limit}
+            : {'provider': 'library', 'item_id': artistId},
+      },
+      'snapshot': {
+        'phase': 'invalidated',
+        'knowledge': 'unknown',
+        'freshness': 'unknown',
+      },
+    });
+  }
+}
 
 class _DeferredSearchCoreBridge extends Fake implements MashinCoreBridgeApi {
   @override

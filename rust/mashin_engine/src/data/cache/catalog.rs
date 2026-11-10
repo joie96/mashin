@@ -72,8 +72,8 @@ impl RefreshError {
 }
 
 #[derive(serde::Deserialize)]
-struct ServerIdentity {
-    server_id: String,
+pub(super) struct ServerIdentity {
+    pub(super) server_id: String,
 }
 impl Drop for Refresh {
     fn drop(&mut self) {
@@ -169,12 +169,287 @@ impl CachedCatalog {
     }
 }
 
+impl CachedCatalog {
+    // Keep the remaining observation owned by the caller after the first local result.
+    async fn read_providers<T: Send + 'static>(
+        &self,
+        query: CatalogQuery,
+        extract: fn(CatalogValue) -> Option<Vec<T>>,
+    ) -> Result<crate::application::repositories::ProviderRead<T>, String> {
+        use crate::application::repositories::{
+            ProviderRead, ProviderRefreshError, ProviderUpdate,
+        };
+        let mut updates = self.observe_cached(query, false);
+        let first = updates
+            .next()
+            .await
+            .ok_or("provider observation ended before local read")?;
+        if first.phase == CatalogLoadPhase::Invalidated {
+            return Err(first
+                .error
+                .unwrap_or_else(|| "provider session invalidated".into()));
+        }
+        let current = ProviderUpdate {
+            items: first.value.and_then(extract),
+            cache_error: first.cache_error,
+        };
+        let refresh = match first.phase {
+            CatalogLoadPhase::Ready => None,
+            CatalogLoadPhase::Failed => {
+                let error = first
+                    .error
+                    .unwrap_or_else(|| "provider refresh failed".into());
+                Some(
+                    Box::pin(async move { Err(ProviderRefreshError::Failed(error)) })
+                        as futures_util::future::BoxFuture<'static, _>,
+                )
+            }
+            _ => Some(Box::pin(async move {
+                while let Some(state) = updates.next().await {
+                    match state.phase {
+                        CatalogLoadPhase::Ready => {
+                            return Ok(ProviderUpdate {
+                                items: state.value.and_then(extract),
+                                cache_error: state.cache_error,
+                            })
+                        }
+                        CatalogLoadPhase::Failed => {
+                            return Err(ProviderRefreshError::Failed(
+                                state
+                                    .error
+                                    .unwrap_or_else(|| "provider refresh failed".into()),
+                            ));
+                        }
+                        CatalogLoadPhase::Invalidated => {
+                            return Err(ProviderRefreshError::Invalidated(
+                                state
+                                    .error
+                                    .unwrap_or_else(|| "provider session invalidated".into()),
+                            ))
+                        }
+                        _ => {}
+                    }
+                }
+                Err(ProviderRefreshError::Failed(
+                    "provider observation ended before completion".into(),
+                ))
+            })
+                as futures_util::future::BoxFuture<'static, _>),
+        };
+        Ok(ProviderRead { current, refresh })
+    }
+}
+
+impl crate::application::repositories::ProviderClient for CachedCatalog {
+    // Provider reads share catalog ownership, scheduling and durable observations.
+    fn read_manifests(
+        &self,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<
+            crate::application::repositories::ProviderRead<
+                crate::domain::providers::ProviderManifest,
+            >,
+            String,
+        >,
+    > {
+        Box::pin(
+            self.read_providers(CatalogQuery::ProviderManifests {}, |value| match value {
+                CatalogValue::ProviderManifests(items) => Some(items),
+                _ => None,
+            }),
+        )
+    }
+
+    fn read_instances(
+        &self,
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<
+            crate::application::repositories::ProviderRead<
+                crate::domain::providers::ProviderInstance,
+            >,
+            String,
+        >,
+    > {
+        Box::pin(
+            self.read_providers(CatalogQuery::ProviderInstances, |value| match value {
+                CatalogValue::ProviderInstances(items) => Some(items),
+                _ => None,
+            }),
+        )
+    }
+
+    fn get_icon_data<'request>(
+        &'request self,
+        provider: &'request str,
+    ) -> futures_util::future::BoxFuture<'request, Result<Option<String>, String>> {
+        Box::pin(async move {
+            let runtime = &self.inner;
+            runtime
+                .require_active()
+                .map_err(|_| "provider session invalidated".to_owned())?;
+            let context = runtime.cache_context().await;
+            let images = if let Ok(context) = &context {
+                let server_id = context.cache.observe().borrow().server_id.clone();
+                if let Some(server_id) = server_id {
+                    match context.cache.activate_images(server_id).await {
+                        Ok(()) => context.cache.images().await.ok(),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            } else {
+                None
+            };
+            let cached = if let Some(images) = &images {
+                super::image_loader::read_provider_icon(images, provider)
+                    .await
+                    .ok()
+            } else {
+                None
+            };
+            let result = runtime.client.get_icon_data(provider).await;
+            runtime
+                .require_active()
+                .map_err(|_| "provider session invalidated".to_owned())?;
+            match result {
+                Ok(icon) => {
+                    if let (Ok(context), Some(images)) = (context, images.as_ref()) {
+                        runtime
+                            .verify_server_identity(&context, false)
+                            .await
+                            .map_err(|error| match error {
+                                RefreshError::Failed(error) | RefreshError::Invalidated(error) => {
+                                    error
+                                }
+                            })?;
+                        if let Err(error) = super::image_loader::persist_provider_icon(
+                            images,
+                            provider,
+                            icon.clone(),
+                        )
+                        .await
+                        {
+                            LOGGER.debug(format_args!("Provider icon persistence failed: {error}"));
+                        }
+                    }
+                    runtime
+                        .require_active()
+                        .map_err(|_| "provider session invalidated".to_owned())?;
+                    Ok(icon)
+                }
+                Err(error) => {
+                    if let Some(images) = &images {
+                        images.require_active().map_err(|error| error.to_string())?;
+                    }
+                    cached.ok_or(error)
+                }
+            }
+        })
+    }
+}
+
 impl CatalogRuntime {
-    // Reserve confirmation order before identity/storage waits; readers never acquire this guard.
+    // Reserve confirmation order before waits; only inline cache publications share this guard.
     async fn begin_confirmed_write(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.confirmed_revision
             .fetch_add(1, std::sync::atomic::Ordering::AcqRel);
         self.confirmed_writes.lock().await
+    }
+
+    // Image files precede metadata; older refreshes cannot publish after a newer confirmation.
+    async fn persist_inline_images(
+        &self,
+        context: &CacheContext,
+        value: &mut CatalogValue,
+        expected_revision: Option<u64>,
+    ) -> Result<(), String> {
+        use crate::domain::media::MediaItem;
+        let has_manifest_icons = matches!(value,CatalogValue::ProviderManifests(manifests) if manifests.iter().any(|manifest| [&manifest.icon,&manifest.icon_svg,&manifest.icon_svg_dark,&manifest.icon_svg_monochrome].into_iter().flatten().any(|value|crate::domain::artwork::is_inline_source(value))));
+        let playlists: Vec<_> = match value {
+            CatalogValue::Playlist(playlist)
+            | CatalogValue::Item(MediaItem::Playlist(playlist)) => vec![playlist],
+            CatalogValue::Playlists(playlists) => playlists.iter_mut().collect(),
+            CatalogValue::Search(results) => results.playlists.iter_mut().collect(),
+            CatalogValue::RecommendationItems(items) => items
+                .iter_mut()
+                .filter_map(|item| match item {
+                    MediaItem::Playlist(playlist) => Some(playlist),
+                    _ => None,
+                })
+                .collect(),
+            CatalogValue::RecommendationFolders(folders) => folders
+                .iter_mut()
+                .flat_map(|folder| folder.items.iter_mut())
+                .filter_map(|item| match item {
+                    MediaItem::Playlist(playlist) => Some(playlist),
+                    _ => None,
+                })
+                .collect(),
+            _ => Vec::new(),
+        };
+        let playlists: Vec<_> = playlists
+            .into_iter()
+            .filter(|playlist| {
+                playlist.media.metadata.as_ref().is_some_and(|metadata| {
+                    metadata
+                        .images
+                        .iter()
+                        .any(crate::domain::artwork::is_inline_image)
+                })
+            })
+            .collect();
+        if playlists.is_empty() && !has_manifest_icons {
+            return Ok(());
+        }
+        let _publication_order = if expected_revision.is_some() {
+            Some(self.confirmed_writes.lock().await)
+        } else {
+            None
+        };
+        if expected_revision.is_some_and(|expected| {
+            self.confirmed_revision
+                .load(std::sync::atomic::Ordering::Acquire)
+                != expected
+        }) {
+            return Err(super::database::CacheError::SupersededObservation.to_string());
+        }
+        context
+            .database
+            .require_active()
+            .map_err(|error| error.to_string())?;
+        let server_id = context
+            .cache
+            .observe()
+            .borrow()
+            .server_id
+            .clone()
+            .ok_or("image cache requires an observed server identity")?;
+        context
+            .cache
+            .activate_images(server_id)
+            .await
+            .map_err(|error| error.to_string())?;
+        let images = context
+            .cache
+            .images()
+            .await
+            .map_err(|error| error.to_string())?;
+        context
+            .database
+            .require_active()
+            .map_err(|error| error.to_string())?;
+        for playlist in playlists {
+            super::image_loader::persist_playlist_images(&images, playlist).await?;
+        }
+        if let CatalogValue::ProviderManifests(manifests) = value {
+            for manifest in manifests {
+                super::image_loader::persist_manifest_icons(&images, manifest).await?;
+            }
+        }
+        Ok(())
     }
 
     // Retired sessions and leases cannot start or publish a new observation.
@@ -184,20 +459,10 @@ impl CatalogRuntime {
                 .database
                 .require_active()
                 .map_err(RefreshError::from_cache),
-            CacheAccess::Session(session) => {
-                if session
-                    .owner
-                    .generation
-                    .load(std::sync::atomic::Ordering::Acquire)
-                    != session.generation
-                {
-                    Err(RefreshError::Invalidated(
-                        "catalog belongs to a retired session".into(),
-                    ))
-                } else {
-                    Ok(())
-                }
-            }
+            CacheAccess::Session(session) => session
+                .owner
+                .require_generation(session.generation)
+                .map_err(RefreshError::Invalidated),
         }
     }
 
@@ -252,7 +517,10 @@ impl CatalogRuntime {
             .unwrap_or_else(|error| error.into_inner());
         refreshes.retain(|_, refresh| {
             refresh.upgrade().is_some_and(|refresh| {
-                refresh.changes.borrow().phase == CatalogLoadPhase::Refreshing
+                matches!(
+                    refresh.changes.borrow().phase,
+                    CatalogLoadPhase::ReadingLocal | CatalogLoadPhase::Refreshing
+                )
             })
         });
         let expected_revision = self
@@ -328,6 +596,7 @@ impl CatalogRuntime {
                                     state.phase = CatalogLoadPhase::Refreshing;
                                     match &result {
                                         Ok((_, cached)) if state.source != Some(crate::domain::catalog::CatalogDataSource::Server) => {
+                                            state.cache_error = cached.cache_error.clone();
                                             state.value = cached.value.clone();
                                             state.source = cached.source;
                                             state.knowledge = cached.knowledge;
@@ -335,6 +604,7 @@ impl CatalogRuntime {
                                             state.observed_at = cached.observed_at;
                                         }
                                         Ok((_, cached)) => {
+                                            state.cache_error = cached.cache_error.clone();
                                             if let Some(server_value) = state.value.as_ref() {
                                                 state.value = Some(merge_server_value(cached.value.clone(), server_value.clone()));
                                             }
@@ -380,7 +650,7 @@ impl CatalogRuntime {
                     let local_result = local_result.unwrap();
                     let Some(publication) = publication.upgrade() else { return; };
                     let mut state = publication.changes.borrow().clone();
-                    let value = match remote_result.unwrap() {
+                    let mut value = match remote_result.unwrap() {
                         Ok(value) => value,
                         Err(error) => {
                             state.phase = CatalogLoadPhase::Failed;
@@ -394,6 +664,9 @@ impl CatalogRuntime {
                             let verify = runtime.verify_server_identity(&context, false);
                             match tokio::time::timeout(Duration::from_secs(5), verify).await {
                                 Ok(Ok(())) => {
+                                    match runtime.persist_inline_images(&context, &mut value, Some(expected_revision)).await {
+                                    Err(error) => Err(RefreshError::Failed(error)),
+                                    Ok(()) => {
                                     let write_query = query.clone();
                                     let user_id = context.user_id.clone();
                                     let revision = runtime.confirmed_revision.clone();
@@ -403,6 +676,8 @@ impl CatalogRuntime {
                                         }
                                         write_cached_read(transaction, &write_query, &user_id, &value, chrono::Utc::now().timestamp())
                                     }).await.map_err(RefreshError::from_cache)
+                                    }
+                                    }
                                 }
                                 Ok(Err(error)) => Err(error),
                                 Err(_) => Err(RefreshError::Failed("cache identity verification exceeded its deadline".into())),
@@ -460,16 +735,31 @@ impl CatalogRuntime {
         let context = self.cache_context().await?;
         let read_query = query.clone();
         let user_id = context.user_id.clone();
-        let (observed, partial) = context
+        let (observed, partial, manifest_slots) = context
             .database
             .read_snapshot(move |snapshot| {
+                if matches!(read_query, CatalogQuery::ProviderManifests {}) {
+                    let stored = super::providers::read_manifest_observation(snapshot, &user_id)?;
+                    let observed = stored.as_ref().map(|(manifests, observed_at)| {
+                        super::reads::CatalogReadObservation {
+                            value: CatalogValue::ProviderManifests(
+                                manifests
+                                    .iter()
+                                    .map(|stored| stored.manifest.clone())
+                                    .collect(),
+                            ),
+                            observed_at: *observed_at,
+                        }
+                    });
+                    return Ok((observed, None, stored.map(|(manifests, _)| manifests)));
+                }
                 let observed = read_cached_read(snapshot, &read_query, &user_id)?;
                 let partial = if observed.is_none() {
                     read_partial_cached(snapshot, &read_query, &user_id)?
                 } else {
                     None
                 };
-                Ok((observed, partial))
+                Ok((observed, partial, None))
             })
             .await
             .map_err(RefreshError::from_cache)?;
@@ -481,10 +771,46 @@ impl CatalogRuntime {
                 value.observed_at <= now
                     && now - value.observed_at < self.fresh_for.as_secs() as i64
             });
-        let value = observed
+        let mut value = observed
             .as_ref()
             .map(|value| value.value.clone())
             .or(partial);
+        let mut cache_error = None;
+        if let Some(stored) =
+            manifest_slots.filter(|stored| stored.iter().any(|manifest| !manifest.icons.is_empty()))
+        {
+            let restore = async {
+                let server_id = context
+                    .cache
+                    .observe()
+                    .borrow()
+                    .server_id
+                    .clone()
+                    .ok_or("image cache requires server identity")?;
+                context
+                    .cache
+                    .activate_images(server_id)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let images = context
+                    .cache
+                    .images()
+                    .await
+                    .map_err(|error| error.to_string())?;
+                let mut manifests = Vec::new();
+                for manifest in stored {
+                    manifests.push(
+                        super::image_loader::restore_manifest_icons(&images, manifest).await?,
+                    );
+                }
+                Ok::<_, String>(CatalogValue::ProviderManifests(manifests))
+            }
+            .await;
+            match restore {
+                Ok(restored) => value = Some(restored),
+                Err(error) => cache_error = Some(error),
+            }
+        }
         let snapshot = CatalogLoadSnapshot {
             source: value
                 .as_ref()
@@ -507,7 +833,7 @@ impl CatalogRuntime {
             phase: CatalogLoadPhase::Refreshing,
             observed_at: observed.map(|value| value.observed_at),
             error: None,
-            cache_error: None,
+            cache_error,
         };
         Ok((context, snapshot))
     }
@@ -560,6 +886,28 @@ fn merge_server_value(previous: Option<CatalogValue>, incoming: CatalogValue) ->
         }};
     }
     match (previous, incoming) {
+        (
+            Some(CatalogValue::ProviderManifests(previous)),
+            CatalogValue::ProviderManifests(incoming),
+        ) => {
+            let mut known: HashMap<_, _> = previous
+                .into_iter()
+                .map(|manifest| (manifest.domain.clone(), manifest))
+                .collect();
+            CatalogValue::ProviderManifests(
+                incoming
+                    .into_iter()
+                    .map(|manifest| {
+                        if let Some(mut previous) = known.remove(&manifest.domain) {
+                            previous.merge_known(manifest);
+                            previous
+                        } else {
+                            manifest
+                        }
+                    })
+                    .collect(),
+            )
+        }
         (Some(CatalogValue::Artist(previous)), CatalogValue::Artist(incoming)) => {
             single!(Artist, previous, incoming)
         }
@@ -604,6 +952,38 @@ fn merge_server_value(previous: Option<CatalogValue>, incoming: CatalogValue) ->
 }
 
 impl CatalogClient for CachedCatalog {
+    fn clear_database_cache(&self) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move {
+            let _order = self.inner.begin_confirmed_write().await;
+            let context = self
+                .inner
+                .cache_context()
+                .await
+                .map_err(|error| match error {
+                    RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
+                })?;
+            self.inner.require_active().map_err(|error| match error {
+                RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
+            })?;
+            match &self.inner.access {
+                CacheAccess::Session(session) => {
+                    session
+                        .owner
+                        .clear_cache_for_generation(
+                            session.generation,
+                            super::lifecycle::CacheMaintenance::ClearDatabase,
+                        )
+                        .await
+                }
+                CacheAccess::Active(_) => context
+                    .cache
+                    .clear_database_cache()
+                    .await
+                    .map_err(|error| error.to_string()),
+            }
+        })
+    }
+
     // Confirmed online writes retire older in-flight observations before cache publication.
     fn commit_confirmed_media(
         &self,
@@ -633,6 +1013,13 @@ impl CatalogClient for CachedCatalog {
                 .map_err(|error| match error {
                     RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
                 })?;
+            let mut value = CatalogValue::Item(item);
+            runtime
+                .persist_inline_images(&context, &mut value, None)
+                .await?;
+            let CatalogValue::Item(item) = value else {
+                unreachable!()
+            };
             let user_id = context.user_id.clone();
             context
                 .database
@@ -711,7 +1098,96 @@ impl CatalogClient for CachedCatalog {
         })
     }
 
-    // Legacy consumers await completion; observing consumers receive local data before refresh.
+    fn read_confirmed_playlist_contents(
+        &self,
+        playlist: crate::domain::media::Playlist,
+    ) -> futures_util::future::BoxFuture<'_, Result<Vec<crate::domain::media::Track>, String>> {
+        let runtime = self.inner.clone();
+        Box::pin(async move {
+            runtime.require_active().map_err(|error| match error {
+                RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
+            })?;
+            let query = CatalogQuery::PlaylistTracks {
+                item_id: playlist.media.item_id.clone(),
+                provider: playlist.media.provider.as_str().to_owned(),
+                allow_dynamic_tracks: false,
+            };
+            let CatalogValue::Tracks(tracks) = runtime.client.load_catalog(query, true).await?
+            else {
+                return Err("playlist tracks unavailable".into());
+            };
+            runtime.require_active().map_err(|error| match error {
+                RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
+            })?;
+            Ok(tracks)
+        })
+    }
+
+    fn commit_confirmed_playlist_contents(
+        &self,
+        playlist: crate::domain::media::Playlist,
+        tracks: Vec<crate::domain::media::Track>,
+    ) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
+        let runtime = self.inner.clone();
+        Box::pin(async move {
+            let _write_order = runtime.begin_confirmed_write().await;
+            let query = CatalogQuery::PlaylistTracks {
+                item_id: playlist.media.item_id.clone(),
+                provider: playlist.media.provider.as_str().to_owned(),
+                allow_dynamic_tracks: false,
+            };
+            let context = runtime.cache_context().await.map_err(|error| match error {
+                RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
+            })?;
+            runtime
+                .verify_server_identity(&context, true)
+                .await
+                .map_err(|error| match error {
+                    RefreshError::Failed(error) | RefreshError::Invalidated(error) => error,
+                })?;
+            let mut value = CatalogValue::Playlist(playlist);
+            runtime
+                .persist_inline_images(&context, &mut value, None)
+                .await?;
+            let CatalogValue::Playlist(playlist) = value else {
+                unreachable!()
+            };
+            let user_id = context.user_id.clone();
+            let observed_at = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_err(|error| error.to_string())?
+                .as_secs();
+            let observed_at = i64::try_from(observed_at).map_err(|error| error.to_string())?;
+            context
+                .database
+                .write_transaction(move |transaction| {
+                    super::track_reads::invalidate_confirmed_playlist_content_reads(
+                        transaction,
+                        &playlist,
+                    )?;
+                    super::playlist_reads::commit_confirmed_playlist(
+                        transaction,
+                        &playlist,
+                        &user_id,
+                    )?;
+                    super::track_reads::invalidate_confirmed_playlist_content_reads(
+                        transaction,
+                        &playlist,
+                    )?;
+                    write_cached_read(
+                        transaction,
+                        &query,
+                        &user_id,
+                        &CatalogValue::Tracks(tracks),
+                        observed_at,
+                    )
+                })
+                .await
+                .map_err(|error| error.to_string())
+        })
+    }
+
+    // Command preparation and confirmed readbacks await completion; displays observe local data first.
     fn begin_startup(&self) -> Box<dyn Send> {
         self.inner.client.begin_startup()
     }
@@ -753,22 +1229,23 @@ impl CatalogClient for CachedCatalog {
     }
 }
 
-pub(crate) struct CatalogCacheOwner {
+pub(crate) struct SessionCacheOwner {
     directory: Arc<dyn Fn() -> Result<std::path::PathBuf, String> + Send + Sync>,
     generation: std::sync::atomic::AtomicU64,
+    retired_generation: std::sync::atomic::AtomicU64,
     cache: tokio::sync::Mutex<Option<ServerCache>>,
     confirmed_writes: Arc<tokio::sync::Mutex<()>>,
 }
 
 struct SessionCache {
-    owner: Arc<CatalogCacheOwner>,
+    owner: Arc<SessionCacheOwner>,
     client: Arc<MusicAssistantClient>,
     user_id: Option<UserId>,
     generation: u64,
-    resolved: tokio::sync::OnceCell<Arc<CacheContext>>,
+    resolved: tokio::sync::Mutex<Option<Arc<CacheContext>>>,
 }
 
-impl CatalogCacheOwner {
+impl SessionCacheOwner {
     // A single app-session factory owns the cache across user and address changes.
     pub(crate) fn new(
         directory: impl Fn() -> Result<std::path::PathBuf, String> + Send + Sync + 'static,
@@ -776,6 +1253,7 @@ impl CatalogCacheOwner {
         Self {
             directory: Arc::new(directory),
             generation: std::sync::atomic::AtomicU64::new(0),
+            retired_generation: std::sync::atomic::AtomicU64::new(u64::MAX),
             cache: tokio::sync::Mutex::new(None),
             confirmed_writes: Arc::new(tokio::sync::Mutex::new(())),
         }
@@ -796,7 +1274,7 @@ impl CatalogCacheOwner {
                     client,
                     user_id,
                     generation,
-                    resolved: tokio::sync::OnceCell::new(),
+                    resolved: tokio::sync::Mutex::new(None),
                 })),
                 fresh_for: Duration::from_secs(300),
                 confirmed_revision: Arc::new(std::sync::atomic::AtomicU64::new(0)),
@@ -806,6 +1284,19 @@ impl CatalogCacheOwner {
         }
     }
     pub(crate) async fn shutdown(&self, generation: u64) -> Result<(), String> {
+        self.retired_generation
+            .fetch_update(
+                std::sync::atomic::Ordering::AcqRel,
+                std::sync::atomic::Ordering::Acquire,
+                |retired| {
+                    Some(if retired == u64::MAX {
+                        generation
+                    } else {
+                        retired.max(generation)
+                    })
+                },
+            )
+            .ok();
         self.generation
             .fetch_max(generation, std::sync::atomic::Ordering::AcqRel);
         let mut owner = self.cache.lock().await;
@@ -817,107 +1308,161 @@ impl CatalogCacheOwner {
         }
         Ok(())
     }
+
+    pub(super) async fn clear_cache_for_generation(
+        &self,
+        generation: u64,
+        operation: super::lifecycle::CacheMaintenance,
+    ) -> Result<(), String> {
+        let owner = self.cache.lock().await;
+        self.require_generation(generation)?;
+        if let Some(cache) = owner.as_ref() {
+            match operation {
+                super::lifecycle::CacheMaintenance::ClearDatabase => {
+                    cache.clear_database_cache().await
+                }
+                super::lifecycle::CacheMaintenance::ClearImages => cache.clear_image_cache().await,
+                _ => return Err("unsupported session cache maintenance".into()),
+            }
+            .map_err(|error| error.to_string())?;
+        }
+        self.require_generation(generation)
+    }
+
+    // Shared cache-root admission does not require opening the media database.
+    pub(super) fn require_generation(&self, generation: u64) -> Result<(), String> {
+        let retired = self
+            .retired_generation
+            .load(std::sync::atomic::Ordering::Acquire);
+        if self.generation.load(std::sync::atomic::Ordering::Acquire) != generation
+            || (retired != u64::MAX && generation <= retired)
+        {
+            return Err("cache belongs to a retired session".into());
+        }
+        Ok(())
+    }
+
+    pub(super) async fn cache_for_generation(
+        &self,
+        generation: u64,
+    ) -> Result<ServerCache, String> {
+        let mut owner = self.cache.lock().await;
+        self.require_generation(generation)?;
+        if owner.is_none() {
+            *owner = Some(
+                ServerCache::initialize((self.directory)()?)
+                    .await
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        self.require_generation(generation)?;
+        Ok(owner.as_ref().unwrap().clone())
+    }
+
+    pub(super) async fn image_lease(
+        &self,
+        client: &MusicAssistantClient,
+        generation: u64,
+    ) -> Result<(super::lifecycle::ImageLease, String, bool), String> {
+        let cache = self.cache_for_generation(generation).await?;
+        let observed_id = cache
+            .server_id_for_address(client.base_url().to_owned())
+            .await
+            .map_err(|error| error.to_string())?;
+        let (server_id, is_verified) = match observed_id {
+            Some(server_id) => (server_id, false),
+            None => {
+                let identity: ServerIdentity = client
+                    .execute_command("info", serde_json::json!({}))
+                    .await?;
+                (identity.server_id, true)
+            }
+        };
+        let _owner = self.cache.lock().await;
+        self.require_generation(generation)?;
+        cache
+            .activate_images(server_id.clone())
+            .await
+            .map_err(|error| error.to_string())?;
+        if is_verified {
+            cache
+                .bind_server_address(server_id.clone(), client.base_url().to_owned())
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        let images = cache.images().await.map_err(|error| error.to_string())?;
+        self.require_generation(generation)?;
+        Ok((images, server_id, is_verified))
+    }
 }
 
 impl SessionCache {
     // Identity lookup and filesystem initialization happen only for migrated media reads.
     async fn resolve(&self) -> Result<Arc<CacheContext>, String> {
-        if self
-            .owner
-            .generation
-            .load(std::sync::atomic::Ordering::Acquire)
-            != self.generation
+        self.owner.require_generation(self.generation)?;
+        let mut resolved = self.resolved.lock().await;
+        if let Some(catalog) = resolved
+            .as_ref()
+            .filter(|catalog| catalog.database.require_active().is_ok())
         {
-            return Err("catalog belongs to a retired session".to_owned());
+            return Ok(catalog.clone());
         }
-        let catalog = self
-            .resolved
-            .get_or_try_init(|| async {
-                LOGGER.debug(format_args!("Cache initialization: resolving user"));
-                let user_id = match self.user_id.clone() {
-                    Some(user_id) => user_id,
-                    None => {
-                        crate::application::repositories::LibraryClient::get_current_user_id(
-                            self.client.as_ref(),
-                        )
-                        .await?
-                    }
-                };
-                let mut owner = self.owner.cache.lock().await;
-                if self
-                    .owner
-                    .generation
-                    .load(std::sync::atomic::Ordering::Acquire)
-                    != self.generation
-                {
-                    return Err("session changed before cache initialization".to_owned());
+        let catalog = async {
+            LOGGER.debug(format_args!("Cache initialization: resolving user"));
+            let user_id = match self.user_id.clone() {
+                Some(user_id) => user_id,
+                None => {
+                    crate::application::repositories::LibraryClient::get_current_user_id(
+                        self.client.as_ref(),
+                    )
+                    .await?
                 }
-                if owner.is_none() {
-                    LOGGER.debug(format_args!("Cache initialization: opening storage"));
-                    *owner = Some(
-                        ServerCache::initialize((self.owner.directory)()?)
-                            .await
-                            .map_err(|error| error.to_string())?,
-                    );
-                }
-                let cache = owner.as_ref().unwrap().clone();
-                drop(owner);
-                let observed_id = cache
-                    .server_id_for_address(self.client.base_url().to_owned())
-                    .await
-                    .map_err(|error| error.to_string())?;
-                let (server_id, is_verified) = if let Some(server_id) = observed_id {
-                    (server_id, false)
-                } else {
-                    LOGGER.debug(format_args!(
-                        "Cache initialization: requesting server identity"
-                    ));
-                    let identity: ServerIdentity = self
-                        .client
-                        .execute_command("info", serde_json::json!({}))
-                        .await?;
-                    (identity.server_id, true)
-                };
-                let _owner = self.owner.cache.lock().await;
-                if self
-                    .owner
-                    .generation
-                    .load(std::sync::atomic::Ordering::Acquire)
-                    != self.generation
-                {
-                    return Err("session changed before database activation".into());
-                }
-                LOGGER.debug(format_args!("Cache initialization: activating database"));
+            };
+            let cache = self.owner.cache_for_generation(self.generation).await?;
+            let observed_id = cache
+                .server_id_for_address(self.client.base_url().to_owned())
+                .await
+                .map_err(|error| error.to_string())?;
+            let (server_id, is_verified) = if let Some(server_id) = observed_id {
+                (server_id, false)
+            } else {
+                LOGGER.debug(format_args!(
+                    "Cache initialization: requesting server identity"
+                ));
+                let identity: ServerIdentity = self
+                    .client
+                    .execute_command("info", serde_json::json!({}))
+                    .await?;
+                (identity.server_id, true)
+            };
+            let _owner = self.owner.cache.lock().await;
+            self.owner.require_generation(self.generation)?;
+            LOGGER.debug(format_args!("Cache initialization: activating database"));
+            cache
+                .activate(server_id.clone())
+                .await
+                .map_err(|error| error.to_string())?;
+            if is_verified {
                 cache
-                    .activate(server_id.clone())
+                    .bind_server_address(server_id.clone(), self.client.base_url().to_owned())
                     .await
                     .map_err(|error| error.to_string())?;
-                if is_verified {
-                    cache
-                        .bind_server_address(server_id.clone(), self.client.base_url().to_owned())
-                        .await
-                        .map_err(|error| error.to_string())?;
-                }
-                let database = cache.database().await.map_err(|error| error.to_string())?;
-                if self
-                    .owner
-                    .generation
-                    .load(std::sync::atomic::Ordering::Acquire)
-                    != self.generation
-                {
-                    return Err("session changed during cache initialization".to_owned());
-                }
-                LOGGER.debug(format_args!("Cache initialization: database ready"));
-                Ok(Arc::new(CacheContext {
-                    cache,
-                    database,
-                    user_id,
-                    expected_server_id: Some(server_id),
-                    is_identity_verified: std::sync::atomic::AtomicBool::new(is_verified),
-                }))
-            })
-            .await?;
-        Ok(catalog.clone())
+            }
+            let database = cache.database().await.map_err(|error| error.to_string())?;
+            self.owner.require_generation(self.generation)?;
+            LOGGER.debug(format_args!("Cache initialization: database ready"));
+            Ok::<_, String>(Arc::new(CacheContext {
+                cache,
+                database,
+                user_id,
+                expected_server_id: Some(server_id),
+                is_identity_verified: std::sync::atomic::AtomicBool::new(is_verified),
+            }))
+        }
+        .await?;
+        self.owner.require_generation(self.generation)?;
+        *resolved = Some(catalog.clone());
+        Ok(catalog)
     }
 }
 
@@ -927,6 +1472,648 @@ mod tests {
     use crate::data::music_assistant::client::tests::{server, server_with_request_handler};
     use crate::domain::identifiers::MediaId;
     use serde_json::json;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn default_provider_icon_survives_offline_reopen_and_confirmed_absence() {
+        use crate::application::repositories::ProviderClient;
+        use base64::Engine;
+        let directory = tempfile::tempdir().unwrap();
+        let cache = cache(directory.path()).await;
+        let bytes = super::super::image_files::tests::bitmap(11);
+        let icon = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        );
+        let (client, worker) = server(vec![("providers/icon", json!(icon))]);
+        let client = Arc::new(client);
+        let catalog = CachedCatalog::new(
+            client.clone(),
+            cache.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        assert!(catalog.get_icon_data("builtin").await.unwrap().is_some());
+        drop(catalog);
+        worker.join().unwrap();
+        cache.shutdown().await.unwrap();
+        let reopened = ServerCache::initialize(directory.path().to_owned())
+            .await
+            .unwrap();
+        reopened.activate("server".into()).await.unwrap();
+        let offline = CachedCatalog::new(
+            client,
+            reopened.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        let cached = offline.get_icon_data("builtin").await.unwrap().unwrap();
+        assert_eq!(
+            super::super::image_files::ImagePayload::decode_inline(&cached)
+                .unwrap()
+                .bytes,
+            bytes
+        );
+        drop(offline);
+        let (client, worker) = server(vec![("providers/icon", json!(null))]);
+        let catalog = CachedCatalog::new(
+            Arc::new(client),
+            reopened.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        assert!(catalog.get_icon_data("builtin").await.unwrap().is_none());
+        drop(catalog);
+        worker.join().unwrap();
+        reopened.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_manifests_and_icons_survive_offline_reopen_and_merge_partial_refresh() {
+        use crate::application::repositories::ProviderClient;
+        use base64::Engine;
+        let directory = tempfile::tempdir().unwrap();
+        let cache = cache(directory.path()).await;
+        let bytes = super::super::image_files::tests::bitmap(9);
+        let icon = format!(
+            "data:image/png;base64,{}",
+            base64::engine::general_purpose::STANDARD.encode(&bytes)
+        );
+        let (client, worker) = server(vec![(
+            "providers/manifests",
+            json!([{"domain":"builtin","name":"Original","icon_svg":icon,"builtin":true}]),
+        )]);
+        let catalog = CachedCatalog::new(
+            Arc::new(client),
+            cache.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            catalog
+                .read_manifests()
+                .await
+                .unwrap()
+                .resolve()
+                .await
+                .unwrap()
+                .items
+                .unwrap()[0]
+                .name
+                .as_deref(),
+            Some("Original")
+        );
+        drop(catalog);
+        worker.join().unwrap();
+        cache
+            .database()
+            .await
+            .unwrap()
+            .read_snapshot(|transaction| {
+                let metadata: String = transaction.query_row(
+                    "SELECT metadata FROM provider_manifests",
+                    [],
+                    |row| row.get(0),
+                )?;
+                assert!(!metadata.contains("base64"));
+                assert!(!metadata.contains("data:"));
+                Ok(())
+            })
+            .await
+            .unwrap();
+        cache.shutdown().await.unwrap();
+        let reopened = ServerCache::initialize(directory.path().to_owned())
+            .await
+            .unwrap();
+        reopened.activate("server".into()).await.unwrap();
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let worker_entered = entered.clone();
+        let worker_release = release.clone();
+        let (client, worker) = server_with_request_handler(
+            vec![(
+                "providers/manifests",
+                json!([{"domain":"builtin","name":"Updated"}]),
+            )],
+            move |_| {
+                worker_entered.notify_one();
+                worker_release.wait();
+            },
+        );
+        let client = Arc::new(client);
+        let catalog = CachedCatalog::new(
+            client.clone(),
+            reopened.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        let mut updates = catalog.observe_catalog(CatalogQuery::ProviderManifests {}, false);
+        let local = updates.next().await.unwrap();
+        let Some(CatalogValue::ProviderManifests(manifests)) = local.value else {
+            panic!("local manifests missing")
+        };
+        assert_eq!(manifests[0].name.as_deref(), Some("Original"));
+        assert_eq!(
+            super::super::image_files::ImagePayload::decode_inline(
+                manifests[0].icon_svg.as_deref().unwrap()
+            )
+            .unwrap()
+            .bytes,
+            bytes
+        );
+        entered.notified().await;
+        release.wait();
+        let terminal = loop {
+            let state = updates.next().await.unwrap();
+            if state.phase == CatalogLoadPhase::Ready {
+                break state;
+            }
+        };
+        let Some(CatalogValue::ProviderManifests(manifests)) = terminal.value else {
+            panic!("server manifests missing")
+        };
+        assert_eq!(manifests[0].name.as_deref(), Some("Updated"));
+        assert_eq!(manifests[0].builtin, Some(true));
+        assert!(manifests[0].icon_svg.is_some());
+        drop(updates);
+        drop(catalog);
+        worker.join().unwrap();
+        let offline = CachedCatalog::new(
+            client,
+            reopened.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        let manifests = offline
+            .read_manifests()
+            .await
+            .unwrap()
+            .resolve()
+            .await
+            .unwrap()
+            .items
+            .unwrap();
+        assert_eq!(manifests[0].name.as_deref(), Some("Updated"));
+        assert!(manifests[0].icon_svg.is_some());
+        drop(offline);
+        reopened.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn provider_instances_publish_cache_before_remote_preserve_errors_and_reopen_per_user() {
+        use crate::application::repositories::ProviderClient;
+        use crate::domain::providers::ProviderInstance;
+        for should_fail in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = cache(directory.path()).await;
+            let old: Vec<ProviderInstance> = serde_json::from_value(
+                json!([{"instance_id":"visible-instance","available":true}]),
+            )
+            .unwrap();
+            let seed = old.clone();
+            cache
+                .database()
+                .await
+                .unwrap()
+                .write_transaction(move |transaction| {
+                    super::super::providers::write_instances(
+                        transaction,
+                        &UserId("user".into()),
+                        &seed,
+                        100,
+                    )?;
+                    super::super::providers::write_instances(
+                        transaction,
+                        &UserId("other".into()),
+                        &seed,
+                        100,
+                    )
+                })
+                .await
+                .unwrap();
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(std::sync::Barrier::new(2));
+            let worker_entered = entered.clone();
+            let worker_release = release.clone();
+            let (client, worker) = server_with_request_handler(
+                vec![(
+                    "providers",
+                    if should_fail {
+                        json!({"test_http_status":503})
+                    } else {
+                        json!([])
+                    },
+                )],
+                move |request| {
+                    assert_eq!(request["command"], "providers");
+                    assert_eq!(request["args"], json!({}));
+                    worker_entered.notify_one();
+                    worker_release.wait();
+                },
+            );
+            let client = Arc::new(client);
+            let catalog = CachedCatalog::new(
+                client.clone(),
+                cache.clone(),
+                UserId("user".into()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+            let mut updates = catalog.observe_catalog(CatalogQuery::ProviderInstances, false);
+            let local = updates.next().await.unwrap();
+            assert_eq!(
+                local.value,
+                Some(CatalogValue::ProviderInstances(old.clone()))
+            );
+            assert_eq!(local.phase, CatalogLoadPhase::Refreshing);
+            entered.notified().await;
+            let early_instances =
+                tokio::time::timeout(Duration::from_millis(100), catalog.read_instances()).await;
+            drop(updates);
+            release.wait();
+            let early_instances = early_instances.unwrap().unwrap();
+            assert_eq!(early_instances.current.items, Some(old.clone()));
+            let expected = if should_fail { old.clone() } else { Vec::new() };
+            let refreshed = early_instances.refresh.unwrap().await;
+            if should_fail {
+                assert!(refreshed.is_err());
+            } else {
+                assert_eq!(refreshed.unwrap().items, Some(expected.clone()));
+            }
+            drop(catalog);
+            cache.shutdown().await.unwrap();
+            let requests = worker.join().unwrap();
+            assert_eq!(requests.len(), 1);
+            let reopened = ServerCache::initialize(directory.path().to_owned())
+                .await
+                .unwrap();
+            reopened.activate("server".into()).await.unwrap();
+            let expected_other = old.clone();
+            reopened
+                .database()
+                .await
+                .unwrap()
+                .read_snapshot(move |transaction| {
+                    assert_eq!(
+                        super::super::providers::read_instances(
+                            transaction,
+                            &UserId("user".into())
+                        )?,
+                        Some(expected)
+                    );
+                    assert_eq!(
+                        super::super::providers::read_instances(
+                            transaction,
+                            &UserId("other".into())
+                        )?,
+                        Some(expected_other)
+                    );
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let offline = CachedCatalog::new(
+                client,
+                reopened.clone(),
+                UserId("user".into()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+            assert_eq!(
+                offline
+                    .read_instances()
+                    .await
+                    .unwrap()
+                    .resolve()
+                    .await
+                    .unwrap()
+                    .items
+                    .unwrap(),
+                if should_fail { old } else { Vec::new() }
+            );
+            drop(offline);
+            reopened.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn confirmed_playlist_contents_commit_atomically_and_preserve_server_success() {
+        use crate::domain::media::Playlist;
+        for (should_fail_commit, should_fail_readback, is_empty) in [
+            (false, false, false),
+            (true, false, false),
+            (false, true, false),
+            (false, false, true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = cache(directory.path()).await;
+            let original: Playlist = serde_json::from_value(json!({
+                "provider":"library","item_id":"42","name":"Old playlist",
+                "provider_mappings":[{"provider_instance":"source-a","provider_domain":"domain-a","item_id":"remote"}]
+            })).unwrap();
+            let mut confirmed = original.clone();
+            confirmed.media.name = "Confirmed playlist".into();
+            confirmed.media.provider_mappings = serde_json::from_value(json!([
+                {"provider_instance":"source-b","provider_domain":"domain-b","item_id":"remote-new"}
+            ]))
+            .unwrap();
+            let playlist_query = CatalogQuery::Playlist {
+                provider: "library".into(),
+                item_id: MediaId("42".into()),
+            };
+            let tracks_query = CatalogQuery::PlaylistTracks {
+                provider: "library".into(),
+                item_id: MediaId("42".into()),
+                allow_dynamic_tracks: false,
+            };
+            let neighbor_query = CatalogQuery::PlaylistTracks {
+                provider: "library".into(),
+                item_id: MediaId("neighbor".into()),
+                allow_dynamic_tracks: false,
+            };
+            let aliases: Vec<_> = [
+                ("library", "42"),
+                ("source-a", "remote"),
+                ("domain-a", "remote"),
+                ("source-b", "remote-new"),
+                ("domain-b", "remote-new"),
+            ]
+            .into_iter()
+            .map(|(provider, item_id)| CatalogQuery::PlaylistTracks {
+                provider: provider.into(),
+                item_id: MediaId(item_id.into()),
+                allow_dynamic_tracks: true,
+            })
+            .collect();
+            let old_track =
+                json!({"provider":"library","item_id":"old","name":"Old track","position":0});
+            let old_tracks =
+                CatalogValue::Tracks(vec![serde_json::from_value(old_track.clone()).unwrap(); 2]);
+            let response = if should_fail_readback {
+                json!({"invalid":"not a track list"})
+            } else if is_empty {
+                json!([])
+            } else {
+                json!([
+                    {"media_type":"track","provider":"library","item_id":"new","name":"New track","position":0},
+                    {"media_type":"track","provider":"library","item_id":"new","name":"New track","position":1},
+                    {"media_type":"track","provider":"library","item_id":"old","name":"Old track","position":2}
+                ])
+            };
+            let (client, worker) = server(vec![("music/playlists/playlist_tracks", response)]);
+            let catalog = CachedCatalog::new(
+                Arc::new(client),
+                cache.clone(),
+                UserId("user".into()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+            let seed_playlist = playlist_query.clone();
+            let seed_tracks = tracks_query.clone();
+            let seed_neighbor = neighbor_query.clone();
+            let seed_aliases = aliases.clone();
+            cache.database().await.unwrap().write_transaction(move |transaction| {
+                let user = UserId("user".into());
+                write_cached_read(transaction, &seed_playlist, &user, &CatalogValue::Playlist(original), 1)?;
+                write_cached_read(transaction, &seed_tracks, &user, &old_tracks, 1)?;
+                write_cached_read(transaction, &seed_neighbor, &user, &old_tracks, 1)?;
+                for alias in seed_aliases { write_cached_read(transaction, &alias, &user, &old_tracks, 1)?; }
+                if should_fail_commit {
+                    transaction.execute_batch("CREATE TEMP TRIGGER fail_content BEFORE INSERT ON track_list_states BEGIN SELECT RAISE(ABORT,'synthetic content failure'); END;")?;
+                }
+                Ok(())
+            }).await.unwrap();
+            let result = catalog
+                .read_confirmed_playlist_contents(confirmed.clone())
+                .await;
+            if should_fail_readback {
+                assert!(result.is_err());
+            } else {
+                let tracks = result.unwrap();
+                assert_eq!(tracks.len(), if is_empty { 0 } else { 3 });
+                if !is_empty {
+                    assert_eq!(tracks[0].media.item_id.as_str(), "new");
+                    assert_eq!(tracks[1].media.item_id.as_str(), "new");
+                    assert_eq!(tracks[1].media.position, Some(1));
+                }
+                assert_eq!(
+                    catalog
+                        .commit_confirmed_playlist_contents(confirmed, tracks)
+                        .await
+                        .is_err(),
+                    should_fail_commit
+                );
+            }
+            assert_eq!(worker.join().unwrap().len(), 1);
+            drop(catalog);
+            cache.shutdown().await.unwrap();
+            drop(cache);
+            let reopened = ServerCache::initialize(directory.path().to_owned())
+                .await
+                .unwrap();
+            reopened.activate("server".into()).await.unwrap();
+            reopened
+                .database()
+                .await
+                .unwrap()
+                .read_snapshot(move |snapshot| {
+                    let user = UserId("user".into());
+                    let Some(CatalogValue::Playlist(playlist)) =
+                        read_partial_cached(snapshot, &playlist_query, &user)?
+                    else {
+                        panic!("playlist metadata missing")
+                    };
+                    let kept_old = should_fail_commit || should_fail_readback;
+                    assert_eq!(
+                        playlist.media.name,
+                        if kept_old {
+                            "Old playlist"
+                        } else {
+                            "Confirmed playlist"
+                        }
+                    );
+                    let CatalogValue::Tracks(tracks) =
+                        read_cached_read(snapshot, &tracks_query, &user)?
+                            .unwrap()
+                            .value
+                    else {
+                        panic!("playlist tracks missing")
+                    };
+                    assert_eq!(
+                        tracks.len(),
+                        if kept_old {
+                            2
+                        } else if is_empty {
+                            0
+                        } else {
+                            3
+                        }
+                    );
+                    if !tracks.is_empty() {
+                        assert_eq!(
+                            tracks[0].media.item_id.as_str(),
+                            if kept_old { "old" } else { "new" }
+                        );
+                    }
+                    let CatalogValue::Tracks(neighbor) =
+                        read_cached_read(snapshot, &neighbor_query, &user)?
+                            .unwrap()
+                            .value
+                    else {
+                        panic!("neighbor missing")
+                    };
+                    assert_eq!(neighbor.len(), 2);
+                    assert_eq!(neighbor[0].media.item_id.as_str(), "old");
+                    for alias in aliases {
+                        assert_eq!(
+                            read_cached_read(snapshot, &alias, &user)?.is_some(),
+                            kept_old
+                        );
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            reopened.shutdown().await.unwrap();
+            drop(reopened);
+            directory.close().unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn database_clear_retires_old_context_and_reopens_session_without_touching_images() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().to_owned();
+        let owner = Arc::new(SessionCacheOwner::new(move || Ok(path.clone())));
+        let client = Arc::new(MusicAssistantClient::new("http://127.0.0.1:1", None));
+        let catalog = owner.session(client.clone(), Some(UserId("user".into())), 1);
+        let cache = owner.cache_for_generation(1).await.unwrap();
+        cache.activate("server".into()).await.unwrap();
+        cache
+            .bind_server_address("server".into(), client.base_url().into())
+            .await
+            .unwrap();
+        let previous = catalog.inner.cache_context().await.ok().unwrap();
+        let images = cache.images().await.unwrap();
+        let revision = catalog
+            .inner
+            .confirmed_revision
+            .load(std::sync::atomic::Ordering::Acquire);
+        catalog.clear_database_cache().await.unwrap();
+        assert!(previous.database.require_active().is_err());
+        assert!(images.require_active().is_ok());
+        let current = catalog.inner.cache_context().await.ok().unwrap();
+        assert!(current.database.require_active().is_ok());
+        assert!(!Arc::ptr_eq(&previous, &current));
+        assert!(
+            catalog
+                .inner
+                .confirmed_revision
+                .load(std::sync::atomic::Ordering::Acquire)
+                > revision
+        );
+        owner.shutdown(1).await.unwrap();
+        assert!(catalog.clear_database_cache().await.is_err());
+        drop((previous, current, catalog, owner, cache, images));
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn inline_playlist_refresh_reuses_the_persistent_reference_projection() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = cache(directory.path()).await;
+        let response = json!({"provider":"library","item_id":"42","uri":"library://playlist/42","name":"Private","metadata":{"images":[{"type":"thumb","provider":"builtin","path":format!("data:image/png;base64,{}",base64::Engine::encode(&base64::engine::general_purpose::STANDARD,super::super::image_files::tests::bitmap(6)))}]}});
+        let (client, worker) = server(vec![
+            ("music/playlists/get", response.clone()),
+            ("music/playlists/get", response),
+        ]);
+        let catalog = CachedCatalog::new(
+            Arc::new(client),
+            cache.clone(),
+            UserId("user".into()),
+            Duration::from_secs(300),
+        )
+        .await
+        .unwrap();
+        let query = CatalogQuery::Playlist {
+            provider: "library".into(),
+            item_id: MediaId("42".into()),
+        };
+        for _ in 0..2 {
+            let mut updates = catalog.observe_catalog(query.clone(), true);
+            let completed = completed_snapshot(&mut updates).await;
+            assert_eq!(completed.phase, CatalogLoadPhase::Ready);
+            assert!(
+                completed.cache_error.is_none(),
+                "{:?}",
+                completed.cache_error
+            );
+            cache
+                .database()
+                .await
+                .unwrap()
+                .read_snapshot(|snapshot| {
+                    let metadata: String = snapshot.query_row(
+                        "SELECT metadata FROM playlists WHERE provider='library' AND item_id='42'",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert!(metadata.contains("cached_inline"));
+                    assert!(!metadata.contains("data:image"));
+                    Ok(())
+                })
+                .await
+                .unwrap();
+        }
+        assert_eq!(worker.join().unwrap().len(), 2);
+        drop(catalog);
+        cache.shutdown().await.unwrap();
+        drop(cache);
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn retired_owner_rejects_recreated_catalogs_without_initializing_storage() {
+        let owner = Arc::new(SessionCacheOwner::new(|| {
+            panic!("retired catalog opened storage")
+        }));
+        let client = Arc::new(MusicAssistantClient::new("http://127.0.0.1:1", None));
+        owner.shutdown(1).await.unwrap();
+        let catalog = owner.session(client.clone(), None, 1);
+        assert!(catalog.inner.require_active().is_err());
+        assert!(catalog
+            .read_confirmed_playlist_contents(
+                serde_json::from_value(json!({
+                    "provider":"library","item_id":"42","name":"Retired"
+                }))
+                .unwrap()
+            )
+            .await
+            .is_err());
+        if let CacheAccess::Session(session) = &catalog.inner.access {
+            assert!(session.resolve().await.is_err());
+        } else {
+            panic!("expected a session-bound catalog");
+        }
+        let current = owner.session(client, None, 2);
+        assert!(current.inner.require_active().is_ok());
+        owner.shutdown(2).await.unwrap();
+        assert!(current.inner.require_active().is_err());
+    }
 
     async fn completed_snapshot(
         updates: &mut BoxStream<'_, CatalogLoadSnapshot>,
@@ -984,6 +2171,138 @@ mod tests {
     }
 
     // Local-first delivery, shared refresh, commit and error retention.
+    #[tokio::test(flavor = "current_thread")]
+    async fn confirmed_inline_playlist_cover_persists_without_sql_payload_and_preserves_tracks_after_reopen(
+    ) {
+        use super::super::image_sources::{
+            ImageOutputFormat, ImageSize, ImageSourceKey, ImageVariantKey, ImageVariantParameters,
+        };
+        use crate::domain::media::{MediaItem, Playlist, Track};
+        for (proxy_id, should_fail_sql) in [
+            (None, false),
+            (Some("a".repeat(64)), false),
+            (Some("b".repeat(64)), true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = cache(directory.path()).await;
+            let playlist_query = CatalogQuery::Playlist {
+                provider: "library".into(),
+                item_id: MediaId("42".into()),
+            };
+            let tracks_query = CatalogQuery::PlaylistTracks {
+                provider: "library".into(),
+                item_id: MediaId("42".into()),
+                allow_dynamic_tracks: false,
+            };
+            let track: Track = serde_json::from_value(
+                json!({"provider":"library","item_id":"track","name":"Repeated"}),
+            )
+            .unwrap();
+            let tracks = CatalogValue::Tracks(vec![track.clone(), track]);
+            let old: Playlist = serde_json::from_value(json!({"provider":"library","item_id":"42","uri":"library://playlist/42","name":"Private","metadata":{"description":"Retained","images":[{"type":"thumb","provider":"builtin","path":"old.jpg"}]}})).unwrap();
+            let seed_playlist = playlist_query.clone();
+            let seed_tracks = tracks_query.clone();
+            let seed_value = tracks.clone();
+            cache.database().await.unwrap().write_transaction(move |transaction| {
+                let user = UserId("user".into());
+                write_cached_read(transaction, &seed_playlist, &user, &CatalogValue::Playlist(old), 100)?;
+                write_cached_read(transaction, &seed_tracks, &user, &seed_value, 100)?;
+                if should_fail_sql { transaction.execute_batch("CREATE TEMP TRIGGER fail_inline_cover BEFORE INSERT ON playlists BEGIN SELECT RAISE(ABORT,'synthetic inline cover commit failure'); END;")?; }
+                Ok(())
+            }).await.unwrap();
+            let client = Arc::new(MusicAssistantClient::new("http://127.0.0.1:1", None));
+            let catalog = CachedCatalog::new(
+                client,
+                cache.clone(),
+                UserId("user".into()),
+                Duration::from_secs(300),
+            )
+            .await
+            .unwrap();
+            let bytes = super::super::image_files::tests::bitmap(4);
+            let confirmed: Playlist = serde_json::from_value(json!({"provider":"library","item_id":"42","uri":"library://playlist/42","name":"Private","metadata":{"images":[{"type":"thumb","provider":"builtin","path":format!("data:image/png;base64,{}",base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes)),"proxy_id":proxy_id}]}})).unwrap();
+            let result = catalog
+                .commit_confirmed_media(MediaItem::Playlist(confirmed))
+                .await;
+            assert_eq!(result.is_err(), should_fail_sql);
+            drop(catalog);
+            cache.shutdown().await.unwrap();
+            drop(cache);
+            let reopened = ServerCache::initialize(directory.path().to_owned())
+                .await
+                .unwrap();
+            reopened.activate("server".into()).await.unwrap();
+            let image = reopened
+                .database()
+                .await
+                .unwrap()
+                .read_snapshot(move |snapshot| {
+                    let user = UserId("user".into());
+                    let metadata: String = snapshot.query_row(
+                        "SELECT metadata FROM playlists WHERE provider='library' AND item_id='42'",
+                        [],
+                        |row| row.get(0),
+                    )?;
+                    assert!(!metadata.contains("base64"));
+                    assert!(!metadata.contains("data:image"));
+                    let CatalogValue::Playlist(playlist) =
+                        read_partial_cached(snapshot, &playlist_query, &user)?.unwrap()
+                    else {
+                        panic!("playlist missing after reopen")
+                    };
+                    let metadata = playlist.media.metadata.unwrap();
+                    assert_eq!(metadata.description.as_deref(), Some("Retained"));
+                    assert_eq!(
+                        read_cached_read(snapshot, &tracks_query, &user)?
+                            .unwrap()
+                            .value,
+                        tracks
+                    );
+                    let image = metadata.images.into_iter().next().unwrap();
+                    assert_eq!(image.cached_inline.is_some(), !should_fail_sql);
+                    assert_eq!(image.path, if should_fail_sql { "old.jpg" } else { "" });
+                    Ok(image)
+                })
+                .await
+                .unwrap();
+            if !should_fail_sql {
+                assert_eq!(image.proxy_id, proxy_id);
+                let reference = image.cached_inline.as_ref().unwrap();
+                let source = ImageSourceKey::from_inline(
+                    &image,
+                    reference.owner_uri.as_ref().unwrap().as_str(),
+                    reference.position,
+                )
+                .unwrap();
+                reopened.activate_images("server".into()).await.unwrap();
+                let key = ImageVariantKey {
+                    source,
+                    parameters: ImageVariantParameters {
+                        size: ImageSize::Original,
+                        output_format: ImageOutputFormat::Automatic,
+                    },
+                };
+                assert_eq!(
+                    reopened
+                        .images()
+                        .await
+                        .unwrap()
+                        .read_variant(key)
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .read
+                        .payload
+                        .bytes,
+                    bytes
+                );
+            }
+            reopened.shutdown().await.unwrap();
+            drop(reopened);
+            directory.close().unwrap();
+        }
+    }
+
     #[tokio::test(flavor = "current_thread")]
     async fn track_single_reads_share_refresh_retain_failure_and_reopen() {
         use crate::domain::media::{FieldKnowledge, MediaItem, MediaType, Track};
@@ -2647,7 +3966,7 @@ mod tests {
         {
             let directory = tempfile::tempdir().unwrap();
             let path = directory.path().to_owned();
-            let owner = Arc::new(CatalogCacheOwner::new(move || Ok(path.clone())));
+            let owner = Arc::new(SessionCacheOwner::new(move || Ok(path.clone())));
             let identity_requested = Arc::new(tokio::sync::Notify::new());
             let signal = identity_requested.clone();
             let expected_info_requests = if should_cancel_older_commit { 3 } else { 4 };
@@ -3168,6 +4487,35 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn simultaneous_catalog_starts_share_initial_refresh_and_promote_priority() {
+        use crate::application::repositories::RequestPriority;
+
+        let directory = tempfile::tempdir().unwrap();
+        let cache = cache(directory.path()).await;
+        let catalog = CachedCatalog::new(
+            Arc::new(MusicAssistantClient::new("http://127.0.0.1:1", None)),
+            cache.clone(),
+            UserId("user".to_owned()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        let first = with_request_priority(RequestPriority::Background, async {
+            catalog.inner.refresh(query(), false)
+        })
+        .await;
+        assert_eq!(first.changes.borrow().phase, CatalogLoadPhase::ReadingLocal);
+        let second = catalog.inner.refresh(query(), false);
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(
+            first.group.effective_priority(),
+            RequestPriority::Foreground
+        );
+        drop((first, second));
+        cache.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn artist_cache_first_publishes_local_before_delayed_shared_remote_commit() {
         let directory = tempfile::tempdir().unwrap();
         let cache = cache(directory.path()).await;
@@ -3366,7 +4714,7 @@ mod tests {
     async fn artist_cache_first_session_owner_reuses_server_identity_and_partitions_users() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().to_owned();
-        let owner = Arc::new(CatalogCacheOwner::new(move || Ok(root.clone())));
+        let owner = Arc::new(SessionCacheOwner::new(move || Ok(root.clone())));
         let (client, worker) = server(vec![
             ("info", json!({"server_id":"server"})),
             (
@@ -3442,10 +4790,107 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn completed_dynamic_radio_read_waits_past_cached_sample_and_rejects_refresh_failures() {
+        use futures_util::FutureExt;
+        for response in [
+            json!([{"media_type":"track","item_id":"new","provider":"source","name":"New","duration":180}]),
+            json!([]),
+            json!({"test_http_status":503}),
+            json!([{"media_type":"album","item_id":"wrong","provider":"source","name":"Wrong"}]),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = cache(directory.path()).await;
+            let query = CatalogQuery::PlaylistTracks {
+                item_id: crate::domain::identifiers::MediaId("source://track/seed".into()),
+                provider: "radio_playlist".into(),
+                allow_dynamic_tracks: true,
+            };
+            let (client, worker) = server(vec![(
+                "music/playlists/playlist_tracks",
+                json!([{"media_type":"track","item_id":"old","provider":"source","name":"Old","duration":180}]),
+            )]);
+            let initial = CachedCatalog::new(
+                Arc::new(client),
+                cache.clone(),
+                UserId("user".into()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+            let CatalogValue::Tracks(cached) =
+                initial.load_catalog(query.clone(), true).await.unwrap()
+            else {
+                panic!("tracks expected")
+            };
+            assert_eq!(cached[0].media.item_id.as_str(), "old");
+            worker.join().unwrap();
+            drop(initial);
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let arrived = entered.clone();
+            let (release, gate) = std::sync::mpsc::channel();
+            let (client, worker) =
+                crate::data::music_assistant::client::tests::server_with_request_handler(
+                    vec![("music/playlists/playlist_tracks", response.clone())],
+                    move |request| {
+                        if request["command"] == "music/playlists/playlist_tracks" {
+                            arrived.notify_one();
+                            gate.recv().unwrap();
+                        }
+                    },
+                );
+            let catalog = CachedCatalog::new(
+                Arc::new(client),
+                cache.clone(),
+                UserId("user".into()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+            let Ok((_, local)) = catalog.inner.read_local(&query).await else {
+                panic!("expected a readable radio cache")
+            };
+            assert_eq!(
+                local.source,
+                Some(crate::domain::catalog::CatalogDataSource::Cache)
+            );
+            assert_eq!(local.knowledge, CatalogReadKnowledge::ObservedResponse);
+            assert_eq!(local.value, Some(CatalogValue::Tracks(cached)));
+            let mut completed = Box::pin(catalog.load_catalog(query, true));
+            tokio::time::timeout(Duration::from_secs(3), async {
+                tokio::select! {
+                    result = &mut completed => panic!("radio completed before server response: {result:?}"),
+                    _ = entered.notified() => {},
+                }
+            }).await.unwrap();
+            assert!(completed.as_mut().now_or_never().is_none());
+            release.send(()).unwrap();
+            let result = completed.await;
+            let requests = worker.join().unwrap();
+            let request = requests
+                .iter()
+                .find(|request| request["command"] == "music/playlists/playlist_tracks")
+                .unwrap();
+            assert_eq!(request["args"]["force_refresh"], true);
+            assert_eq!(request["args"]["allow_dynamic_tracks"], true);
+            if response.as_array().is_some_and(|items| items.is_empty()) {
+                assert!(matches!(result, Ok(CatalogValue::Tracks(tracks)) if tracks.is_empty()));
+            } else if response[0]["item_id"] == "new" {
+                assert!(
+                    matches!(result, Ok(CatalogValue::Tracks(tracks)) if tracks.len() == 1 && tracks[0].media.item_id.as_str() == "new")
+                );
+            } else {
+                assert!(result.is_err());
+            }
+            drop(catalog);
+            cache.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn cold_session_creates_database_and_persists_server_response() {
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().to_owned();
-        let owner = Arc::new(CatalogCacheOwner::new(move || Ok(root.clone())));
+        let owner = Arc::new(SessionCacheOwner::new(move || Ok(root.clone())));
         let (client, worker) = server(vec![
             (
                 "auth/me",
@@ -3466,7 +4911,7 @@ mod tests {
         assert_eq!(loaded, value("Persisted"));
         assert!(directory
             .path()
-            .join("Cache/mashin-media-cache.sqlite3")
+            .join("Cache/metadata.sqlite3")
             .is_file());
         assert_eq!(worker.join().unwrap().len(), 3);
         owner.shutdown(2).await.unwrap();
@@ -3491,7 +4936,7 @@ mod tests {
         let directory = tempfile::tempdir().unwrap();
         let cache = cache(directory.path()).await;
         let root = directory.path().to_owned();
-        let owner = Arc::new(CatalogCacheOwner::new(move || Ok(root.clone())));
+        let owner = Arc::new(SessionCacheOwner::new(move || Ok(root.clone())));
         let mut guard = owner.cache.lock().await;
         *guard = Some(cache.clone());
         let (client, worker) = server(vec![
@@ -3603,7 +5048,7 @@ mod tests {
                 .await
                 .unwrap();
             let root = directory.path().to_owned();
-            let owner = Arc::new(CatalogCacheOwner::new(move || Ok(root.clone())));
+            let owner = Arc::new(SessionCacheOwner::new(move || Ok(root.clone())));
             let mut guard = owner.cache.lock().await;
             *guard = Some(cache.clone());
             let mut response = json!({"provider":"library","item_id":"007","name":"Server"});
@@ -3653,7 +5098,7 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn parallel_server_survives_cache_initialization_failure() {
-        let owner = Arc::new(CatalogCacheOwner::new(|| {
+        let owner = Arc::new(SessionCacheOwner::new(|| {
             Err("synthetic directory failure".into())
         }));
         let (client, worker) = server(vec![(
@@ -3900,7 +5345,7 @@ mod tests {
         for changes_server in [false, true] {
             let directory = tempfile::tempdir().unwrap();
             let root = directory.path().to_owned();
-            let owner = Arc::new(CatalogCacheOwner::new(move || Ok(root.clone())));
+            let owner = Arc::new(SessionCacheOwner::new(move || Ok(root.clone())));
             let entered = Arc::new(tokio::sync::Notify::new());
             let release = Arc::new(std::sync::Barrier::new(2));
             let worker_entered = entered.clone();
@@ -3977,7 +5422,7 @@ mod tests {
         use crate::application::repositories::InitialUserDataUpdate;
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().to_owned();
-        let owner = Arc::new(CatalogCacheOwner::new(move || Ok(root.clone())));
+        let owner = Arc::new(SessionCacheOwner::new(move || Ok(root.clone())));
         let entered = Arc::new(tokio::sync::Notify::new());
         let release = Arc::new(std::sync::Barrier::new(2));
         let worker_entered = entered.clone();
@@ -4000,6 +5445,7 @@ mod tests {
                     "music/artists/library_items",
                     json!({"test_http_status":503}),
                 ),
+                ("music/playlists/library_items", json!([])),
             ],
             move |request| {
                 if request["command"] == "music/artists/library_items" {
@@ -4060,7 +5506,7 @@ mod tests {
         );
         owner.shutdown(4).await.unwrap();
         let requests = worker.join().unwrap();
-        assert_eq!(requests.len(), 9);
+        assert_eq!(requests.len(), 10);
         let artist_request = requests
             .iter()
             .find(|request| request["command"] == "music/artists/library_items")
@@ -4204,58 +5650,79 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn library_album_and_playlist_publisher_preserves_cache_on_error_and_uses_server_pagination_after_reopen(
+    async fn library_favorite_publisher_preserves_cache_on_error_and_uses_server_pagination_after_reopen(
     ) {
         use crate::application::repositories::InitialUserDataUpdate;
-        for (is_playlist, should_fail) in
-            [(false, true), (false, false), (true, true), (true, false)]
-        {
-            let command = if is_playlist {
-                "music/playlists/library_items"
-            } else {
-                "music/albums/library_items"
+        use crate::domain::media::MediaType;
+        for (media_type, should_fail) in [
+            (MediaType::Track, true),
+            (MediaType::Track, false),
+            (MediaType::Album, true),
+            (MediaType::Album, false),
+            (MediaType::Playlist, true),
+            (MediaType::Playlist, false),
+        ] {
+            let command = match media_type {
+                MediaType::Track => "music/tracks/library_items",
+                MediaType::Album => "music/albums/library_items",
+                MediaType::Playlist => "music/playlists/library_items",
+                _ => unreachable!(),
             };
-            let names = |favorites: &crate::domain::library::Favorites| -> Vec<String> {
-                if is_playlist {
-                    favorites
+            let names = move |favorites: &crate::domain::library::Favorites| -> Vec<String> {
+                match media_type {
+                    MediaType::Track => favorites
+                        .tracks
+                        .iter()
+                        .map(|item| item.media.name.clone())
+                        .collect(),
+                    MediaType::Playlist => favorites
                         .playlists
                         .iter()
                         .map(|item| item.media.name.clone())
-                        .collect()
-                } else {
-                    favorites
+                        .collect(),
+                    MediaType::Album => favorites
                         .albums
                         .iter()
                         .map(|item| item.media.name.clone())
-                        .collect()
+                        .collect(),
+                    _ => unreachable!(),
                 }
             };
             let directory = tempfile::tempdir().unwrap();
             let cache = cache(directory.path()).await;
-            let query = if is_playlist {
-                CatalogQuery::LibraryPlaylists {
+            let query = match media_type {
+                MediaType::Track => CatalogQuery::LibraryTracks {
                     favorite: Some(true),
                     limit: 500,
                     offset: 0,
                     summary: false,
-                }
-            } else {
-                CatalogQuery::LibraryAlbums {
+                },
+                MediaType::Playlist => CatalogQuery::LibraryPlaylists {
+                    favorite: Some(true),
+                    limit: 500,
+                    offset: 0,
+                    summary: false,
+                },
+                MediaType::Album => CatalogQuery::LibraryAlbums {
                     favorite: Some(true),
                     limit: 500,
                     offset: 0,
                     summary: false,
                     filters: Default::default(),
-                }
+                },
+                _ => unreachable!(),
             };
             let response = json!([
                 {"provider":"library","item_id":"cached-a","name":"Cached A","favorite":true},
                 {"provider":"library","item_id":"cached-b","name":"Cached B","favorite":true}
             ]);
-            let cached = if is_playlist {
-                CatalogValue::Playlists(serde_json::from_value(response).unwrap())
-            } else {
-                CatalogValue::Albums(serde_json::from_value(response).unwrap())
+            let cached = match media_type {
+                MediaType::Track => CatalogValue::Tracks(serde_json::from_value(response).unwrap()),
+                MediaType::Playlist => {
+                    CatalogValue::Playlists(serde_json::from_value(response).unwrap())
+                }
+                MediaType::Album => CatalogValue::Albums(serde_json::from_value(response).unwrap()),
+                _ => unreachable!(),
             };
             let write_query = query.clone();
             let write_value = cached.clone();
@@ -4279,25 +5746,22 @@ mod tests {
             } else {
                 json!((0..500).map(|index| json!({"provider":"library","item_id":format!("server-{index}"),"name":format!("Server {index:03}"),"favorite":true})).collect::<Vec<_>>())
             };
-            let mut responses = vec![("music/tracks/library_items", json!([]))];
-            if is_playlist {
-                responses.extend([
-                    ("music/albums/library_items", json!([])),
-                    ("music/artists/library_items", json!([])),
-                ]);
-            }
+            let mut responses = [
+                "music/tracks/library_items",
+                "music/albums/library_items",
+                "music/artists/library_items",
+                "music/playlists/library_items",
+            ]
+            .into_iter()
+            .filter(|candidate| *candidate != command)
+            .map(|candidate| (candidate, json!([])))
+            .collect::<Vec<_>>();
             responses.push((command, server_page));
             if !should_fail {
                 responses.push((
                     command,
                     json!([{"provider":"library","item_id":"tail","name":"Tail","favorite":true}]),
                 ));
-                if !is_playlist {
-                    responses.extend([
-                        ("music/artists/library_items", json!([])),
-                        ("music/playlists/library_items", json!([])),
-                    ]);
-                }
             }
             let entered = Arc::new(tokio::sync::Notify::new());
             let release = Arc::new(std::sync::Barrier::new(2));
@@ -4327,9 +5791,7 @@ mod tests {
             let loading = tokio::spawn(async move {
                 let mut publish = move |update| {
                     if let InitialUserDataUpdate::FavoritePage(favorites) = update {
-                        if (is_playlist && !favorites.playlists.is_empty())
-                            || (!is_playlist && !favorites.albums.is_empty())
-                        {
+                        if !names(&favorites).is_empty() {
                             publisher_visible.notify_one();
                         }
                         published.lock().unwrap().push(favorites);
@@ -4365,23 +5827,16 @@ mod tests {
                 assert_eq!(names(&favorites)[0], "Server 000");
                 assert_eq!(names(&favorites).last().unwrap(), "Tail");
             }
-            let publications = observed
+            let mut publications = observed
                 .lock()
                 .unwrap()
                 .iter()
-                .filter(|favorites| !names(favorites).is_empty())
-                .count();
-            // Other completed media pages remain distinct publisher updates.
-            assert_eq!(
-                publications,
-                if should_fail {
-                    1
-                } else if is_playlist {
-                    3
-                } else {
-                    5
-                }
-            );
+                .map(&names)
+                .filter(|items| !items.is_empty())
+                .collect::<Vec<_>>();
+            // Independent categories may repeat the unchanged target projection.
+            publications.dedup();
+            assert_eq!(publications.len(), if should_fail { 1 } else { 3 });
             let requests = worker.join().unwrap();
             let page_requests = requests
                 .iter()
@@ -4412,6 +5867,10 @@ mod tests {
                 .unwrap()
                 .unwrap();
             let retained_names = match observed.value {
+                CatalogValue::Tracks(items) => items
+                    .into_iter()
+                    .map(|item| item.media.name)
+                    .collect::<Vec<_>>(),
                 CatalogValue::Albums(items) => items
                     .into_iter()
                     .map(|item| item.media.name)

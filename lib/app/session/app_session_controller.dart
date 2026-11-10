@@ -17,12 +17,35 @@ class AppSessionController extends ChangeNotifier {
     coreEvents = MashinCoreBridgeEvents(coreBridge: this.coreBridge);
     _instance = this;
     PreferredProviderController.instance.addListener(notifyListeners);
+    _providerSubscription = this.coreBridge.catalogUpdates.listen((update) {
+      if (!_isDisposed &&
+          _isAuthenticated &&
+          update.kind == CatalogQueryKind.providerManifests) {
+        ProviderManifestRegistry.replaceAll(update.providerManifests);
+      }
+    });
+    _cacheSubscription = this.coreBridge.events.listen((event) {
+      if (!_isDisposed &&
+          _isAuthenticated &&
+          event['type'] == 'cache_cleared' &&
+          event['cache'] == 'database') {
+        unawaited(
+          _runStartupTask(
+            'provider icons',
+            _loadProviderIcons,
+            _startupTimeout,
+          ),
+        );
+      }
+    });
   }
 
   static AppSessionController? _instance;
 
   final MashinCoreBridge coreBridge;
   late final MashinCoreBridgeEvents coreEvents;
+  late final StreamSubscription<CatalogUpdate> _providerSubscription;
+  late final StreamSubscription<Map<String, dynamic>> _cacheSubscription;
 
   UserData? _userDataController;
   Future<void>? _initialization;
@@ -153,6 +176,7 @@ class AppSessionController extends ChangeNotifier {
     PreferredProviderController.instance.reset();
     ProviderManifestRegistry.clear();
     MediaImage.configureArtworkLoader(null);
+    MediaImage.configureImageLoader(null);
     MediaItemImage.configureProxyBaseUrl('');
     await coreEvents.reset();
     if (!_isDisposed) notifyListeners();
@@ -189,7 +213,23 @@ class AppSessionController extends ChangeNotifier {
     }
     final controller = UserData(coreBridge: coreBridge);
     _userDataController = controller;
-    MediaImage.configureArtworkLoader(coreBridge.getMediaArtwork);
+    MediaImage.configureArtworkLoader(
+      coreBridge.getMediaArtwork,
+      catalogUpdates: coreBridge.catalogUpdates,
+      catalogReadChanges: coreBridge.catalogReadChanges,
+    );
+    MediaImage.configureImageLoader(
+      (request, refresh) => coreBridge.readImage(request, refresh: refresh),
+      invalidations: coreBridge.events
+          .where(
+            (event) =>
+                event['type'] == 'cache_cleared' && event['cache'] == 'images',
+          )
+          .map<void>((_) {}),
+      sourceChanges: coreBridge.events
+          .where((event) => event['type'] == 'image_source_changed')
+          .map((event) => event['proxy_id'] as String),
+    );
   }
 
   // Rust owns parallel data loading; icons, snapshots and playback remain independent.
@@ -242,7 +282,7 @@ class AppSessionController extends ChangeNotifier {
         !identical(controller, _userDataController)) {
       return;
     }
-    ProviderManifestRegistry.registerAll(manifests);
+    ProviderManifestRegistry.replaceAll(manifests);
   }
 
   void _disposeUserDataController() {
@@ -257,6 +297,8 @@ class AppSessionController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_providerSubscription.cancel());
+    unawaited(_cacheSubscription.cancel());
     PreferredProviderController.instance.removeListener(notifyListeners);
     _disposeUserDataController();
     coreEvents.dispose();
@@ -264,6 +306,7 @@ class AppSessionController extends ChangeNotifier {
     if (identical(_instance, this)) {
       _instance = null;
       MediaImage.configureArtworkLoader(null);
+      MediaImage.configureImageLoader(null);
       PreferredProviderController.instance.reset();
     }
     super.dispose();

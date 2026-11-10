@@ -1,9 +1,9 @@
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/foundation.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 
 import '../../core/core_models.dart';
@@ -60,17 +60,117 @@ class MediaArtworkBackground extends StatelessWidget {
   }
 }
 
-/// Displays server proxy artwork or inline image content without an app-owned cache.
+/// Visible subscribers own local image reads and their optional native refresh.
 class MediaImage extends StatefulWidget {
   static Future<MediaItemImage?> Function(MediaItem)? _loadArtwork;
+  static Stream<CatalogUpdate>? _artworkUpdates;
+  static Stream<CatalogReadChange>? _artworkReadChanges;
   static int _artworkGeneration = 0;
+  static Future<ImageReadSnapshot> Function(ImageRequest, bool)? _loadImage;
+  static final ValueNotifier<int> _imageChanges = ValueNotifier<int>(0);
+  static final ValueNotifier<int> _cacheChanges = ValueNotifier<int>(0);
+  static StreamSubscription<void>? _imageInvalidationSubscription;
+  static StreamSubscription<String>? _sourceChangeSubscription;
+  static final ValueNotifier<(int, String)> _sourceChanges = ValueNotifier((
+    0,
+    '',
+  ));
+  static int get _imageGeneration => _imageChanges.value;
+
+  static void configureImageLoader(
+    Future<ImageReadSnapshot> Function(ImageRequest, bool)? loader, {
+    Stream<void>? invalidations,
+    Stream<String>? sourceChanges,
+  }) {
+    unawaited(_imageInvalidationSubscription?.cancel());
+    _imageInvalidationSubscription = null;
+    unawaited(_sourceChangeSubscription?.cancel());
+    _sourceChangeSubscription = null;
+    _loadImage = loader;
+    MediaItemImage.cachedImageSource = loader == null
+        ? null
+        : _createImageSource;
+    ProviderManifestRegistry.cachedIconSource = loader == null
+        ? null
+        : _createImageSource;
+    _imageChanges.value++;
+    final generation = _imageGeneration;
+    if (loader != null && invalidations != null) {
+      _imageInvalidationSubscription = invalidations.listen((_) {
+        if (generation == _imageGeneration) _cacheChanges.value++;
+      });
+    }
+    if (loader != null && sourceChanges != null) {
+      _sourceChangeSubscription = sourceChanges.listen((proxyId) {
+        if (generation == _imageGeneration) {
+          _sourceChanges.value = (_sourceChanges.value.$1 + 1, proxyId);
+        }
+      });
+    }
+  }
+
+  static String _createImageSource(ImageRequest request) => Uri(
+    scheme: 'mashin-image',
+    host: 'model',
+    queryParameters: {
+      'session': '$_imageGeneration',
+      'request': jsonEncode(request.toJson()),
+    },
+  ).toString();
+
+  static bool _hasSameImageIdentity(String previous, String current) {
+    try {
+      final previousUri = Uri.parse(previous);
+      final currentUri = Uri.parse(current);
+      if (previousUri.scheme != 'mashin-image' ||
+          currentUri.scheme != 'mashin-image' ||
+          previousUri.queryParameters['session'] !=
+              currentUri.queryParameters['session']) {
+        return false;
+      }
+      final previousRequest =
+          jsonDecode(previousUri.queryParameters['request']!)
+              as Map<String, dynamic>;
+      final currentRequest =
+          jsonDecode(currentUri.queryParameters['request']!)
+              as Map<String, dynamic>;
+      final previousImage =
+          previousRequest.remove('image') as Map<String, dynamic>;
+      final currentImage =
+          currentRequest.remove('image') as Map<String, dynamic>;
+      if (previousRequest['providerIconRole'] != null &&
+          previousImage['proxy_id'] == null &&
+          currentImage['proxy_id'] == null) {
+        previousImage.remove('path');
+        currentImage.remove('path');
+        return mapEquals(previousRequest, currentRequest) &&
+            mapEquals(previousImage, currentImage);
+      }
+      final previousReference =
+          previousImage.remove('cached_inline') as Map<String, dynamic>?;
+      final currentReference =
+          currentImage.remove('cached_inline') as Map<String, dynamic>?;
+      if (previousReference == null || currentReference == null) return false;
+      previousReference.remove('content_hash');
+      currentReference.remove('content_hash');
+      return mapEquals(previousRequest, currentRequest) &&
+          mapEquals(previousImage, currentImage) &&
+          mapEquals(previousReference, currentReference);
+    } catch (_) {
+      return false;
+    }
+  }
 
   // Model getters create requests only; visible widgets own the online reads.
   static void configureArtworkLoader(
-    Future<MediaItemImage?> Function(MediaItem)? loader,
-  ) {
+    Future<MediaItemImage?> Function(MediaItem)? loader, {
+    Stream<CatalogUpdate>? catalogUpdates,
+    Stream<CatalogReadChange>? catalogReadChanges,
+  }) {
     _artworkGeneration++;
     _loadArtwork = loader;
+    _artworkUpdates = catalogUpdates;
+    _artworkReadChanges = catalogReadChanges;
     MediaItemImage.missingArtworkSource = loader == null
         ? null
         : _createArtworkSource;
@@ -115,11 +215,50 @@ class MediaImage extends StatefulWidget {
 class _MediaImageState extends State<MediaImage>
     with DetailPageLifecycle<MediaImage> {
   CoreQueryScope _queryScope = CoreQueryScope();
+  late CoreQueryScope _imageScope = _queryScope.createChild();
   String? _resolvedSource;
   bool _isVisible = true;
   bool _isLoadingArtwork = false;
   bool _hasLoadedArtwork = false;
+  bool _isLoadingImage = false;
+  bool _hasLoadedImage = false;
+  Uint8List? _bytes;
+  String? _proxyId;
+  bool _hasPendingSourceChange = false;
   int _loadGeneration = 0;
+  int _imageLoadGeneration = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    MediaImage._imageChanges.addListener(_onImageSessionChanged);
+    MediaImage._cacheChanges.addListener(_onImageSessionChanged);
+    MediaImage._sourceChanges.addListener(_onImageSourceChanged);
+  }
+
+  void _onImageSourceChanged() {
+    if (_proxyId != MediaImage._sourceChanges.value.$2) return;
+    _hasPendingSourceChange = true;
+    if (_isLoadingImage) return;
+    _hasPendingSourceChange = false;
+    _hasLoadedImage = false;
+    if (_isVisible) unawaited(_loadMissingArtwork());
+  }
+
+  void _onImageSessionChanged() {
+    _cancelArtwork();
+    _queryScope = CoreQueryScope();
+    _imageScope = _queryScope.createChild();
+    setState(() {
+      _bytes = null;
+      _proxyId = null;
+      _hasPendingSourceChange = false;
+      _resolvedSource = null;
+      _hasLoadedImage = false;
+      _hasLoadedArtwork = false;
+    });
+    if (_isVisible) unawaited(_loadMissingArtwork());
+  }
 
   @override
   void didChangeDependencies() {
@@ -137,10 +276,18 @@ class _MediaImageState extends State<MediaImage>
   void didUpdateWidget(covariant MediaImage oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.source != widget.source) {
+      final shouldRetainBytes = MediaImage._hasSameImageIdentity(
+        oldWidget.source,
+        widget.source,
+      );
       _cancelArtwork();
       _queryScope = CoreQueryScope();
+      _imageScope = _queryScope.createChild();
       _resolvedSource = null;
+      _proxyId = null;
       _hasLoadedArtwork = false;
+      _hasLoadedImage = false;
+      if (!shouldRetainBytes) _bytes = null;
       unawaited(_loadMissingArtwork());
     }
   }
@@ -153,25 +300,41 @@ class _MediaImageState extends State<MediaImage>
       _cancelArtwork();
     } else {
       _queryScope = CoreQueryScope();
+      _imageScope = _queryScope.createChild();
       unawaited(_loadMissingArtwork());
     }
   }
 
   @override
   void dispose() {
+    MediaImage._imageChanges.removeListener(_onImageSessionChanged);
+    MediaImage._cacheChanges.removeListener(_onImageSessionChanged);
+    MediaImage._sourceChanges.removeListener(_onImageSourceChanged);
     _cancelArtwork();
     super.dispose();
   }
 
   void _cancelArtwork() {
     _loadGeneration++;
+    _imageLoadGeneration++;
+    _hasPendingSourceChange = false;
+    if (_isLoadingArtwork) _hasLoadedArtwork = false;
     _queryScope.cancel();
     _isLoadingArtwork = false;
+    _isLoadingImage = false;
   }
 
   // Every image subscribes separately, so hiding one cannot cancel another visible consumer.
   Future<void> _loadMissingArtwork() async {
     final source = widget.source;
+    if (!source.startsWith('mashin-artwork:')) {
+      await _loadImageSource(source);
+      return;
+    }
+    if (_resolvedSource != null) {
+      unawaited(_loadImageSource(_resolvedSource!));
+      if (_hasLoadedArtwork) return;
+    }
     final loader = MediaImage._loadArtwork;
     if (!_isVisible ||
         _isLoadingArtwork ||
@@ -181,34 +344,206 @@ class _MediaImageState extends State<MediaImage>
       return;
     }
     _isLoadingArtwork = true;
-    final generation = ++_loadGeneration;
+    final generation = _loadGeneration;
     final sessionGeneration = MediaImage._artworkGeneration;
+    StreamSubscription<CatalogUpdate>? updates;
+    StreamSubscription<CatalogReadChange>? readChanges;
+    bool isCurrent() =>
+        mounted &&
+        _isVisible &&
+        generation == _loadGeneration &&
+        sessionGeneration == MediaImage._artworkGeneration;
     try {
       final request = Uri.parse(source);
       if (request.queryParameters['session'] != '$sessionGeneration') return;
       final item = mediaItemFromJson(
         jsonDecode(request.queryParameters['item']!) as Map<String, dynamic>,
       );
+      final observed = <(String, String), MediaItemImage?>{};
+      final pendingEmpty = <(String, String)>{};
+      bool matches(String? itemId, String? provider, MediaType? mediaType) =>
+          mediaType == item.mediaType &&
+          item.providerMappings.any(
+            (mapping) =>
+                mapping.itemId == itemId &&
+                mapping.providerInstance == provider,
+          );
+      void applyArtwork(MediaItemImage? image) {
+        if (!isCurrent()) return;
+        final size = int.tryParse(request.queryParameters['size'] ?? '');
+        final resolved = image?.getProxyPath(size: size, ownerUri: item.uri);
+        if (_hasLoadedArtwork && resolved == _resolvedSource) return;
+        _imageScope.cancel();
+        _imageScope = _queryScope.createChild();
+        _imageLoadGeneration++;
+        _isLoadingImage = false;
+        _hasLoadedImage = false;
+        _proxyId = null;
+        setState(() {
+          _resolvedSource = resolved;
+          _hasLoadedArtwork = true;
+          if (resolved == null) _bytes = null;
+        });
+        if (resolved != null) unawaited(_loadImageSource(resolved));
+      }
+
+      void applyObservedArtwork() {
+        final image = item.providerMappings
+            .map(
+              (mapping) => observed[(mapping.itemId, mapping.providerInstance)],
+            )
+            .whereType<MediaItemImage>()
+            .firstOrNull;
+        if (image != null ||
+            item.providerMappings.every(
+              (mapping) => observed.containsKey((
+                mapping.itemId,
+                mapping.providerInstance,
+              )),
+            )) {
+          applyArtwork(image);
+        }
+      }
+
+      updates = MediaImage._artworkUpdates?.listen((update) {
+        if (!isCurrent() ||
+            update.kind != CatalogQueryKind.providerItem ||
+            !matches(update.itemId, update.provider, update.mediaType) ||
+            update.item == null) {
+          return;
+        }
+        final mappedItem = update.item!;
+        final candidates = <MediaItemImage>[
+          ...?mappedItem.metadata?.images,
+          if (mappedItem is Track && mappedItem.image != null)
+            mappedItem.image!,
+        ];
+        final image = candidates
+            .where(
+              (image) =>
+                  image.cachedInline != null ||
+                  image.path.trim().isNotEmpty ||
+                  (image.proxyId?.trim().isNotEmpty ?? false),
+            )
+            .firstOrNull;
+        final key = (update.itemId!, update.provider!);
+        if (image == null) {
+          pendingEmpty.add(key);
+        } else {
+          pendingEmpty.remove(key);
+          observed[key] = image;
+          applyObservedArtwork();
+        }
+      });
+      readChanges = MediaImage._artworkReadChanges?.listen((change) {
+        if (isCurrent() &&
+            change.kind == CatalogQueryKind.providerItem &&
+            change.phase == CatalogLoadPhase.invalidated &&
+            matches(change.itemId, change.provider, change.mediaType)) {
+          _onImageSessionChanged();
+        } else if (isCurrent() &&
+            change.kind == CatalogQueryKind.providerItem &&
+            change.knowledge == CatalogReadKnowledge.observedResponse &&
+            matches(change.itemId, change.provider, change.mediaType) &&
+            pendingEmpty.remove((change.itemId!, change.provider!))) {
+          observed[(change.itemId!, change.provider!)] = null;
+          applyObservedArtwork();
+        }
+      });
       final image = await _queryScope.run(
         () => _queryScope.execute(() => loader(item), onCancel: () {}),
       );
-      if (!mounted ||
-          generation != _loadGeneration ||
-          sessionGeneration != MediaImage._artworkGeneration) {
-        return;
-      }
-      final size = int.tryParse(request.queryParameters['size'] ?? '');
-      final resolved = image?.getProxyPath(size: size);
-      setState(() {
-        _resolvedSource = resolved;
-        _hasLoadedArtwork = true;
-      });
+      if (!isCurrent()) return;
+      if (!observed.values.any((value) => value != null)) applyArtwork(image);
     } on CoreQueryCanceled {
       return;
     } catch (_) {
       return;
     } finally {
+      await Future.wait<void>([
+        if (updates != null) updates.cancel(),
+        if (readChanges != null) readChanges.cancel(),
+      ]);
       if (generation == _loadGeneration) _isLoadingArtwork = false;
+    }
+  }
+
+  // Follow-up reads share the widget's native cancellation scope; late bytes never cross sessions.
+  Future<void> _loadImageSource(String source) async {
+    final loader = MediaImage._loadImage;
+    if (loader == null || !_isVisible || _isLoadingImage || _hasLoadedImage) {
+      return;
+    }
+    _isLoadingImage = true;
+    final generation = ++_imageLoadGeneration;
+    final sessionGeneration = MediaImage._imageGeneration;
+    bool isCurrent() =>
+        mounted &&
+        _isVisible &&
+        generation == _imageLoadGeneration &&
+        sessionGeneration == MediaImage._imageGeneration;
+    try {
+      final ImageRequest request;
+      if (source.startsWith('mashin-image:')) {
+        final uri = Uri.parse(source);
+        if (uri.queryParameters['session'] != '$sessionGeneration') return;
+        request = ImageRequest.fromJson(
+          jsonDecode(uri.queryParameters['request']!) as Map<String, dynamic>,
+        );
+      } else if (MediaItemImage.isProxyUrl(source)) {
+        final uri = Uri.parse(source);
+        request = ImageRequest(
+          image: MediaItemImage(
+            type: 'thumb',
+            path: '',
+            provider: 'builtin',
+            remotelyAccessible: false,
+            proxyId: uri.pathSegments.last,
+          ),
+          size: MediaItemImage.mapToAllowedSize(
+            int.tryParse(uri.queryParameters['size'] ?? '') ?? 512,
+          ),
+        );
+      } else if (source.startsWith('data:image/') ||
+          source.trimLeft().startsWith('<')) {
+        request = ImageRequest(
+          image: MediaItemImage(
+            type: 'thumb',
+            path: source,
+            provider: 'builtin',
+            remotelyAccessible: false,
+          ),
+        );
+      } else {
+        return;
+      }
+      _proxyId = request.image.proxyId;
+      var snapshot = await _imageScope.run(() => loader(request, false));
+      if (!isCurrent()) return;
+      if (snapshot.bytes != null && !listEquals(_bytes, snapshot.bytes)) {
+        setState(() => _bytes = snapshot.bytes);
+      }
+      if (snapshot.hasRefresh) {
+        snapshot = await _imageScope.run(() => loader(request, true));
+        if (!isCurrent()) return;
+        if (snapshot.bytes != null && !listEquals(_bytes, snapshot.bytes)) {
+          setState(() => _bytes = snapshot.bytes);
+        }
+      }
+      _hasLoadedImage = true;
+    } on CoreQueryCanceled {
+      return;
+    } catch (_) {
+      return;
+    } finally {
+      if (generation == _imageLoadGeneration) {
+        _isLoadingImage = false;
+        if (_hasPendingSourceChange) {
+          _hasPendingSourceChange = false;
+          _hasLoadedImage = false;
+          if (_isVisible) unawaited(_loadMissingArtwork());
+        }
+      }
     }
   }
 
@@ -224,6 +559,19 @@ class _MediaImageState extends State<MediaImage>
 
   @override
   Widget build(BuildContext context) {
+    final cachedBytes = _bytes;
+    if (cachedBytes != null) {
+      return Image.memory(
+        cachedBytes,
+        fit: widget.fit,
+        gaplessPlayback: true,
+        errorBuilder: (_, _, _) => widget.fallback,
+      );
+    }
+    if (MediaImage._loadImage != null ||
+        widget.source.startsWith('mashin-image:')) {
+      return widget.fallback;
+    }
     final String trimmedSource =
         (widget.source.startsWith('mashin-artwork:')
                 ? _resolvedSource ?? ''
@@ -257,11 +605,6 @@ class _MediaImageState extends State<MediaImage>
       return widget.fallback;
     }
 
-    return Image.network(
-      trimmedSource,
-      fit: widget.fit,
-      gaplessPlayback: true,
-      errorBuilder: (_, _, _) => widget.fallback,
-    );
+    return widget.fallback;
   }
 }

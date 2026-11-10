@@ -39,16 +39,21 @@ pub(crate) struct SessionEnvironment {
         )
             -> Result<crate::data::music_assistant::connection::MusicAssistantConnection, String>,
     pub(crate) app_settings: Arc<dyn super::settings::AppSettingsStorage>,
-    pub(crate) repositories: Arc<dyn Fn(
-        Arc<crate::data::music_assistant::client::MusicAssistantClient>,
-        crate::domain::session::MusicAssistantServerUrl,
-        Option<UserId>,
-        u64,
-    ) -> futures_util::future::BoxFuture<
-        'static,
-        Result<super::repositories::SessionServices, String>,
-    > + Send + Sync>,
-    pub(crate) shutdown_repositories: Arc<dyn Fn(u64)->futures_util::future::BoxFuture<'static,Result<(),String>> + Send + Sync>,
+    pub(crate) repositories: Arc<
+        dyn Fn(
+                Arc<crate::data::music_assistant::client::MusicAssistantClient>,
+                crate::domain::session::MusicAssistantServerUrl,
+                Option<UserId>,
+                u64,
+            ) -> futures_util::future::BoxFuture<
+                'static,
+                Result<super::repositories::SessionServices, String>,
+            > + Send
+            + Sync,
+    >,
+    pub(crate) shutdown_repositories: Arc<
+        dyn Fn(u64) -> futures_util::future::BoxFuture<'static, Result<(), String>> + Send + Sync,
+    >,
 }
 
 pub(crate) struct AuthenticatedIdentity {
@@ -92,6 +97,7 @@ pub(crate) struct SessionTasks {
     repositories_load: tokio::sync::Mutex<()>,
     user_data_load: tokio::sync::Mutex<()>,
     session_data_load: tokio::sync::Mutex<()>,
+    provider_refresh: Arc<tokio::sync::Mutex<()>>,
     cancellation: watch::Sender<bool>,
     state: Mutex<SessionTasksState>,
     join_guard: tokio::sync::Mutex<()>,
@@ -110,6 +116,7 @@ impl Default for SessionTasks {
             repositories_load: tokio::sync::Mutex::new(()),
             user_data_load: tokio::sync::Mutex::new(()),
             session_data_load: tokio::sync::Mutex::new(()),
+            provider_refresh: Arc::new(tokio::sync::Mutex::new(())),
             cancellation: watch::channel(false).0,
             state: Mutex::new(SessionTasksState::default()),
             join_guard: tokio::sync::Mutex::new(()),
@@ -227,6 +234,10 @@ impl SessionTasks {
 
     pub(crate) async fn lock_session_data_load(&self) -> tokio::sync::MutexGuard<'_, ()> {
         self.session_data_load.lock().await
+    }
+
+    pub(crate) fn try_lock_provider_refresh(&self) -> Option<tokio::sync::OwnedMutexGuard<()>> {
+        self.provider_refresh.clone().try_lock_owned().ok()
     }
 
     // Queries share this session's cancellation and join boundary.

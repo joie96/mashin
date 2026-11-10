@@ -8,6 +8,52 @@ import 'package:mashin/features/home/home_controller.dart';
 
 void main() {
   test(
+    'home retains early cached recent tracks when the pending read fails',
+    () async {
+      for (final hasTracks in [true, false]) {
+        final recent = Completer<List<MediaItem>>();
+        final bridge = _RecommendationBridge(recentResult: recent);
+        final controller = HomeController(coreBridge: bridge);
+        addTearDown(() async {
+          controller.dispose();
+          await bridge.eventsController.close();
+        });
+        await controller.load();
+        await bridge.requested.future;
+        bridge.eventsController.add({
+          'type': 'catalog_updated',
+          'query': {
+            'RecentlyPlayed': {'limit': 40},
+          },
+          'value': {
+            'Tracks': [
+              if (hasTracks)
+                {
+                  'provider': 'source',
+                  'item_id': 'recent',
+                  'name': 'Cached recent',
+                },
+            ],
+          },
+        });
+        final cached = controller.recentListens;
+        if (hasTracks) {
+          expect(cached.single.name, 'Cached recent');
+        } else {
+          expect(cached, isEmpty);
+        }
+        expect(controller.isLoadingRecentListens, isFalse);
+        expect(recent.isCompleted, isFalse);
+        recent.completeError(StateError('offline'));
+        bridge.result.complete(const RecommendationSnapshot());
+        await Future<void>.delayed(Duration.zero);
+        expect(identical(controller.recentListens, cached), isTrue);
+        expect(controller.isLoadingRecentListens, isFalse);
+      }
+    },
+  );
+
+  test(
     'home retains unknown or failed sections and accepts authoritative empty',
     () async {
       final bridge = _RecommendationBridge();
@@ -127,6 +173,9 @@ void main() {
 }
 
 class _RecommendationBridge implements MashinCoreBridgeApi {
+  _RecommendationBridge({this.recentResult});
+
+  final Completer<List<MediaItem>>? recentResult;
   final eventsController = StreamController<Map<String, dynamic>>.broadcast(
     sync: true,
   );
@@ -210,8 +259,8 @@ class _RecommendationBridge implements MashinCoreBridgeApi {
   }
 
   @override
-  Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40}) async =>
-      const [];
+  Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40}) =>
+      recentResult?.future ?? Future.value(const []);
 
   @override
   dynamic noSuchMethod(Invocation invocation) => super.noSuchMethod(invocation);

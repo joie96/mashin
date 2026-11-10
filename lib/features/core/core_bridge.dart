@@ -164,6 +164,15 @@ typedef _NativeJsonCommandFn = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _DartJsonCommandFn = int Function(ffi.Pointer<Utf8>);
 
 extension CatalogUpdates on MashinCoreBridgeApi {
+  Stream<void> get mediaReadInvalidations => events
+      .where(
+        (event) =>
+            (event['type'] == 'cache_cleared' &&
+                event['cache'] == 'database') ||
+            event['type'] == 'provider_instances_changed',
+      )
+      .map<void>((_) {});
+
   Stream<CatalogReadChange> get catalogReadChanges => events
       .where((event) => event['type'] == 'catalog_read_changed')
       .map(CatalogReadChange.fromJson);
@@ -197,6 +206,12 @@ abstract class MashinCoreBridgeApi {
   Future<List<ProviderManifest>> getProviderManifests();
   Future<String?> getProviderIconData(String provider);
   Future<MediaItemImage?> getMediaArtwork(MediaItem item);
+  Future<void> clearDatabaseCache();
+  Future<void> clearImageCache();
+  Future<ImageReadSnapshot> readImage(
+    ImageRequest request, {
+    bool refresh = false,
+  });
   Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40});
   Future<SearchResults> searchMedia(
     String query,
@@ -474,6 +489,24 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       );
 
   @override
+  Future<void> clearDatabaseCache() =>
+      _submitVoidOperation('clearDatabaseCache');
+
+  @override
+  Future<void> clearImageCache() => _submitVoidOperation('clearImageCache');
+
+  @override
+  Future<ImageReadSnapshot> readImage(
+    ImageRequest request, {
+    bool refresh = false,
+  }) => _startMusicAssistantQuery<ImageReadSnapshot>(
+    'readImage',
+    <String, Object?>{'request': request.toJson(), 'refresh': refresh},
+    (Object? decoded) =>
+        ImageReadSnapshot.fromJson(decoded as Map<String, dynamic>),
+  );
+
+  @override
   Future<MediaItemImage?> getMediaArtwork(MediaItem item) =>
       _startMusicAssistantQuery<MediaItemImage?>(
         'mediaArtwork',
@@ -488,15 +521,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       _startMusicAssistantQuery<List<MediaItem>>(
         'recentlyPlayedTracks',
         <String, Object?>{'limit': limit.clamp(1, 100)},
-        (Object? decoded) {
-          if (decoded is! List) {
-            throw const FormatException('recently played media must be a list');
-          }
-          return decoded
-              .whereType<Map<String, dynamic>>()
-              .map(mediaItemFromJson)
-              .toList(growable: false);
-        },
+        tracksFromJson,
       );
 
   @override
@@ -552,7 +577,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     return _startMusicAssistantQuery<List<Track>>(
       'albumTracks',
       <String, Object?>{'itemId': itemId, 'provider': provider},
-      _decodeTracks,
+      tracksFromJson,
     );
   }
 
@@ -584,7 +609,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       'forceRefresh': forceRefresh,
       'allowDynamicTracks': allowDynamicTracks,
     },
-    _decodeTracks,
+    tracksFromJson,
   );
 
   @override
@@ -601,7 +626,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     return _startMusicAssistantQuery<List<Track>>(
       'artistTopTracks',
       <String, Object?>{'itemId': itemId, 'provider': provider},
-      _decodeTracks,
+      tracksFromJson,
     );
   }
 
@@ -637,7 +662,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
         'limit': limit.clamp(1, 100),
         'allowLookup': allowLookup,
       },
-      _decodeTracks,
+      tracksFromJson,
     );
   }
 
@@ -646,7 +671,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     return _startMusicAssistantQuery<List<Track>>(
       'trackVersions',
       <String, Object?>{'itemId': itemId, 'provider': provider},
-      _decodeTracks,
+      tracksFromJson,
     );
   }
 
@@ -818,16 +843,6 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
         .toList(growable: false);
   }
 
-  List<Track> _decodeTracks(Object? decoded) {
-    if (decoded is! List) {
-      throw const FormatException('tracks must be a list');
-    }
-    return decoded
-        .whereType<Map<String, dynamic>>()
-        .map(Track.fromJson)
-        .toList(growable: false);
-  }
-
   // Engine lifecycle.
   @override
   Future<void> activateEngine() => _submitVoidOperation('activateEngine');
@@ -987,11 +1002,9 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   @override
   Future<UpdateChannel> getUpdateChannel({
     required UpdateChannel defaultChannel,
-  }) => _submitOperation<UpdateChannel>(
-    'getUpdateChannel',
-    <String, Object?>{'defaultChannel': defaultChannel.name},
-    (Object? result) => UpdateChannel.values.byName(result as String),
-  );
+  }) => _submitOperation<UpdateChannel>('getUpdateChannel', <String, Object?>{
+    'defaultChannel': defaultChannel.name,
+  }, (Object? result) => UpdateChannel.values.byName(result as String));
 
   @override
   Future<void> saveUpdateChannel(UpdateChannel channel) => _submitVoidOperation(

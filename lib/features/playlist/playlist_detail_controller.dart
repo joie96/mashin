@@ -23,6 +23,9 @@ class PlaylistDetailController extends ChangeNotifier {
        ) {
     userDataController?.addListener(_onUserDataChanged);
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+    _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
+      _onMediaReadInvalidated,
+    );
     _catalogReadSubscription = coreBridge.catalogReadChanges.listen(
       _onCatalogReadChange,
     );
@@ -34,6 +37,7 @@ class PlaylistDetailController extends ChangeNotifier {
   final UserData? userDataController;
   final DetailProviderSelection sectionProvider;
   StreamSubscription<CatalogUpdate>? _catalogSubscription;
+  StreamSubscription<void>? _cacheSubscription;
   StreamSubscription<CatalogReadChange>? _catalogReadSubscription;
   final ChangeNotifier _readStatusNotifier = ChangeNotifier();
   CatalogReadChange? _tracksReadState;
@@ -41,6 +45,9 @@ class PlaylistDetailController extends ChangeNotifier {
 
   Playlist? _playlist;
   List<Track> _tracks = const <Track>[];
+  List<Track> _sourceTracks = const <Track>[];
+  CoreQueryScope? _trackAlbumsScope;
+  (int, List<Track>)? _trackAlbumsContext;
   final Map<String, bool> _favoriteOverrides = <String, bool>{};
 
   bool _isLoadingMetadata = true;
@@ -56,6 +63,7 @@ class PlaylistDetailController extends ChangeNotifier {
   bool _requiresReload = false;
   CoreQueryScope _queryScope = CoreQueryScope();
   Future<void>? _loadingFuture;
+  Completer<Playlist?>? _firstMetadata;
 
   CoreQueryScope get _activeQueryScope => CoreQueryScope.current ?? _queryScope;
   bool get _isLoadCanceled => _isDisposed || _activeQueryScope.isCanceled;
@@ -83,6 +91,18 @@ class PlaylistDetailController extends ChangeNotifier {
     }
   }
 
+  void _onMediaReadInvalidated(void _) {
+    if (_isDisposed) return;
+    _requiresReload = true;
+    _queryScope.cancel();
+    _loadGeneration++;
+    _loadingFuture = null;
+    if (!_isPageVisible) return;
+    _queryScope = CoreQueryScope();
+    _requiresReload = false;
+    unawaited(loadPlaylist());
+  }
+
   @override
   void notifyListeners() {
     if (!_isLoadCanceled) {
@@ -94,6 +114,7 @@ class PlaylistDetailController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     unawaited(_catalogSubscription?.cancel());
+    unawaited(_cacheSubscription?.cancel());
     unawaited(_catalogReadSubscription?.cancel());
     _readStatusNotifier.dispose();
     _queryScope.cancel();
@@ -160,8 +181,18 @@ class PlaylistDetailController extends ChangeNotifier {
         ) &&
         update.item is Playlist) {
       final playlist = update.item! as Playlist;
-      _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
+      final incoming =
+          userDataController?.withFavoriteStatus(playlist) ?? playlist;
+      final hasChangedMetadata = !hasSameMediaContent(_playlist, incoming);
+      if (hasChangedMetadata) _playlist = incoming;
       _isPlaylistFavorite = isItemFavorite(_playlist!);
+      final firstMetadata = _firstMetadata;
+      if (firstMetadata != null && !firstMetadata.isCompleted) {
+        firstMetadata.complete(_playlist);
+      }
+      final wasLoadingMetadata = _isLoadingMetadata;
+      _isLoadingMetadata = false;
+      if (!hasChangedMetadata && !wasLoadingMetadata) return;
     } else if (update.matches(
       CatalogQueryKind.playlistTracks,
       sectionProvider.selectedItemId,
@@ -172,9 +203,8 @@ class PlaylistDetailController extends ChangeNotifier {
           (track) => userDataController?.withFavoriteStatus(track) ?? track,
         ),
       );
-      final hasChangedTracks = !hasSameMediaListContent(_tracks, incoming);
+      final hasChangedTracks = _applyTracks(incoming);
       if (!hasChangedTracks && !_isLoadingTracks) return;
-      if (hasChangedTracks) _tracks = incoming;
       _isLoadingTracks = false;
     } else {
       return;
@@ -183,24 +213,47 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   void _onCatalogReadChange(CatalogReadChange change) {
-    if (_isLoadCanceled || !_isPageVisible || change.allowDynamicTracks == true)
+    if (_isLoadCanceled ||
+        !_isPageVisible ||
+        change.allowDynamicTracks == true) {
       return;
-    if (!change.matches(
-      CatalogQueryKind.playlistTracks,
-      sectionProvider.selectedItemId,
-      sectionProvider.selectedProvider,
-    )) return;
-    _tracksReadState = change;
+    }
+    final isHeader = change.matches(
+      CatalogQueryKind.playlist,
+      itemId,
+      providerInstanceIdOrDomain,
+    );
+    if (!isHeader &&
+        !change.matches(
+          CatalogQueryKind.playlistTracks,
+          sectionProvider.selectedItemId,
+          sectionProvider.selectedProvider,
+        )) {
+      return;
+    }
+    if (!isHeader) _tracksReadState = change;
     _readStatusNotifier.notifyListeners();
     if (change.phase == CatalogLoadPhase.invalidated) {
-      _loadGeneration++;
-      _queryScope.cancel();
-      _loadingFuture = null;
-      _tracks = const <Track>[];
-      _isLoadingTracks = false;
-      _requiresReload = true;
-      super.notifyListeners();
+      _invalidateServerContext();
     }
+  }
+
+  // Header, track and enrichment invalidations retire the same visible context.
+  void _invalidateServerContext() {
+    _loadGeneration++;
+    _queryScope.cancel();
+    _loadingFuture = null;
+    _playlist = null;
+    _tracks = const [];
+    _sourceTracks = const [];
+    _isLoadingMetadata = false;
+    _isLoadingTracks = false;
+    _isLoadingTrackAlbums = false;
+    _requiresReload = true;
+    if (_firstMetadata case final pending? when !pending.isCompleted) {
+      pending.complete(null);
+    }
+    super.notifyListeners();
   }
 
   Future<void> loadPlaylist() {
@@ -296,13 +349,42 @@ class PlaylistDetailController extends ChangeNotifier {
         }
       }
 
-      await _loadMetadata();
-      final Playlist? originalPlaylist = _playlist;
-      if (!_isDisposed && originalPlaylist != null) {
-        await sectionProvider.initialize(originalPlaylist);
-      }
-      if (!_isDisposed && loadGeneration == _loadGeneration) {
+      final firstMetadata = Completer<Playlist?>();
+      _firstMetadata = firstMetadata;
+      if (_playlist != null) firstMetadata.complete(_playlist);
+      final metadataLoading = _loadMetadata();
+      try {
+        final originalPlaylist = await Future.any<Playlist?>([
+          firstMetadata.future,
+          metadataLoading.then((_) => _playlist),
+        ]);
+        if (_isLoadCanceled || loadGeneration != _loadGeneration) return;
+        if (originalPlaylist != null) {
+          await sectionProvider.initialize(originalPlaylist);
+        }
+        if (_isLoadCanceled || loadGeneration != _loadGeneration) return;
         await _loadTracks(loadGeneration);
+        await metadataLoading;
+        if (_isLoadCanceled || loadGeneration != _loadGeneration) return;
+        final refreshedPlaylist = _playlist;
+        if (refreshedPlaylist != null &&
+            !identical(originalPlaylist, refreshedPlaylist)) {
+          final previousContext = (
+            sectionProvider.selectedItemId,
+            sectionProvider.selectedProvider,
+          );
+          await sectionProvider.initialize(refreshedPlaylist);
+          if (_isLoadCanceled || loadGeneration != _loadGeneration) return;
+          if (previousContext !=
+              (
+                sectionProvider.selectedItemId,
+                sectionProvider.selectedProvider,
+              )) {
+            await _loadTracks(loadGeneration);
+          }
+        }
+      } finally {
+        if (identical(_firstMetadata, firstMetadata)) _firstMetadata = null;
       }
     } finally {
       if (!_isDisposed && loadGeneration == _loadGeneration) {
@@ -327,6 +409,7 @@ class PlaylistDetailController extends ChangeNotifier {
       if (_isDisposed) return;
       final int loadGeneration = ++_loadGeneration;
       _tracks = const <Track>[];
+      _sourceTracks = const <Track>[];
       _isLoadingTracks = true;
       notifyListeners();
       await _loadTracks(loadGeneration);
@@ -380,15 +463,17 @@ class PlaylistDetailController extends ChangeNotifier {
     _hasLoadedPrivatePlaylist = true;
     _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
 
-    _tracks = List<Track>.unmodifiable(
-      storedTracks
-          .map((Track track) {
-            final Track withFavorite =
-                userDataController?.withFavoriteStatus(track) ?? track;
-            _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
-            return withFavorite;
-          })
-          .toList(growable: false),
+    _applyTracks(
+      List<Track>.unmodifiable(
+        storedTracks
+            .map((Track track) {
+              final Track withFavorite =
+                  userDataController?.withFavoriteStatus(track) ?? track;
+              _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
+              return withFavorite;
+            })
+            .toList(growable: false),
+      ),
     );
 
     _isPlaylistFavorite = _playlist?.favorite ?? false;
@@ -401,10 +486,10 @@ class PlaylistDetailController extends ChangeNotifier {
         onCancel: () {},
       );
       if (_isLoadCanceled) return;
-      _playlist = userDataController?.withFavoriteStatus(online) ?? online;
+      final incoming = userDataController?.withFavoriteStatus(online) ?? online;
+      if (!hasSameMediaContent(_playlist, incoming)) _playlist = incoming;
       _isPlaylistFavorite = _playlist?.favorite ?? false;
     } catch (_) {
-      if (!_isLoadCanceled) _playlist = null;
     } finally {
       if (!_isLoadCanceled) {
         _isLoadingMetadata = false;
@@ -414,6 +499,7 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   Future<void> _loadTracks(int loadGeneration) async {
+    unawaited(_loadTrackAlbums(loadGeneration, _sourceTracks));
     try {
       final List<Track> loaded = await _activeQueryScope.execute(
         () => coreBridge.getPlaylistTracks(
@@ -437,11 +523,18 @@ class PlaylistDetailController extends ChangeNotifier {
             })
             .toList(growable: false),
       );
-      if (!hasSameMediaListContent(_tracks, incoming)) {
-        _tracks = incoming;
-        unawaited(_loadTrackAlbums(loadGeneration, _tracks));
-      }
+      _applyTracks(incoming);
     } catch (_) {}
+  }
+
+  bool _applyTracks(List<Track> incoming) {
+    final hasChanges = !hasSameMediaListContent(_sourceTracks, incoming);
+    if (hasChanges) {
+      _sourceTracks = incoming;
+      _tracks = incoming;
+    }
+    unawaited(_loadTrackAlbums(_loadGeneration, _sourceTracks));
+    return hasChanges;
   }
 
   // Enriches online tracks without delaying the initial playlist display.
@@ -449,6 +542,20 @@ class PlaylistDetailController extends ChangeNotifier {
     int loadGeneration,
     List<Track> initialTracks,
   ) async {
+    final context = (loadGeneration, initialTracks);
+    if (context == _trackAlbumsContext || _isLoadCanceled || !_isPageVisible) {
+      return;
+    }
+    _trackAlbumsContext = context;
+    _trackAlbumsScope?.cancel();
+    final queryScope = _activeQueryScope.createChild();
+    _trackAlbumsScope = queryScope;
+    bool isCurrent() =>
+        !_isDisposed &&
+        _isPageVisible &&
+        !queryScope.isCanceled &&
+        loadGeneration == _loadGeneration &&
+        identical(initialTracks, _sourceTracks);
     final Set<(String, String)> artistKeys = <(String, String)>{};
     for (final Track track in initialTracks) {
       if (track.album == null || track.album!.year != null) {
@@ -461,70 +568,83 @@ class PlaylistDetailController extends ChangeNotifier {
       }
     }
     if (artistKeys.isEmpty) {
+      _isLoadingTrackAlbums = false;
+      queryScope.cancel();
       return;
     }
 
-    final pendingArtists = artistKeys.iterator;
-    final queryScope = _activeQueryScope;
-    Future<List<Album>> loadArtistAlbums() async {
-      final albums = <Album>[];
-      while (!_isDisposed &&
-          loadGeneration == _loadGeneration &&
-          !queryScope.isCanceled &&
-          pendingArtists.moveNext()) {
-        final artistKey = pendingArtists.current;
-        try {
-          albums.addAll(
-            await queryScope.execute(
-              () => coreBridge.getArtistAlbums(artistKey.$2, artistKey.$1),
-              onCancel: () {},
-            ),
-          );
-        } catch (_) {}
+    final observed = <(String, String), List<Album>>{};
+    void accept((String, String) key, List<Album> albums) {
+      if (!isCurrent()) return;
+      if (observed[key] case final previous?
+          when hasSameMediaListContent(previous, albums)) {
+        return;
       }
-      return albums;
+      observed[key] = albums;
+      _applyTrackAlbums(
+        initialTracks,
+        observed.values.expand((albums) => albums),
+      );
     }
 
     _isLoadingTrackAlbums = true;
-    final List<List<Album>> albumGroups =
-        await Future.wait(
-          List.generate(3, (_) => loadArtistAlbums()),
-        ).whenComplete(() {
-          if (!_isDisposed && loadGeneration == _loadGeneration) {
-            _isLoadingTrackAlbums = false;
-          }
-        });
-    if (_isDisposed || loadGeneration != _loadGeneration) {
-      return;
+    final subscription = coreBridge.catalogUpdates.listen((update) {
+      final key = (update.provider ?? '', update.itemId ?? '');
+      if (update.kind == CatalogQueryKind.artistAlbums &&
+          artistKeys.contains(key)) {
+        accept(key, update.albums);
+      }
+    });
+    final readSubscription = coreBridge.catalogReadChanges.listen((change) {
+      if (isCurrent() &&
+          change.kind == CatalogQueryKind.artistAlbums &&
+          artistKeys.contains((change.provider ?? '', change.itemId ?? '')) &&
+          change.phase == CatalogLoadPhase.invalidated) {
+        _invalidateServerContext();
+      }
+    });
+    try {
+      await queryScope.run(
+        () => Future.wait(
+          artistKeys.map((key) async {
+            try {
+              final albums = await queryScope.execute(
+                () => coreBridge.getArtistAlbums(key.$2, key.$1),
+                onCancel: () {},
+              );
+              accept(key, albums);
+            } catch (_) {}
+          }),
+        ),
+      );
+    } finally {
+      await subscription.cancel();
+      await readSubscription.cancel();
+      if (identical(_trackAlbumsScope, queryScope)) {
+        _isLoadingTrackAlbums = false;
+      }
+      queryScope.cancel();
     }
+  }
 
+  // Join against observed tracks so derived years never become source knowledge.
+  void _applyTrackAlbums(List<Track> source, Iterable<Album> albums) {
     final Map<(String, String), Album> albumsByKey =
         <(String, String), Album>{};
-    for (final List<Album> albums in albumGroups) {
-      for (final Album album in albums) {
-        albumsByKey[(
-              album.provider.toLowerCase(),
-              album.itemId.toLowerCase(),
-            )] =
-            album;
-      }
+    for (final album in albums) {
+      albumsByKey[(album.provider, album.itemId)] = album;
     }
-    bool hasChanges = false;
-    final List<Track> enriched = _tracks
+    final List<Track> enriched = source
         .map((Track track) {
           final Album? reference = track.album;
           if (reference == null || reference.year != null) {
             return track;
           }
           final Album? album =
-              albumsByKey[(
-                reference.provider.toLowerCase(),
-                reference.itemId.toLowerCase(),
-              )];
+              albumsByKey[(reference.provider, reference.itemId)];
           if (album == null) {
             return track;
           }
-          hasChanges = true;
           return Track(
             itemId: track.itemId,
             provider: track.provider,
@@ -549,7 +669,7 @@ class PlaylistDetailController extends ChangeNotifier {
           );
         })
         .toList(growable: false);
-    if (hasChanges) {
+    if (!hasSameMediaListContent(_tracks, enriched)) {
       _tracks = List<Track>.unmodifiable(enriched);
       notifyListeners();
     }

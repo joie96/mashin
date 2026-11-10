@@ -187,7 +187,8 @@ class PlaybackSessionCallbackTest {
         val releaseResults = CountDownLatch(1)
         val releaseAlbums = CountDownLatch(1)
         val requestCount = AtomicInteger()
-        val search = MediaLibrarySearch { _, argument ->
+        val queryFixture = com.joie96.mashin.media.library.BlockingSearchFixture()
+        val search = queryFixture.search { _, argument ->
             requestCount.incrementAndGet()
             val request = JSONObject(argument!!)
             val mediaType = request.getString("mediaType")
@@ -226,7 +227,9 @@ class PlaybackSessionCallbackTest {
             releaseResults.countDown()
             search.results("jazz", SearchMediaCategory.Tracks).get(5, TimeUnit.SECONDS)
             search.results("jazz", SearchMediaCategory.Playlists).get(5, TimeUnit.SECONDS)
-            search.results("jazz", SearchMediaCategory.Artists).get(5, TimeUnit.SECONDS)
+            org.junit.Assert.assertThrows(java.util.concurrent.ExecutionException::class.java) {
+                search.results("jazz", SearchMediaCategory.Artists).get(5, TimeUnit.SECONDS)
+            }
             assertFalse(search.results("jazz", SearchMediaCategory.Albums).isDone)
             val categories = callback.onGetSearchResult(session, controller, "jazz", 0, 10, null).get()
             assertEquals(expectedCategories, categories.value?.map { it.mediaId })
@@ -236,7 +239,8 @@ class PlaybackSessionCallbackTest {
                 .get(1, TimeUnit.SECONDS).value?.last()?.mediaId)
             assertEquals("browse:playlist:library:playlist-1", openedCategories.getValue("search:playlists?jazz")
                 .get(1, TimeUnit.SECONDS).value?.single()?.mediaId)
-            assertTrue(openedCategories.getValue("search:artists?jazz").get(1, TimeUnit.SECONDS).value!!.isEmpty())
+            assertEquals(LibraryResult.RESULT_ERROR_UNKNOWN,
+                openedCategories.getValue("search:artists?jazz").get(1, TimeUnit.SECONDS).resultCode)
             val page = callback.onGetSearchResult(session, controller, "jazz", 1, 1, null).get()
             assertEquals("search:albums?jazz", page.value?.single()?.mediaId)
             repeat(2) {
@@ -263,6 +267,7 @@ class PlaybackSessionCallbackTest {
             releaseResults.countDown()
             releaseAlbums.countDown()
             browser.close()
+            queryFixture.close()
             session.release()
             player.release()
         }

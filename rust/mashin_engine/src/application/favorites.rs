@@ -219,6 +219,14 @@ pub(in crate::application) mod tests {
     }
 
     impl CatalogClient for RecordingCatalog {
+        fn commit_confirmed_playlist_contents(
+            &self,
+            playlist: crate::domain::media::Playlist,
+            _tracks: Vec<crate::domain::media::Track>,
+        ) -> BoxFuture<'_, Result<(), String>> {
+            self.commit_confirmed_media(MediaItem::Playlist(playlist))
+        }
+
         fn commit_confirmed_playlist_removal(
             &self,
             playlist: crate::domain::media::Playlist,

@@ -65,6 +65,32 @@ mod tests {
     use crate::application::queries::ApplicationQuery;
 
     #[test]
+    fn cache_maintenance_commands_and_completion_events_keep_separate_areas() {
+        for (kind, area) in [
+            ("clearDatabaseCache", "database"),
+            ("clearImageCache", "images"),
+        ] {
+            assert!(super::decode_command(kind, None).is_ok());
+            assert!(super::decode_command(kind, Some(r#"{"unexpected":true}"#)).is_err());
+            let request: NativeOperationRequest =
+                serde_json::from_value(serde_json::json!({"requestId":42,"kind":kind})).unwrap();
+            assert!(matches!(request.operation, NativeOperation::Command(_)));
+            let cache = if area == "database" {
+                crate::application::events::CacheArea::Database
+            } else {
+                crate::application::events::CacheArea::Images
+            };
+            assert_eq!(
+                serde_json::to_value(crate::application::events::ApplicationEvent::CacheCleared {
+                    cache
+                })
+                .unwrap(),
+                serde_json::json!({"type":"cache_cleared","cache":area})
+            );
+        }
+    }
+
+    #[test]
     fn startup_request_and_catalog_update_keep_the_native_contract_typed() {
         use crate::application::events::ApplicationEvent;
         use crate::domain::catalog::{CatalogQuery, CatalogValue};
@@ -73,6 +99,10 @@ mod tests {
             ApplicationQuery::StartSessionDataLoad {}
         ));
         assert!(super::decode_query("loadSessionData", None).is_err());
+        assert_eq!(
+            serde_json::to_value(ApplicationEvent::ProviderInstancesChanged).unwrap(),
+            serde_json::json!({"type":"provider_instances_changed"})
+        );
         assert!(matches!(
             super::decode_query(
                 "recommendations",

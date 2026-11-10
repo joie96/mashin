@@ -11,15 +11,37 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 
 impl crate::application::repositories::ProviderClient for MusicAssistantClient {
-    fn get_manifests(
+    fn read_manifests(
         &self,
-    ) -> futures_util::future::BoxFuture<'_, Result<Vec<ProviderManifest>, String>> {
-        Box::pin(load_provider_manifests(self))
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<crate::application::repositories::ProviderRead<ProviderManifest>, String>,
+    > {
+        Box::pin(async move {
+            Ok(crate::application::repositories::ProviderRead {
+                current: crate::application::repositories::ProviderUpdate {
+                    items: Some(load_provider_manifests(self).await?),
+                    cache_error: None,
+                },
+                refresh: None,
+            })
+        })
     }
-    fn get_instances(
+    fn read_instances(
         &self,
-    ) -> futures_util::future::BoxFuture<'_, Result<Vec<ProviderInstance>, String>> {
-        Box::pin(load_provider_instances(self))
+    ) -> futures_util::future::BoxFuture<
+        '_,
+        Result<crate::application::repositories::ProviderRead<ProviderInstance>, String>,
+    > {
+        Box::pin(async move {
+            Ok(crate::application::repositories::ProviderRead {
+                current: crate::application::repositories::ProviderUpdate {
+                    items: Some(load_provider_instances(self).await?),
+                    cache_error: None,
+                },
+                refresh: None,
+            })
+        })
     }
     fn get_icon_data<'request>(
         &'request self,

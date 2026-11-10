@@ -62,6 +62,16 @@ pub(super) fn write_playlist_observation(
     } else {
         incoming.clone()
     };
+    if playlist.media.metadata.as_ref().is_some_and(|metadata| {
+        metadata
+            .images
+            .iter()
+            .any(crate::domain::artwork::is_inline_image)
+    }) {
+        return Err(CacheError::InvalidMediaObservation(
+            "inline playlist images require persistent image references",
+        ));
+    }
     if playlist
         .media
         .external_ids

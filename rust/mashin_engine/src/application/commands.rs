@@ -24,6 +24,8 @@ pub(crate) enum ApplicationCommand {
     ActivateEngine {},
     DeactivateEngine {},
     Shutdown {},
+    ClearDatabaseCache {},
+    ClearImageCache {},
     SelectLocalOutput {},
     SelectRemotePlayer {
         player_id: PlayerId,

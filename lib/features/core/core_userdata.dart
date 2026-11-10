@@ -17,6 +17,7 @@ class UserData extends ChangeNotifier {
   late final StreamSubscription<Map<String, dynamic>> _eventSubscription;
   Future<void>? _snapshotRefresh;
   bool _needsSnapshotRefresh = false;
+  int _snapshotRevision = 0;
   bool _isLoadingLibraryData = false;
   bool _isLoadingFavorites = false;
   bool _hasLoadedFavorites = false;
@@ -55,6 +56,8 @@ class UserData extends ChangeNotifier {
       _playlistTracksByPlaylistId[playlistId.trim()] ?? const <Track>[];
 
   Future<void> loadLibraryData() async {
+    if (_isDisposed) return;
+    final snapshotRevision = ++_snapshotRevision;
     _isLoadingLibraryData = true;
     _isLoadingFavorites = true;
     _isLoadingPlaylists = true;
@@ -62,14 +65,18 @@ class UserData extends ChangeNotifier {
     try {
       if (_isDisposed) return;
       final snapshot = await _coreBridge.loadUserData();
-      if (!_isDisposed) _applySnapshot(snapshot);
+      if (!_isDisposed && snapshotRevision == _snapshotRevision) {
+        _applySnapshot(snapshot);
+      }
     } catch (_) {
-      _loadingPlaylistIds = <String>{};
+      if (!_isDisposed && snapshotRevision == _snapshotRevision) {
+        _loadingPlaylistIds = <String>{};
+        _isLoadingFavorites = false;
+        _isLoadingPlaylists = false;
+      }
       rethrow;
     } finally {
       _isLoadingLibraryData = false;
-      _isLoadingFavorites = false;
-      _isLoadingPlaylists = false;
       if (!_isDisposed) notifyListeners();
     }
   }
@@ -187,6 +194,8 @@ class UserData extends ChangeNotifier {
   }
 
   Future<void> _refreshSnapshot() {
+    if (_isDisposed) return Future<void>.value();
+    _snapshotRevision++;
     _needsSnapshotRefresh = true;
     return _snapshotRefresh ??= Future<void>.microtask(_drainSnapshotRefreshes);
   }
@@ -195,8 +204,17 @@ class UserData extends ChangeNotifier {
     try {
       while (_needsSnapshotRefresh && !_isDisposed) {
         _needsSnapshotRefresh = false;
-        final snapshot = await _coreBridge.getUserData();
-        if (!_isDisposed && !_needsSnapshotRefresh) _applySnapshot(snapshot);
+        final snapshotRevision = _snapshotRevision;
+        try {
+          final snapshot = await _coreBridge.getUserData();
+          if (!_isDisposed &&
+              !_needsSnapshotRefresh &&
+              snapshotRevision == _snapshotRevision) {
+            _applySnapshot(snapshot);
+          }
+        } catch (_) {
+          if (!_isDisposed && !_needsSnapshotRefresh) rethrow;
+        }
       }
     } finally {
       _snapshotRefresh = null;

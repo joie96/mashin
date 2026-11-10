@@ -44,6 +44,10 @@ object RustCoreBridge {
     // Native snapshot boundary.
     external fun query(kind: String, argument: String?): String?
 
+    // Asynchronous requests use the native session-owned query registry.
+    external fun startQuery(requestId: Long, kind: String, argument: String?): Boolean
+    external fun cancelQuery(requestId: Long): Boolean
+
     // JNI callbacks may arrive off the UI thread; media-session state is confined to the main thread.
     @JvmStatic
     fun deliverCoreEvent(payload: String) {

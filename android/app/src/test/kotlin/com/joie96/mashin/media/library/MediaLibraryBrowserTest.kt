@@ -29,6 +29,7 @@ import org.robolectric.annotation.LooperMode
 @Config(sdk = [35])
 @LooperMode(LooperMode.Mode.PAUSED)
 class MediaLibraryBrowserTest {
+    private val queryFixture = BlockingSearchFixture()
     private val folders = JSONArray()
     private val requests = mutableListOf<PlaybackRequest>()
     private val references = mutableListOf<Pair<String, JSONObject>>()
@@ -46,18 +47,24 @@ class MediaLibraryBrowserTest {
     @Before
     fun initialize() {
         val context = RuntimeEnvironment.getApplication()
-        browser = MediaLibraryBrowser(context, query = { kind, argument ->
+        val queryCore: (String, String?) -> String? = { kind, argument ->
             if (kind == "recommendations") {
                 recommendationViews.add(JSONObject(checkNotNull(argument)).getString("view"))
                 JSONObject().put("folders", folders).put("is_loading", isLoadingRecommendations).toString()
             } else if (kind == "getUserData") {
                 userData.toString()
+            } else if (kind == "recentlyPlayedTracks") {
+                "[]"
             } else {
                 val reference = JSONObject(checkNotNull(argument))
                 references.add(kind to reference)
                 results["$kind:${reference.getString("itemId")}"]?.toString() ?: "[]"
             }
-        }) { request -> requests.add(request); Futures.immediateVoidFuture() }
+        }
+        browser = MediaLibraryBrowser(context, query = queryCore,
+            catalogQuery = { kind, argument -> Futures.immediateFuture(checkNotNull(queryCore(kind, argument))) }) {
+            request -> requests.add(request); Futures.immediateVoidFuture()
+        }
         player = RustSessionPlayer({ Futures.immediateVoidFuture() }, browser::startPlayback, browser::resolveLibraryMediaItem)
         session = MediaLibrarySession.Builder(context, player, browser).build()
     }
@@ -67,9 +74,66 @@ class MediaLibraryBrowserTest {
         session.release()
         player.release()
         browser.close()
+        queryFixture.close()
     }
 
     // Discover categories preserve the Flutter feed order and expose their actual media.
+    @Test
+    fun failedSearchWithoutCachedValuesReportsAnErrorInsteadOfEmptySuccess() {
+        val search = queryFixture.search { _, _ -> error("Offline search") }
+        val searchBrowser = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), search = search) {
+            Futures.immediateVoidFuture()
+        }
+        try {
+            searchBrowser.onSearch(session, controller, "jazz", null).get(5, TimeUnit.SECONDS)
+            val result = searchBrowser.onGetChildren(session, controller, "search:tracks?jazz", 0, 10, null)
+                .get(5, TimeUnit.SECONDS)
+            assertEquals(LibraryResult.RESULT_ERROR_UNKNOWN, result.resultCode)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        } finally {
+            searchBrowser.close()
+        }
+    }
+
+    @Test
+    fun cachedSearchTracksReachMedia3BeforeRefreshAndLaterValuesReplaceThem() {
+        val started = CountDownLatch(4)
+        val releaseRefresh = CountDownLatch(1)
+        val search = queryFixture.search { _, _ ->
+            started.countDown()
+            check(releaseRefresh.await(5, TimeUnit.SECONDS))
+            error("Offline refresh")
+        }
+        val searchBrowser = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), search = search) {
+            Futures.immediateVoidFuture()
+        }
+        try {
+            val canceled = searchBrowser.onGetChildren(session, controller, "search:tracks?jazz", 0, Int.MAX_VALUE, null)
+            val pending = searchBrowser.onGetChildren(session, controller, "search:tracks?jazz", 0, Int.MAX_VALUE, null)
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            canceled.cancel(false)
+            assertFalse("One browser cancellation must not cancel another consumer", pending.isCancelled)
+            for (name in listOf("Cached", "Refreshed")) {
+                val event = JSONObject().put("type", "catalog_updated")
+                    .put("query", JSONObject().put("Search", JSONObject()
+                        .put("query", "jazz").put("media_type", "track").put("limit", 50)))
+                    .put("value", JSONObject().put("Search", JSONObject()
+                        .put("tracks", JSONArray().put(item(name, "track")))))
+                searchBrowser.onCoreEvent("catalog_updated", catalogEvent = event)
+                val result = if (name == "Cached") pending else searchBrowser.onGetChildren(
+                    session, controller, "search:tracks?jazz", 0, Int.MAX_VALUE, null)
+                assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", name),
+                    checkNotNull(result.get(5, TimeUnit.SECONDS).value).map { it.mediaMetadata.title.toString() })
+            }
+            val page = searchBrowser.onGetChildren(session, controller, "search:tracks?jazz", 1, 2, null)
+            assertEquals(listOf("Refreshed"), checkNotNull(page.get(5, TimeUnit.SECONDS).value)
+                .map { it.mediaMetadata.title.toString() })
+        } finally {
+            releaseRefresh.countDown()
+            searchBrowser.close()
+        }
+    }
+
     @Test
     fun allRecommendationSubmenusWaitForTheirDataAndFinishOnCoreEvents() {
         for ((parent, folderId, mediaType) in listOf(
@@ -88,7 +152,7 @@ class MediaLibraryBrowserTest {
             val pending = browser.onGetChildren(session, controller, parent, 0, Int.MAX_VALUE, null)
             assertThrows(TimeoutException::class.java) { pending.get(100, TimeUnit.MILLISECONDS) }
             folders.put(folder(folderId, item(parent, mediaType)))
-            browser.onCoreEvent("recommendations_changed")
+            publishRecommendations()
             val result = pending.get(5, TimeUnit.SECONDS)
             assertEquals(LibraryResult.RESULT_SUCCESS, result.resultCode)
             assertEquals(parent, checkNotNull(result.value).last().mediaMetadata.title)
@@ -96,17 +160,18 @@ class MediaLibraryBrowserTest {
     }
 
     @Test
-    fun partialRecommendationFoldersWaitButCompletedEmptyFoldersDoNot() {
+    fun partialRecommendationFoldersShowAvailableItemsAndCompletedEmptyFoldersDoNotWait() {
         isLoadingRecommendations = true
         val loadingFolder = folder("user_recommendations", item("partial", "track")).put("is_loading", true)
         folders.put(loadingFolder)
         val pending = browser.onGetChildren(session, controller, "home:recommendations", 0, Int.MAX_VALUE, null)
-        assertThrows(TimeoutException::class.java) { pending.get(100, TimeUnit.MILLISECONDS) }
+        assertEquals("partial", checkNotNull(pending.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
         loadingFolder.put("is_loading", false)
-        browser.onCoreEvent("recommendations_changed")
+        publishRecommendations()
         assertEquals("partial", checkNotNull(pending.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
 
         folders.put(folder("sitewide_top_albums_weekly"))
+        publishRecommendations()
         assertTrue(children("discover:albums").isEmpty())
     }
 
@@ -172,11 +237,10 @@ class MediaLibraryBrowserTest {
     @Test
     fun staticMenusRemainImmediateWhileDataQueryIsBlocked() {
         val queryStarted = CountDownLatch(1)
-        val releaseQuery = CountDownLatch(1)
-        val blockedBrowser = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), query = { _, _ ->
+        val remote = com.google.common.util.concurrent.SettableFuture.create<String>()
+        val blockedBrowser = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), catalogQuery = { _, _ ->
             queryStarted.countDown()
-            check(releaseQuery.await(5, TimeUnit.SECONDS))
-            "[]"
+            remote
         }) { Futures.immediateVoidFuture() }
         try {
             val pending = blockedBrowser.onGetChildren(session, controller, "home:recent", 0, Int.MAX_VALUE, null)
@@ -193,10 +257,9 @@ class MediaLibraryBrowserTest {
                 assertTrue("$parent must not wait for data queries", result.isDone)
                 assertEquals(expected, checkNotNull(result.get().value).map { it.mediaId })
             }
-            releaseQuery.countDown()
+            remote.set("[]")
             pending.get(5, TimeUnit.SECONDS)
         } finally {
-            releaseQuery.countDown()
             blockedBrowser.close()
         }
     }
@@ -257,15 +320,177 @@ class MediaLibraryBrowserTest {
         assertTrue(children("discover:tracks").isEmpty())
         folders.put(folder("sitewide_top_tracks_weekly", item("song", "track"), item("wrong", "album"),
             item("", "track"), item("missing-provider", "track").put("provider", "")))
+        publishRecommendations()
         val songs = children("discover:tracks")
         assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "song"),
             songs.map { it.mediaMetadata.title.toString() })
         assertTrue(children("discover:exploration").isEmpty())
         folders.put(folder("user_exploration_weekly", item("empty-playlist", "playlist")))
+        publishRecommendations()
         assertTrue(children("discover:exploration").isEmpty())
     }
 
     // Fixtures cross the same JSON boundary as Rust query results.
+    private fun publishRecommendations() {
+        listOf("home", "explore").forEach { view ->
+            browser.onCoreEvent("recommendations_updated", catalogEvent = JSONObject()
+                .put("type", "recommendations_updated").put("view", view)
+                .put("snapshot", JSONObject().put("folders", folders).put("is_loading", isLoadingRecommendations)))
+        }
+    }
+
+    @Test
+    fun nativeRecentReadPublishesBeforeCompletionAndLastControllerDisconnectCancelsIt() {
+        val started = CountDownLatch(1)
+        val nativeIds = mutableListOf<Long>()
+        val canceledIds = mutableListOf<Long>()
+        val nativeRequests = com.joie96.mashin.core.NativeQueryRequests({ id, kind, _ ->
+            assertEquals("recentlyPlayedTracks", kind)
+            nativeIds.add(id); started.countDown(); true
+        }, { id -> canceledIds.add(id); true })
+        val recentBrowser = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), queryRequests = nativeRequests) {
+            Futures.immediateVoidFuture()
+        }
+        val other = MediaSession.ControllerInfo.createTestOnlyControllerInfo(
+            "other", 2, 1001, 0, 0, true, Bundle.EMPTY, true)
+        try {
+            val first = recentBrowser.onGetChildren(session, controller, "home:recent", 0, 10, null)
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            val second = recentBrowser.onGetChildren(session, other, "home:recent", 1, 2, null)
+            first.cancel(false)
+            assertTrue(canceledIds.isEmpty())
+            val event = JSONObject().put("type", "catalog_updated")
+                .put("query", JSONObject().put("RecentlyPlayed", JSONObject().put("limit", 50)))
+                .put("value", JSONObject().put("Tracks", JSONArray().put(item("cached", "track").apply { remove("media_type") })))
+            recentBrowser.onCoreEvent("catalog_updated", catalogEvent = event)
+            assertEquals(listOf("cached"), checkNotNull(second.get(5, TimeUnit.SECONDS).value)
+                .map { it.mediaMetadata.title.toString() })
+            assertTrue(canceledIds.isEmpty())
+            recentBrowser.onDisconnected(session, controller)
+            assertTrue(canceledIds.isEmpty())
+            recentBrowser.onDisconnected(session, other)
+            assertEquals(nativeIds, canceledIds)
+            recentBrowser.onCoreEvent("catalog_updated", catalogEvent = event)
+        } finally { recentBrowser.close() }
+    }
+
+    @Test
+    fun partialFavoriteAndPrivateTrackSnapshotsAreVisibleWhileTheirRefreshIsLoading() {
+        userData = JSONObject().put("is_loading_favorites", true).put("favorites", JSONObject()
+            .put("albums", JSONArray().put(item("cached-album", "album"))))
+        assertEquals("cached-album", children("favorites:albums").single().mediaMetadata.title)
+        val playlist = item("private", "playlist").put("provider", "library").put("is_loading_tracks", true)
+            .put("items", JSONArray().put(item("cached-track", "track")))
+        userData.put("playlists", JSONArray().put(playlist)).put("is_loading_playlists", true)
+        val parent = children("node:playlists").single().mediaId
+        assertEquals("cached-track", children(parent).last().mediaMetadata.title)
+        assertTrue(references.isEmpty())
+    }
+
+    @Test
+    fun subscriptionSurvivesCanceledPageUntilUnsubscribeAndSessionChangeRetiresRequests() {
+        val started = java.util.concurrent.LinkedBlockingQueue<Long>()
+        val canceled = java.util.concurrent.LinkedBlockingQueue<Long>()
+        val nativeRequests = com.joie96.mashin.core.NativeQueryRequests({ id, _, _ -> started.add(id); true },
+            { id -> canceled.add(id); true })
+        val scoped = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), queryRequests = nativeRequests) { Futures.immediateVoidFuture() }
+        try {
+            scoped.onSubscribe(session, controller, "home:recent", null).get()
+            val page = scoped.onGetChildren(session, controller, "home:recent", 0, 10, null)
+            val first = checkNotNull(started.poll(5, TimeUnit.SECONDS))
+            page.cancel(false)
+            assertTrue(canceled.isEmpty())
+            scoped.onUnsubscribe(session, controller, "home:recent").get()
+            assertEquals(first, canceled.poll(5, TimeUnit.SECONDS))
+            val pending = scoped.onGetChildren(session, controller, "home:recent", 0, 10, null)
+            val second = checkNotNull(started.poll(5, TimeUnit.SECONDS))
+            scoped.onCoreEvent("session_changed")
+            assertTrue(pending.isCancelled)
+            assertEquals(second, canceled.poll(5, TimeUnit.SECONDS))
+            scoped.onCoreEvent("android_query_completed", catalogEvent = JSONObject()
+                .put("type", "android_query_completed").put("request_id", second).put("result", JSONArray()))
+            assertTrue(pending.isCancelled)
+        } finally { scoped.close() }
+    }
+
+    @Test
+    fun newControllerSearchStartsImmediatelyAndRetainsOtherControllersOldSearch() {
+        val started = mutableListOf<Long>()
+        val canceled = mutableListOf<Long>()
+        val nativeRequests = com.joie96.mashin.core.NativeQueryRequests({ id, _, _ -> started.add(id); true },
+            { id -> canceled.add(id); true })
+        val scoped = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), queryRequests = nativeRequests) { Futures.immediateVoidFuture() }
+        val other = MediaSession.ControllerInfo.createTestOnlyControllerInfo("other", 2, 1001, 0, 0, true, Bundle.EMPTY, true)
+        try {
+            scoped.onSearch(session, controller, "old", null).get()
+            scoped.onSearch(session, other, "old", null).get()
+            assertEquals(4, started.size)
+            val oldPage = scoped.onGetChildren(session, controller, "search:tracks?old", 0, 10, null)
+            scoped.onSearch(session, controller, "new", null).get()
+            assertEquals(8, started.size)
+            assertTrue(oldPage.isCancelled)
+            assertTrue(canceled.isEmpty())
+            scoped.onDisconnected(session, other)
+            assertEquals(started.take(4).toSet(), canceled.toSet())
+        } finally { scoped.close() }
+        assertEquals(started.toSet(), canceled.toSet())
+    }
+
+    @Test
+    fun failedNativeMissFinishesWaitingBrowserWithErrorNotEmptySuccess() {
+        val remote = com.google.common.util.concurrent.SettableFuture.create<String>()
+        val started = CountDownLatch(1)
+        val scoped = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), catalogQuery = { _, _ -> started.countDown(); remote }) {
+            Futures.immediateVoidFuture()
+        }
+        try {
+            val pending = scoped.onGetChildren(session, controller, "home:recent", 0, 10, null)
+            assertTrue(started.await(5, TimeUnit.SECONDS))
+            remote.setException(IllegalStateException("offline"))
+            assertEquals(LibraryResult.RESULT_ERROR_UNKNOWN, pending.get(5, TimeUnit.SECONDS).resultCode)
+        } finally { scoped.close() }
+    }
+
+    @Test
+    fun albumPlaylistAndArtistSectionsDisplayTypedCacheBeforeEveryRemoteCompletion() {
+        val started = java.util.concurrent.LinkedBlockingQueue<Pair<String, com.google.common.util.concurrent.SettableFuture<String>>>()
+        val snapshot = JSONObject().put("favorites", JSONObject()
+            .put("albums", JSONArray().put(item("album", "album")))
+            .put("playlists", JSONArray().put(item("playlist", "playlist")))
+            .put("artists", JSONArray().put(item("artist", "artist"))))
+        val scoped = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), query = { _, _ -> snapshot.toString() },
+            catalogQuery = { kind, _ -> com.google.common.util.concurrent.SettableFuture.create<String>().also { started.add(kind to it) } }) {
+            Futures.immediateVoidFuture()
+        }
+        try {
+            listOf("albums", "playlists", "artists").forEach { category ->
+                scoped.onGetChildren(session, controller, "favorites:$category", 0, 10, null).get(5, TimeUnit.SECONDS)
+            }
+            for ((parent, kind, id) in listOf(
+                Triple("browse:album:test:album", LibraryReadKind.AlbumTracks, "album"),
+                Triple("browse:playlist:test:playlist", LibraryReadKind.PlaylistTracks, "playlist"),
+                Triple("artistAlbums:browse:artist:test:artist", LibraryReadKind.ArtistAlbums, "artist"),
+                Triple("artistTopTracks:browse:artist:test:artist", LibraryReadKind.ArtistTopTracks, "artist"),
+                Triple("similarArtists:browse:artist:test:artist", LibraryReadKind.SimilarArtists, "artist"),
+            )) {
+                val pending = scoped.onGetChildren(session, controller, parent, 0, Int.MAX_VALUE, null)
+                val (command, remote) = checkNotNull(started.poll(5, TimeUnit.SECONDS))
+                assertEquals(kind.command, command)
+                val event = JSONObject().put("type", "catalog_updated")
+                    .put("query", JSONObject().put(kind.catalog, JSONObject().put("item_id", id).put("provider", "test").put("limit", 50)))
+                    .put("value", JSONObject().put(kind.value, JSONArray().put(item("cached", kind.mediaType).apply { remove("media_type") })))
+                scoped.onCoreEvent("catalog_updated", catalogEvent = event)
+                assertEquals("cached", checkNotNull(pending.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
+                assertFalse(remote.isDone)
+                event.put("value", JSONObject().put(kind.value, JSONArray()))
+                scoped.onCoreEvent("catalog_updated", catalogEvent = event)
+                remote.setException(IllegalStateException("offline"))
+                assertTrue(checkNotNull(scoped.onGetChildren(session, controller, parent, 0, 10, null)
+                    .get(5, TimeUnit.SECONDS).value).isEmpty())
+            }
+        } finally { scoped.close() }
+    }
+
     private fun children(parentId: String): List<MediaItem> {
         val result = browser.onGetChildren(session, controller, parentId, 0, Int.MAX_VALUE, null)
             .get(5, TimeUnit.SECONDS)

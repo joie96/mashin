@@ -141,6 +141,9 @@ pub(crate) enum CatalogSortDirection {
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub(crate) enum CatalogQuery {
+    ProviderManifests {},
+    #[serde(skip)]
+    ProviderInstances,
     ProviderItem {
         item_id: MediaId,
         provider: String,
@@ -178,6 +181,12 @@ pub(crate) enum CatalogQuery {
         summary: bool,
         #[serde(default, skip_serializing_if = "AlbumLibraryFilters::is_default")]
         filters: AlbumLibraryFilters,
+    },
+    LibraryTracks {
+        favorite: Option<bool>,
+        limit: u32,
+        offset: u32,
+        summary: bool,
     },
     LibraryPlaylists {
         favorite: Option<bool>,
@@ -237,6 +246,9 @@ pub(crate) enum CatalogQuery {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum CatalogValue {
+    ProviderManifests(Vec<super::providers::ProviderManifest>),
+    #[serde(skip)]
+    ProviderInstances(Vec<super::providers::ProviderInstance>),
     Item(MediaItem),
     RecommendationFolders(Vec<RecommendationFolder>),
     RecommendationItems(Vec<MediaItem>),

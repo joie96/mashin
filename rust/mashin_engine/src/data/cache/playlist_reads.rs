@@ -308,7 +308,7 @@ mod tests {
     #[test]
     fn confirmed_playlist_removal_is_atomic_preserves_unrelated_data_and_survives_reopen() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("mashin-media-cache.sqlite3");
+        let path = directory.path().join(super::super::database::DATABASE_FILE_NAME);
         let mut connection = rusqlite::Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "foreign_keys", true)
@@ -497,7 +497,7 @@ mod tests {
     #[test]
     fn confirmed_playlist_creation_invalidates_empty_selections_and_survives_reopen() {
         let directory = tempfile::tempdir().unwrap();
-        let path = directory.path().join("mashin-media-cache.sqlite3");
+        let path = directory.path().join(super::super::database::DATABASE_FILE_NAME);
         let mut connection = rusqlite::Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "foreign_keys", true)
@@ -606,7 +606,9 @@ mod tests {
 
     #[test]
     fn confirmed_playlist_preserves_other_user_and_contents_and_retires_old_and_new_aliases() {
-        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("metadata.db");
+        let mut connection = rusqlite::Connection::open(&path).unwrap();
         connection
             .pragma_update(None, "foreign_keys", true)
             .unwrap();
@@ -666,14 +668,13 @@ mod tests {
             item_id: MediaId("42".into()),
             allow_dynamic_tracks: false,
         };
-        super::super::reads::write_cached_read(
-            &transaction,
-            &content_query,
-            &user,
-            &CatalogValue::Tracks(Vec::new()),
-            100,
+        let track: crate::domain::media::Track = serde_json::from_value(
+            json!({"provider":"library","item_id":"track","name":"Repeated track"}),
         )
         .unwrap();
+        let content = CatalogValue::Tracks(vec![track.clone(), track]);
+        super::super::reads::write_cached_read(&transaction, &content_query, &user, &content, 100)
+            .unwrap();
         let recommendations = CatalogQuery::RecommendationFolders;
         for owner in [&user, &other] {
             super::super::reads::write_cached_read(
@@ -685,7 +686,7 @@ mod tests {
             )
             .unwrap();
         }
-        let confirmed: Playlist = serde_json::from_value(json!({"provider":"library","item_id":"42","name":"Playlist","favorite":null,"provider_mappings":[{"provider_domain":"source","provider_instance":"new-a","item_id":"remote"}]})).unwrap();
+        let confirmed: Playlist = serde_json::from_value(json!({"provider":"library","item_id":"42","name":"Playlist","favorite":null,"metadata":{"images":[{"type":"thumb","provider":"builtin","path":"confirmed-cover.jpg","proxy_id":"b".repeat(64)}]},"provider_mappings":[{"provider_domain":"source","provider_instance":"new-a","item_id":"remote"}]})).unwrap();
         commit_confirmed_playlist(&transaction, &confirmed, &user).unwrap();
         for query in aliases.iter().chain([&library, &search]) {
             assert!(read_playlist_read(&transaction, query, &user)
@@ -738,6 +739,100 @@ mod tests {
             other_item.media.favorite,
             crate::domain::media::FieldKnowledge::Known(Some(true))
         );
+        transaction.commit().unwrap();
+        connection.close().unwrap();
+        let mut connection = rusqlite::Connection::open(&path).unwrap();
+        let snapshot = connection.transaction().unwrap();
+        let restored = read_playlist(
+            &snapshot,
+            &original.media.provider,
+            &original.media.item_id,
+            &user,
+        )
+        .unwrap()
+        .unwrap();
+        let metadata = restored.media.metadata.unwrap();
+        assert_eq!(metadata.description.as_deref(), Some("Details"));
+        assert_eq!(metadata.images[0].path, "confirmed-cover.jpg");
+        assert_eq!(
+            metadata.images[0].proxy_id.as_deref(),
+            Some("b".repeat(64).as_str())
+        );
+        assert_eq!(
+            super::super::reads::read_cached_read(&snapshot, &content_query, &user)
+                .unwrap()
+                .unwrap()
+                .value,
+            content
+        );
+        snapshot.rollback().unwrap();
+        let svg = r#"<svg xmlns="http://www.w3.org/2000/svg" width="1" height="1"><rect width="1" height="1" fill="red"/></svg>"#;
+        let data_uri = format!(
+            "data:image/svg+xml;base64,{}",
+            base64::Engine::encode(&base64::engine::general_purpose::STANDARD, svg)
+        );
+        for path in [svg.to_owned(), data_uri] {
+            let mut inline = confirmed.clone();
+            inline.media.metadata.as_mut().unwrap().images[0].path = path;
+            let transaction = connection.transaction().unwrap();
+            assert!(matches!(
+                commit_confirmed_playlist(&transaction, &inline, &user),
+                Err(CacheError::InvalidMediaObservation(_))
+            ));
+            transaction.rollback().unwrap();
+        }
+        let cleared: Playlist = serde_json::from_value(
+            json!({"provider":"library","item_id":"42","name":"Playlist","metadata":{"images":[]}}),
+        )
+        .unwrap();
+        connection.execute_batch("CREATE TEMP TRIGGER fail_cover BEFORE INSERT ON playlists BEGIN SELECT RAISE(ABORT,'synthetic cover commit failure'); END;").unwrap();
+        let failed = connection.transaction().unwrap();
+        assert!(commit_confirmed_playlist(&failed, &cleared, &user).is_err());
+        failed.rollback().unwrap();
+        let snapshot = connection.transaction().unwrap();
+        assert_eq!(
+            read_playlist(
+                &snapshot,
+                &original.media.provider,
+                &original.media.item_id,
+                &user
+            )
+            .unwrap()
+            .unwrap()
+            .media
+            .metadata
+            .unwrap()
+            .images[0]
+                .path,
+            "confirmed-cover.jpg"
+        );
+        snapshot.rollback().unwrap();
+        connection.execute_batch("DROP TRIGGER fail_cover").unwrap();
+        let transaction = connection.transaction().unwrap();
+        commit_confirmed_playlist(&transaction, &cleared, &user).unwrap();
+        transaction.commit().unwrap();
+        connection.close().unwrap();
+        let mut connection = rusqlite::Connection::open(&path).unwrap();
+        let snapshot = connection.transaction().unwrap();
+        let restored = read_playlist(
+            &snapshot,
+            &original.media.provider,
+            &original.media.item_id,
+            &user,
+        )
+        .unwrap()
+        .unwrap();
+        assert!(restored.media.metadata.unwrap().images.is_empty());
+        assert_eq!(
+            super::super::reads::read_cached_read(&snapshot, &content_query, &user)
+                .unwrap()
+                .unwrap()
+                .value,
+            content
+        );
+        snapshot.rollback().unwrap();
+        connection.close().unwrap();
+        directory.close().unwrap();
     }
 
     #[test]

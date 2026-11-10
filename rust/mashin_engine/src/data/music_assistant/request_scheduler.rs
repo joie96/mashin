@@ -10,7 +10,13 @@ use std::sync::{Arc, Mutex};
 use std::time::Instant;
 use tokio::sync::oneshot;
 
-type Response = Result<Value, HttpCommandError>;
+#[derive(Clone)]
+enum ReadPayload {
+    Json(Value),
+    Bytes(Arc<[u8]>),
+}
+
+type Response = Result<ReadPayload, HttpCommandError>;
 type Operation = Pin<Box<dyn Future<Output = Response> + Send>>;
 static LOGGER: Logger = Logger::new(module_path!());
 
@@ -177,6 +183,40 @@ impl RequestScheduler {
     pub(crate) async fn execute(
         &self,
         key: String,
+        operation: impl Future<Output = Result<Value, HttpCommandError>> + Send + 'static,
+    ) -> Result<Value, HttpCommandError> {
+        match self
+            .execute_read(format!("json:{key}"), async move {
+                operation.await.map(ReadPayload::Json)
+            })
+            .await?
+        {
+            ReadPayload::Json(value) => Ok(value),
+            ReadPayload::Bytes(_) => unreachable!("JSON and byte jobs have separate keys"),
+        }
+    }
+
+    pub(super) async fn execute_bytes(
+        &self,
+        key: String,
+        operation: impl Future<Output = Result<Vec<u8>, HttpCommandError>> + Send + 'static,
+    ) -> Result<Arc<[u8]>, HttpCommandError> {
+        match self
+            .execute_read(format!("bytes:{key}"), async move {
+                operation
+                    .await
+                    .map(|bytes| ReadPayload::Bytes(bytes.into()))
+            })
+            .await?
+        {
+            ReadPayload::Bytes(bytes) => Ok(bytes),
+            ReadPayload::Json(_) => unreachable!("JSON and byte jobs have separate keys"),
+        }
+    }
+
+    async fn execute_read(
+        &self,
+        key: String,
         operation: impl Future<Output = Response> + Send + 'static,
     ) -> Response {
         let (sender, receiver) = oneshot::channel();
@@ -248,7 +288,11 @@ fn dispatch(inner: &Arc<Inner>, state: &mut State) {
         let is_background = job.priority < RequestPriority::Icon;
         let priority = job.priority;
         let queued_at = job.queued_at;
-        let command = key.split(':').next().unwrap_or_default().to_owned();
+        let command = key
+            .strip_prefix("json:")
+            .map(|key| key.split(':').next().unwrap_or_default())
+            .unwrap_or("imageproxy")
+            .to_owned();
         let running = RunningRequest {
             inner: inner.clone(),
             key,
@@ -345,5 +389,138 @@ impl Drop for Subscription {
             }
             dispatch(&self.inner, &mut state);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn byte_subscribers_share_one_buffer_and_do_not_join_json_jobs() {
+        let scheduler = RequestScheduler::default();
+        let (first, second, json) = tokio::join!(
+            scheduler.execute_bytes("same".into(), async {
+                tokio::task::yield_now().await;
+                Ok(vec![1, 2, 3])
+            }),
+            scheduler.execute_bytes("same".into(), async {
+                panic!("duplicate byte operation ran")
+            }),
+            scheduler.execute("same".into(), async { Ok(serde_json::json!({"value": 4})) }),
+        );
+        let first = first.unwrap();
+        let second = second.unwrap();
+        assert_eq!(&*first, &[1, 2, 3]);
+        assert!(Arc::ptr_eq(&first, &second));
+        assert_eq!(json.unwrap(), serde_json::json!({"value": 4}));
+        assert_eq!(scheduler.pending_read_count(), 0);
+        assert_eq!(
+            &*scheduler
+                .execute_bytes("same".into(), async { Ok(vec![9]) })
+                .await
+                .unwrap(),
+            &[9]
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn byte_cancellation_preserves_other_subscribers_and_last_drop_cancels_work() {
+        let scheduler = Arc::new(RequestScheduler::default());
+        let (started, start) = oneshot::channel();
+        let (release, hold) = oneshot::channel();
+        let owner = scheduler.clone();
+        let first = tokio::spawn(async move {
+            owner
+                .execute_bytes("shared".into(), async move {
+                    started.send(()).unwrap();
+                    hold.await.unwrap();
+                    Ok(vec![7])
+                })
+                .await
+        });
+        start.await.unwrap();
+        let owner = scheduler.clone();
+        let second = tokio::spawn(async move {
+            owner
+                .execute_bytes("shared".into(), async { panic!("duplicate operation ran") })
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(
+            scheduler.inner.state.lock().unwrap().jobs["bytes:shared"]
+                .subscribers
+                .len(),
+            2
+        );
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        release.send(()).unwrap();
+        assert_eq!(&*second.await.unwrap().unwrap(), &[7]);
+
+        let (started, start) = oneshot::channel();
+        let (dropped, drop_observed) = oneshot::channel();
+        struct NotifyDrop(Option<oneshot::Sender<()>>);
+        impl Drop for NotifyDrop {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+        let owner = scheduler.clone();
+        let pending = tokio::spawn(async move {
+            owner
+                .execute_bytes("cancelled".into(), async move {
+                    let _guard = NotifyDrop(Some(dropped));
+                    started.send(()).unwrap();
+                    std::future::pending::<Result<Vec<u8>, HttpCommandError>>().await
+                })
+                .await
+        });
+        start.await.unwrap();
+        pending.abort();
+        assert!(pending.await.unwrap_err().is_cancelled());
+        tokio::time::timeout(std::time::Duration::from_secs(2), drop_observed)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(scheduler.pending_read_count(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn foreground_byte_subscriber_promotes_queued_prefetch_during_startup() {
+        use crate::application::repositories::with_request_priority;
+        let scheduler = Arc::new(RequestScheduler::default());
+        let startup = scheduler.begin_startup();
+        let (started, mut start) = oneshot::channel();
+        let owner = scheduler.clone();
+        let prefetch = tokio::spawn(async move {
+            with_request_priority(
+                RequestPriority::Background,
+                owner.execute_bytes("prefetch".into(), async move {
+                    started.send(()).unwrap();
+                    Ok(vec![8])
+                }),
+            )
+            .await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(scheduler.pending_read_count(), 1);
+        assert!(matches!(
+            start.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        let visible = with_request_priority(
+            RequestPriority::Foreground,
+            scheduler.execute_bytes("prefetch".into(), async {
+                panic!("promoted prefetch must not download twice")
+            }),
+        )
+        .await
+        .unwrap();
+        start.await.unwrap();
+        assert!(Arc::ptr_eq(&visible, &prefetch.await.unwrap().unwrap()));
+        assert_eq!(&*visible, &[8]);
+        drop(startup);
+        assert_eq!(scheduler.pending_read_count(), 0);
     }
 }

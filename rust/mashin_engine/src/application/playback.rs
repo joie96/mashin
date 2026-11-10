@@ -114,12 +114,17 @@ impl Application {
             )
         };
         let providers = self.provider_repository(generation)?;
-        let instances = self.runtime.block_on(providers.get_instances());
+        let instances = self
+            .runtime
+            .block_on(async { providers.read_instances().await?.resolve().await });
         let catalog = self.catalog_repository(generation)?;
         self.runtime
             .block_on(crate::application::radio::start_radio(
                 catalog.as_ref(),
-                instances.as_deref().ok(),
+                instances
+                    .as_ref()
+                    .ok()
+                    .and_then(|update| update.items.as_deref()),
                 media_items,
                 |media, option| {
                     let event_publisher = event_publisher.clone();

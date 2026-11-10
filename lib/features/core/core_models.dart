@@ -1,4 +1,5 @@
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
@@ -29,6 +30,7 @@ enum AlbumType { album, single, live, soundtrack, compilation, ep, unknown }
 enum RecommendationView { home, explore }
 
 enum CatalogQueryKind {
+  providerManifests,
   providerItem,
   artist,
   album,
@@ -68,6 +70,8 @@ class CatalogReadChange {
     this.error,
     this.source,
     this.cacheError,
+    this.searchQuery,
+    this.mediaType,
   });
 
   final CatalogQueryKind kind;
@@ -82,6 +86,8 @@ class CatalogReadChange {
   final String? error;
   final CatalogDataSource? source;
   final String? cacheError;
+  final String? searchQuery;
+  final MediaType? mediaType;
 
   // Decode missing data as unknown state, never as a synthetic empty response.
   factory CatalogReadChange.fromJson(Map<String, dynamic> json) {
@@ -124,6 +130,10 @@ class CatalogReadChange {
         _ => throw const FormatException('invalid catalog data source'),
       },
       cacheError: snapshot['cache_error'] as String?,
+      searchQuery: arguments['query'] as String?,
+      mediaType: MediaType.values
+          .where((type) => type.name == arguments['media_type'])
+          .firstOrNull,
     );
   }
 
@@ -146,6 +156,7 @@ class CatalogUpdate {
     this.albums = const <Album>[],
     this.artists = const <Artist>[],
     this.searchResults,
+    this.providerManifests = const <ProviderManifest>[],
   });
 
   final CatalogQueryKind kind;
@@ -161,6 +172,7 @@ class CatalogUpdate {
   final List<Album> albums;
   final List<Artist> artists;
   final SearchResults? searchResults;
+  final List<ProviderManifest> providerManifests;
 
   // Native query identities are independent of the canonical identities in results.
   factory CatalogUpdate.fromJson(Map<String, dynamic> json) {
@@ -213,6 +225,9 @@ class CatalogUpdate {
       searchResults: resultKind == 'Search'
           ? SearchResults.fromJson(Map<String, dynamic>.from(result as Map))
           : null,
+      providerManifests: resultKind == 'ProviderManifests'
+          ? decodeList(ProviderManifest.fromJson)
+          : const <ProviderManifest>[],
     );
   }
 
@@ -347,6 +362,16 @@ List<List<String>> _stringPairsFromJson(Object? value) {
           .map((List pair) => pair.whereType<String>().toList(growable: false))
           .toList(growable: false) ??
       const <List<String>>[];
+}
+
+List<Track> tracksFromJson(Object? decoded) {
+  if (decoded is! List) {
+    throw const FormatException('tracks must be a list');
+  }
+  return decoded
+      .whereType<Map<String, dynamic>>()
+      .map(Track.fromJson)
+      .toList(growable: false);
 }
 
 MediaItem mediaItemFromJson(Map<String, dynamic> json) {
@@ -696,18 +721,124 @@ class AudioFormat {
   );
 }
 
+class ImageRequest {
+  const ImageRequest({
+    required this.image,
+    this.ownerUri,
+    this.position = 0,
+    this.size = 512,
+    this.providerIconRole,
+  });
+
+  final MediaItemImage image;
+  final String? ownerUri;
+  final int position;
+  final int size;
+  final String? providerIconRole;
+
+  factory ImageRequest.fromJson(Map<String, dynamic> json) => ImageRequest(
+    image: MediaItemImage.fromJson(json['image'] as Map<String, dynamic>),
+    ownerUri: json['ownerUri'] as String?,
+    position: json['position'] as int,
+    size: json['size'] as int,
+    providerIconRole: json['providerIconRole'] as String?,
+  );
+
+  Map<String, Object?> toJson() {
+    final path = _normalizedImagePath();
+    return {
+      'image': {
+        'type': image.type,
+        'path': path,
+        'provider': image.provider,
+        'remotely_accessible': image.remotelyAccessible,
+        'proxy_id': image.proxyId,
+        if (image.cachedInline != null)
+          'cached_inline': image.cachedInline!.toJson(),
+      },
+      'ownerUri': ownerUri,
+      'position': position,
+      'size': size,
+      'providerIconRole': providerIconRole,
+    };
+  }
+
+  String _normalizedImagePath() {
+    if (!image.path.startsWith('data:image/')) return image.path;
+    try {
+      final data = UriData.parse(image.path);
+      return data.isBase64
+          ? image.path
+          : Uri.dataFromBytes(
+              data.contentAsBytes(),
+              mimeType: data.mimeType,
+            ).toString();
+    } on FormatException {
+      return image.path;
+    }
+  }
+}
+
+class ImageReadSnapshot {
+  const ImageReadSnapshot({
+    this.bytes,
+    this.cacheError,
+    this.hasRefresh = false,
+  });
+
+  final Uint8List? bytes;
+  final String? cacheError;
+  final bool hasRefresh;
+
+  factory ImageReadSnapshot.fromJson(Map<String, dynamic> json) =>
+      ImageReadSnapshot(
+        bytes: json['bytes'] == null
+            ? null
+            : base64Decode(json['bytes'] as String),
+        cacheError: json['cacheError'] as String?,
+        hasRefresh: json['hasRefresh'] as bool,
+      );
+}
+
+class CachedInlineImage {
+  const CachedInlineImage({
+    this.ownerUri,
+    required this.position,
+    this.contentHash,
+  });
+
+  final String? ownerUri;
+  final int position;
+  final String? contentHash;
+
+  factory CachedInlineImage.fromJson(Map<String, dynamic> json) =>
+      CachedInlineImage(
+        ownerUri: json['owner_uri'] as String?,
+        position: json['position'] as int,
+        contentHash: json['content_hash'] as String?,
+      );
+
+  Map<String, Object?> toJson() => {
+    'owner_uri': ownerUri,
+    'position': position,
+    if (contentHash != null) 'content_hash': contentHash,
+  };
+}
+
 class MediaItemImage {
   static const List<int> _allowedSizes = <int>[0, 80, 160, 256, 512, 1024];
   static String _proxyBaseUrl = '';
 
   static String get currentBaseUrl => _proxyBaseUrl;
   static String? Function(MediaItem, int)? missingArtworkSource;
+  static String? Function(ImageRequest)? cachedImageSource;
 
   final String type;
   final String path;
   final String provider;
   final bool remotelyAccessible;
   final String? proxyId;
+  final CachedInlineImage? cachedInline;
 
   const MediaItemImage({
     required this.type,
@@ -715,6 +846,7 @@ class MediaItemImage {
     required this.provider,
     required this.remotelyAccessible,
     this.proxyId,
+    this.cachedInline,
   });
 
   factory MediaItemImage.fromJson(Map<String, dynamic> json) {
@@ -724,6 +856,11 @@ class MediaItemImage {
       provider: (json['provider'] as String?)?.trim() ?? '',
       remotelyAccessible: json['remotely_accessible'] == true,
       proxyId: (json['proxy_id'] as String?)?.trim(),
+      cachedInline: json['cached_inline'] == null
+          ? null
+          : CachedInlineImage.fromJson(
+              json['cached_inline'] as Map<String, dynamic>,
+            ),
     );
   }
 
@@ -745,7 +882,23 @@ class MediaItemImage {
     return _allowedSizes.last;
   }
 
-  String? getProxyPath({String? checksum, int? size}) {
+  String? getProxyPath({
+    String? checksum,
+    int? size,
+    String? ownerUri,
+    int position = 0,
+  }) {
+    final cachedSource = cachedImageSource;
+    if (cachedSource != null) {
+      return cachedSource(
+        ImageRequest(
+          image: this,
+          ownerUri: ownerUri,
+          position: position,
+          size: mapToAllowedSize(size ?? 512),
+        ),
+      );
+    }
     final id = proxyId?.trim() ?? '';
     final originalPath = path.trim();
 
@@ -922,7 +1075,7 @@ class Artist implements MediaItem {
     if (image == null) {
       return null;
     }
-    return image.getProxyPath(checksum: metadata?.cacheChecksum);
+    return image.getProxyPath(checksum: metadata?.cacheChecksum, ownerUri: uri);
   }
 
   factory Artist.fromJson(Map<String, dynamic> json) {
@@ -1019,7 +1172,7 @@ class Album implements MediaItem {
     if (image == null) {
       return null;
     }
-    return image.getProxyPath(checksum: metadata?.cacheChecksum);
+    return image.getProxyPath(checksum: metadata?.cacheChecksum, ownerUri: uri);
   }
 
   factory Album.fromJson(Map<String, dynamic> json) {
@@ -1138,12 +1291,15 @@ class Track implements MediaItem {
   String? get imageUri {
     final albumImage = album?.primaryImage;
     if (albumImage != null) {
-      return albumImage.getProxyPath(checksum: album?.metadata?.cacheChecksum);
+      return albumImage.getProxyPath(
+        checksum: album?.metadata?.cacheChecksum,
+        ownerUri: album?.uri,
+      );
     }
 
     final MediaItemImage? trackImage = image;
     if (trackImage != null) {
-      return trackImage.getProxyPath();
+      return trackImage.getProxyPath(ownerUri: uri);
     }
 
     final MediaItemImage? metadataImage = primaryImage;
@@ -1151,7 +1307,10 @@ class Track implements MediaItem {
       return null;
     }
 
-    return metadataImage.getProxyPath(checksum: metadata?.cacheChecksum);
+    return metadataImage.getProxyPath(
+      checksum: metadata?.cacheChecksum,
+      ownerUri: uri,
+    );
   }
 
   factory Track.fromJson(Map<String, dynamic> json) {
@@ -1483,7 +1642,7 @@ class Playlist implements MediaItem {
     if (image == null) {
       return null;
     }
-    return image.getProxyPath(checksum: metadata?.cacheChecksum);
+    return image.getProxyPath(checksum: metadata?.cacheChecksum, ownerUri: uri);
   }
 
   factory Playlist.fromJson(Map<String, dynamic> json) {
@@ -1530,12 +1689,16 @@ extension MediaItemImageSizing on MediaItem {
         return albumImage.getProxyPath(
           checksum: track.album?.metadata?.cacheChecksum,
           size: normalizedSize,
+          ownerUri: track.album?.uri,
         );
       }
 
       final MediaItemImage? trackImage = track.image;
       if (trackImage != null) {
-        return trackImage.getProxyPath(size: normalizedSize);
+        return trackImage.getProxyPath(
+          size: normalizedSize,
+          ownerUri: track.uri,
+        );
       }
 
       final MediaItemImage? metadataImage = track.primaryImage;
@@ -1546,6 +1709,7 @@ extension MediaItemImageSizing on MediaItem {
       return metadataImage.getProxyPath(
         checksum: track.metadata?.cacheChecksum,
         size: normalizedSize,
+        ownerUri: track.uri,
       );
     }
 
@@ -1559,6 +1723,7 @@ extension MediaItemImageSizing on MediaItem {
       return image.getProxyPath(
         checksum: album.metadata?.cacheChecksum,
         size: normalizedSize,
+        ownerUri: album.uri,
       );
     }
 
@@ -1572,6 +1737,7 @@ extension MediaItemImageSizing on MediaItem {
       return image.getProxyPath(
         checksum: artist.metadata?.cacheChecksum,
         size: normalizedSize,
+        ownerUri: artist.uri,
       );
     }
 
@@ -1585,6 +1751,7 @@ extension MediaItemImageSizing on MediaItem {
       return image.getProxyPath(
         checksum: playlist.metadata?.cacheChecksum,
         size: normalizedSize,
+        ownerUri: playlist.uri,
       );
     }
 
@@ -1599,6 +1766,7 @@ extension MediaItemImageSizing on MediaItem {
     return image.getProxyPath(
       checksum: meta?.cacheChecksum,
       size: normalizedSize,
+      ownerUri: uri,
     );
   }
 }
@@ -1675,6 +1843,7 @@ class QueueItem {
   String? imageUriForSize(int requestedSize) {
     return image?.getProxyPath(
           size: MediaItemImage.mapToAllowedSize(requestedSize),
+          ownerUri: mediaItem.uri,
         ) ??
         mediaItem.imageUriForSize(requestedSize);
   }
@@ -2017,6 +2186,7 @@ class ProviderManifest {
 class ProviderManifestRegistry {
   static final ValueNotifier<int> changes = ValueNotifier<int>(0);
   static Future<String?> Function(String)? _loadIcon;
+  static String Function(ImageRequest)? cachedIconSource;
   static final Map<String, ProviderManifest> _byDomain =
       <String, ProviderManifest>{};
 
@@ -2033,15 +2203,65 @@ class ProviderManifestRegistry {
   }
 
   static void registerAll(Iterable<ProviderManifest> manifests) {
+    var hasChanges = false;
     for (final manifest in manifests) {
       final key = manifest.domain.trim().toLowerCase();
       if (key.isEmpty) {
         continue;
       }
-      _byDomain[key] = manifest;
+      if (!_sameManifest(_byDomain[key], manifest)) {
+        _byDomain[key] = manifest;
+        hasChanges = true;
+      }
     }
+    if (hasChanges) changes.value++;
+  }
+
+  static void replaceAll(Iterable<ProviderManifest> manifests) {
+    final next = <String, ProviderManifest>{
+      for (final manifest in manifests)
+        if (manifest.domain.trim().isNotEmpty)
+          manifest.domain.trim().toLowerCase(): manifest,
+    };
+    if (next.length == _byDomain.length &&
+        next.entries.every(
+          (entry) => _sameManifest(_byDomain[entry.key], entry.value),
+        ))
+      return;
+    _byDomain
+      ..clear()
+      ..addAll(next);
     changes.value++;
   }
+
+  static bool _sameManifest(
+    ProviderManifest? previous,
+    ProviderManifest incoming,
+  ) =>
+      previous != null &&
+      (
+            previous.domain,
+            previous.name,
+            previous.description,
+            previous.icon,
+            previous.iconSvg,
+            previous.iconSvgDark,
+            previous.iconSvgMonochrome,
+            previous.type,
+            previous.builtin,
+          ) ==
+          (
+            incoming.domain,
+            incoming.name,
+            incoming.description,
+            incoming.icon,
+            incoming.iconSvg,
+            incoming.iconSvgDark,
+            incoming.iconSvgMonochrome,
+            incoming.type,
+            incoming.builtin,
+          ) &&
+      listEquals(previous.iconImages, incoming.iconImages);
 
   static void registerOne(ProviderManifest manifest) {
     registerAll(<ProviderManifest>[manifest]);
@@ -2056,15 +2276,48 @@ class ProviderManifestRegistry {
     return _byDomain[domain];
   }
 
-  static String? iconSvgForProvider(String providerOrDomain) =>
-      getByProvider(providerOrDomain)?.preferredIconData;
+  static String? iconSvgForProvider(String providerOrDomain) {
+    final manifest = getByProvider(providerOrDomain);
+    final data = manifest?.preferredIconData;
+    if (data == null || manifest == null) return null;
+    return _iconSource(
+      manifest.domain,
+      manifest.iconSvg != null ? 'icon_svg' : 'icon',
+      data,
+    );
+  }
+
+  static String _iconSource(String provider, String role, String data) =>
+      cachedIconSource?.call(
+        ImageRequest(
+          image: MediaItemImage(
+            type: role,
+            path: data,
+            provider: provider,
+            remotelyAccessible: false,
+          ),
+          providerIconRole: role,
+          size: 80,
+        ),
+      ) ??
+      data;
 
   static Future<String?> getProviderIconData(String providerOrDomain) async {
     final manifest = getByProvider(providerOrDomain);
     final inline = manifest?.preferredIconData?.trim();
-    if (inline != null && inline.isNotEmpty) return inline;
+    if (inline != null && inline.isNotEmpty) {
+      return _iconSource(
+        manifest!.domain,
+        manifest.iconSvg != null ? 'icon_svg' : 'icon',
+        inline,
+      );
+    }
     if (manifest?.hasDefaultIcon != true) return null;
-    return _loadIcon?.call(_providerDomain(providerOrDomain));
+    if (cachedIconSource != null) {
+      return _iconSource(manifest!.domain, 'default', '');
+    }
+    final data = await _loadIcon?.call(_providerDomain(providerOrDomain));
+    return data == null ? null : _iconSource(manifest!.domain, 'default', data);
   }
 
   static String _providerDomain(String providerOrDomain) {

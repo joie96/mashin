@@ -13,6 +13,17 @@ pub(crate) async fn load_catalog(
     force_refresh: bool,
 ) -> Result<CatalogValue, String> {
     match query {
+        CatalogQuery::ProviderManifests {} => super::session::load_provider_manifests(client).await.map(CatalogValue::ProviderManifests),
+        CatalogQuery::ProviderInstances => super::session::load_provider_instances(client)
+            .await
+            .map(CatalogValue::ProviderInstances),
+        CatalogQuery::LibraryTracks { favorite, limit, offset, summary } => client
+            .execute_command("music/tracks/library_items", json!({
+                "favorite": favorite, "limit": limit, "offset": offset, "summary": summary,
+                "sort_field": "sort_name", "sort_direction": "asc",
+            }))
+            .await
+            .map(CatalogValue::Tracks),
         CatalogQuery::LibraryPlaylists { favorite, limit, offset, summary } => client
             .execute_command("music/playlists/library_items", json!({
                 "favorite": favorite, "limit": limit, "offset": offset, "summary": summary,
@@ -119,9 +130,12 @@ pub(crate) async fn load_catalog(
                 CatalogQuery::TrackVersions { item_id, provider } => {
                     ("music/tracks/track_versions", item_id, provider)
                 }
-                CatalogQuery::RecentlyPlayed { .. }
+                CatalogQuery::ProviderManifests {}
+                | CatalogQuery::ProviderInstances
+                | CatalogQuery::RecentlyPlayed { .. }
                 | CatalogQuery::LibraryArtists { .. }
                 | CatalogQuery::LibraryAlbums { .. }
+                | CatalogQuery::LibraryTracks { .. }
                 | CatalogQuery::LibraryPlaylists { .. }
                 | CatalogQuery::ProviderItem { .. }
                 | CatalogQuery::RecommendationFolders
@@ -220,31 +234,6 @@ impl crate::application::repositories::CatalogClient for MusicAssistantClient {
     }
 }
 
-impl crate::application::repositories::ArtworkClient for MusicAssistantClient {
-    // Existing artwork wins; missing artwork is resolved without retaining provider results.
-    fn get_media_artwork<'request>(
-        &'request self,
-        item: &'request crate::domain::media::MediaItem,
-    ) -> futures_util::future::BoxFuture<'request, Option<crate::domain::media::MediaItemImage>>
-    {
-        Box::pin(async move {
-            if let Some(image) = crate::domain::artwork::select_artwork(item) {
-                return Some(image);
-            }
-            for mapping in &item.fields().provider_mappings {
-                let media_type = serde_json::to_value(item).ok()?.get("media_type")?.clone();
-                let value: crate::domain::media::MediaItem = match self.execute_command("music/item", json!({"media_type":media_type,"item_id":mapping.item_id,"provider_instance_id_or_domain":mapping.provider_instance,"allow_update_metadata":false})).await {
-                    Ok(value) => value, Err(_) => continue,
-                };
-                if let Some(image) = crate::domain::artwork::select_artwork(&value) {
-                    return Some(image);
-                }
-            }
-            None
-        })
-    }
-}
-
 // Private projections separate progress-derived observations from generic mapping defaults.
 #[derive(Deserialize, Serialize)]
 struct RecentlyPlayedTrackMapping {
@@ -276,7 +265,7 @@ mod tests {
     use super::*;
     use crate::data::music_assistant::client::tests::server;
     use crate::domain::identifiers::MediaId;
-    use crate::domain::media::MediaType;
+    use crate::domain::media::{MediaItem, MediaType};
 
     #[tokio::test]
     async fn playlist_tracks_preserve_occurrences_flags_and_reject_mixed_media() {
@@ -369,6 +358,12 @@ mod tests {
             assert!(!track.knowledge.artists);
             assert!(!track.knowledge.album);
             assert_eq!(track.media.favorite, FieldKnowledge::Unknown);
+            let typed = serde_json::to_value(CatalogValue::Tracks(tracks.clone())).unwrap();
+            assert!(typed["Tracks"][0].get("media_type").is_none());
+            assert_eq!(typed["Tracks"][0]["item_id"], "recent");
+            let tagged = serde_json::to_value(MediaItem::Track(track.clone())).unwrap();
+            assert_eq!(tagged["media_type"], "track");
+            assert_eq!(tagged["item_id"], typed["Tracks"][0]["item_id"]);
         }
         assert!(
             load_catalog(&client, &CatalogQuery::RecentlyPlayed { limit: 0 }, true)

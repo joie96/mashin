@@ -61,6 +61,16 @@ internal class PlaybackSessionCallback(
     }
 
     // Explicit forwarding is required for Java default callbacks used by legacy browsers.
+    override fun onDisconnected(session: MediaSession, controller: MediaSession.ControllerInfo) =
+        browser.onDisconnected(session, controller)
+
+    override fun onSubscribe(session: MediaLibraryService.MediaLibrarySession, controller: MediaSession.ControllerInfo,
+        parentId: String, params: MediaLibraryService.LibraryParams?): ListenableFuture<LibraryResult<Void>> =
+        browser.onSubscribe(session, controller, parentId, params)
+
+    override fun onUnsubscribe(session: MediaLibraryService.MediaLibrarySession, controller: MediaSession.ControllerInfo,
+        parentId: String): ListenableFuture<LibraryResult<Void>> = browser.onUnsubscribe(session, controller, parentId)
+
     override fun onSetMediaItems(
         session: MediaSession,
         controller: MediaSession.ControllerInfo,

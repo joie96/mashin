@@ -19,6 +19,9 @@ class AlbumDetailController extends ChangeNotifier {
          provider: providerInstanceIdOrDomain,
        ) {
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
+    _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
+      _onMediaReadInvalidated,
+    );
     _readSubscription = coreBridge.catalogReadChanges.listen(
       _onCatalogReadChange,
     );
@@ -26,6 +29,7 @@ class AlbumDetailController extends ChangeNotifier {
 
   final DetailProviderSelection sectionProvider;
   StreamSubscription<CatalogUpdate>? _catalogSubscription;
+  StreamSubscription<void>? _cacheSubscription;
   StreamSubscription<CatalogReadChange>? _readSubscription;
   CatalogReadChange? _metadataReadState;
   CatalogReadChange? _tracksReadState;
@@ -96,6 +100,21 @@ class AlbumDetailController extends ChangeNotifier {
     if (requiresReload) await loadAlbum();
   }
 
+  void _onMediaReadInvalidated(void _) {
+    if (_isControllerDisposed) return;
+    _requiresReload = true;
+    _queryScope.cancel();
+    _sectionsQueryScope.cancel();
+    if (_firstMetadata case final pending? when !pending.isCompleted) {
+      pending.complete(null);
+    }
+    _loadingFuture = null;
+    if (!_isPageVisible) return;
+    _queryScope = CoreQueryScope();
+    _requiresReload = false;
+    unawaited(loadAlbum());
+  }
+
   @override
   void notifyListeners() {
     if (!_isLoadCanceled) {
@@ -107,6 +126,7 @@ class AlbumDetailController extends ChangeNotifier {
   void dispose() {
     _isControllerDisposed = true;
     unawaited(_catalogSubscription?.cancel());
+    unawaited(_cacheSubscription?.cancel());
     unawaited(_readSubscription?.cancel());
     _queryScope.cancel();
     _sectionsQueryScope.cancel();
@@ -156,41 +176,6 @@ class AlbumDetailController extends ChangeNotifier {
       _hasObservedTracks = true;
       _isLoadingTracks = false;
       _tracksNotifier.notifyListeners();
-    } else if (_album?.artists.any(
-          (artist) =>
-              artist.itemId == update.itemId &&
-                  artist.provider == update.provider ||
-              artist.providerMappings.any(
-                (mapping) =>
-                    mapping.itemId == update.itemId &&
-                    mapping.providerInstance == update.provider,
-              ),
-        ) ??
-        false) {
-      switch (update.kind) {
-        case CatalogQueryKind.artistAlbums:
-          _otherAlbums = update.albums
-              .where(
-                (album) =>
-                    album.itemId != _album?.itemId ||
-                    album.provider != _album?.provider,
-              )
-              .map(
-                (album) =>
-                    userDataController?.withFavoriteStatus(album) ?? album,
-              )
-              .toList(growable: false);
-        case CatalogQueryKind.similarArtists:
-          _similarArtists = update.artists
-              .map(
-                (artist) =>
-                    userDataController?.withFavoriteStatus(artist) ?? artist,
-              )
-              .toList(growable: false);
-        default:
-          return;
-      }
-      _relatedNotifier.notifyListeners();
     } else {
       return;
     }
@@ -368,6 +353,7 @@ class AlbumDetailController extends ChangeNotifier {
     }
   }
 
+  // Independent album reads must not gate track-dependent artist queries.
   Future<void> _loadSections() async {
     _sectionsQueryScope.cancel();
     final sectionScope = CoreQueryScope();
@@ -391,10 +377,51 @@ class AlbumDetailController extends ChangeNotifier {
     _relatedNotifier.notifyListeners();
     notifyListeners();
     await sectionScope.run(() async {
-      await Future.wait(<Future<void>>[_loadTracks(), _loadOtherAlbums()]);
-      if (_isLoadCanceled) return;
-      await _loadSimilarArtists();
+      await Future.wait(<Future<void>>[
+        _loadTracksAndSimilarArtists(),
+        _loadOtherAlbums(),
+      ]);
     });
+  }
+
+  // Each observed seed replaces its own branch without waiting for retired reads.
+  Future<void> _loadTracksAndSimilarArtists() async {
+    final scope = CoreQueryScope.current ?? _sectionsQueryScope;
+    CoreQueryScope? branch;
+    (String?, String?)? previousSeed;
+    final reads = <Future<void>>[];
+    var isObserving = true;
+    void observeTracks() {
+      if (!isObserving || scope.isCanceled || !_hasObservedTracks) return;
+      final seed = _tracks.firstOrNull;
+      final identity = (seed?.provider, seed?.itemId);
+      if (identity == previousSeed) return;
+      previousSeed = identity;
+      branch?.cancel();
+      final nextBranch = scope.createChild();
+      branch = nextBranch;
+      reads.add(
+        nextBranch.run(_loadSimilarArtists).whenComplete(nextBranch.cancel),
+      );
+    }
+
+    void onTracksChanged() => scheduleMicrotask(observeTracks);
+    _tracksNotifier.addListener(onTracksChanged);
+    try {
+      observeTracks();
+      await _loadTracks();
+      if (scope.isCanceled) return;
+      if (_hasObservedTracks) {
+        observeTracks();
+      } else {
+        await _loadSimilarArtists();
+      }
+      await Future.wait(reads);
+    } finally {
+      isObserving = false;
+      _tracksNotifier.removeListener(onTracksChanged);
+      branch?.cancel();
+    }
   }
 
   Future<void> _loadMetadata() async {
@@ -474,83 +501,74 @@ class AlbumDetailController extends ChangeNotifier {
   }
 
   Future<void> _loadOtherAlbums() async {
-    final timer = Stopwatch()..start();
-    _logSection('other_albums', 'started');
-    Artist? artist = _album?.artists.firstOrNull;
-    if (artist == null) {
-      _otherAlbums = const <Album>[];
-      _isLoadingOtherAlbums = false;
-      _logSection('other_albums', 'skipped reason=no_artist');
-      _relatedNotifier.notifyListeners();
-      notifyListeners();
-      return;
+    final scope = CoreQueryScope.current ?? _sectionsQueryScope;
+    bool isCurrent() =>
+        !_isControllerDisposed && _isPageVisible && !scope.isCanceled;
+    final artist = _album?.artists.firstOrNull;
+    (String, String)? resolve(Artist value) {
+      final selected = sectionProvider.selectedProvider;
+      if (selected == 'library' || value.provider == selected) {
+        return (value.provider, value.itemId);
+      }
+      final mapping = value.providerMappings
+          .where(
+            (mapping) =>
+                mapping.available && mapping.providerInstance == selected,
+          )
+          .firstOrNull;
+      return mapping == null
+          ? null
+          : (mapping.providerInstance, mapping.itemId);
+    }
+
+    Future<void> loadAlbums(
+      Artist value,
+      bool Function() isValueCurrent,
+    ) async {
+      final key = resolve(value);
+      if (key == null) return;
+      await _observeCatalogValues<List<Album>>(
+        CatalogQueryKind.artistAlbums,
+        Artist(provider: key.$1, itemId: key.$2, name: value.name),
+        isCurrent: isValueCurrent,
+        select: (update) => update.albums,
+        hasSameValue: hasSameMediaListContent,
+        load: () => coreBridge.getArtistAlbums(key.$2, key.$1),
+        onValue: (albums, isAlbumCurrent) async {
+          if (!isAlbumCurrent()) return;
+          final incoming = _projectOtherAlbums(albums);
+          if (hasSameMediaListContent(_otherAlbums, incoming) &&
+              !_isLoadingOtherAlbums) {
+            return;
+          }
+          _otherAlbums = incoming;
+          _isLoadingOtherAlbums = false;
+          _relatedNotifier.notifyListeners();
+          notifyListeners();
+        },
+      );
     }
 
     try {
-      if (sectionProvider.selectedProvider != 'library' &&
-          artist.provider != sectionProvider.selectedProvider) {
-        final Artist fullArtist = await coreBridge.getArtist(
-          artist.itemId,
-          artist.provider,
-        );
-        if (_isLoadCanceled) return;
-        final ProviderMapping? mapping = fullArtist.providerMappings
-            .where(
-              (mapping) =>
-                  mapping.providerInstance ==
-                      sectionProvider.selectedProvider &&
-                  mapping.available,
-            )
-            .firstOrNull;
-        if (mapping == null) {
-          _otherAlbums = const <Album>[];
-          _logSection('other_albums', 'skipped reason=no_provider_mapping');
-          return;
-        }
-        artist = Artist(
-          itemId: mapping.itemId,
-          provider: mapping.providerInstance,
-          name: fullArtist.name,
+      if (artist == null) return;
+      if (sectionProvider.selectedProvider == 'library' ||
+          artist.provider == sectionProvider.selectedProvider) {
+        await loadAlbums(artist, isCurrent);
+      } else {
+        await _observeCatalogValues<Artist>(
+          CatalogQueryKind.artist,
+          artist,
+          initialValue: resolve(artist) == null ? null : artist,
+          isCurrent: isCurrent,
+          select: (update) =>
+              update.item is Artist ? update.item! as Artist : null,
+          hasSameValue: (left, right) => resolve(left) == resolve(right),
+          load: () => coreBridge.getArtist(artist.itemId, artist.provider),
+          onValue: loadAlbums,
         );
       }
-      final List<Album> loaded = await coreBridge.getArtistAlbums(
-        artist.itemId,
-        artist.provider,
-      );
-      if (_isLoadCanceled) return;
-      _otherAlbums = List<Album>.unmodifiable(
-        loaded
-            .where(
-              (Album item) =>
-                  !(item.itemId == itemId &&
-                      item.provider == providerInstanceIdOrDomain) &&
-                  !(item.itemId == sectionProvider.selectedItemId &&
-                      item.provider == sectionProvider.selectedProvider),
-            )
-            .map(
-              (Album item) =>
-                  userDataController?.withFavoriteStatus(item) ?? item,
-            )
-            .toList(growable: false)
-          ..sort(
-            (Album left, Album right) =>
-                (right.year ?? 0).compareTo(left.year ?? 0),
-          ),
-      );
-      _logSection(
-        'other_albums',
-        'loaded count=${_otherAlbums.length} elapsed_ms=${timer.elapsedMilliseconds}',
-      );
-    } catch (error) {
-      if (_isLoadCanceled) return;
-      _logSection(
-        'other_albums',
-        'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
-        level: LogLevelPreference.warn,
-      );
-      _otherAlbums = const <Album>[];
     } finally {
-      if (!_isLoadCanceled) {
+      if (isCurrent() && _isLoadingOtherAlbums) {
         _isLoadingOtherAlbums = false;
         _relatedNotifier.notifyListeners();
         notifyListeners();
@@ -560,8 +578,15 @@ class AlbumDetailController extends ChangeNotifier {
 
   Future<void> _loadSimilarArtists() async {
     final timer = Stopwatch()..start();
-    _logSection('similar_artists', 'started');
+    final scope = CoreQueryScope.current ?? _sectionsQueryScope;
     final Track? seed = _tracks.firstOrNull;
+    bool isCurrent() =>
+        !_isControllerDisposed &&
+        _isPageVisible &&
+        !scope.isCanceled &&
+        (seed?.provider, seed?.itemId) ==
+            (_tracks.firstOrNull?.provider, _tracks.firstOrNull?.itemId);
+    _logSection('similar_artists', 'started');
     if (seed == null) {
       _similarArtists = const <Artist>[];
       _isLoadingSimilarArtists = false;
@@ -572,83 +597,227 @@ class AlbumDetailController extends ChangeNotifier {
     }
 
     try {
-      List<Track> similarTracks = await coreBridge.getSimilarTracks(
-        seed.itemId,
-        seed.provider,
-        limit: 50,
-        allowLookup: true,
+      await _observeSimilarArtistTracks(
+        seed,
+        isCurrent: isCurrent,
+        shouldLookupVersions: true,
       );
-      if (_isLoadCanceled) return;
-      if (similarTracks.isEmpty) {
-        final List<Track> versions = await coreBridge.getTrackVersions(
-          seed.itemId,
-          seed.provider,
-        );
-        if (_isLoadCanceled) return;
-        if (versions.isNotEmpty) {
-          final Track fallback = versions.firstWhere(
-            (Track version) => version.provider != seed.provider,
-            orElse: () => versions.first,
-          );
-          similarTracks = await coreBridge.getSimilarTracks(
-            fallback.itemId,
-            fallback.provider,
-            limit: 50,
-            allowLookup: true,
-          );
-          if (_isLoadCanceled) return;
-        }
-      }
-
-      final String? albumArtistId = _album?.artists.firstOrNull?.itemId;
-      final Map<String, Artist> unique = <String, Artist>{};
-      for (final Track track in similarTracks) {
-        for (final Artist artist in track.artists) {
-          if (artist.itemId != albumArtistId) {
-            unique.putIfAbsent(artist.itemId, () => artist);
-          }
-        }
-      }
-
-      final List<Artist> enriched = <Artist>[];
-      for (final Artist artist in unique.values.take(15)) {
-        if (_isLoadCanceled) return;
-        try {
-          enriched.add(
-            await coreBridge.getArtist(artist.itemId, artist.provider),
-          );
-        } catch (_) {
-          enriched.add(artist);
-        }
-      }
-      if (_isLoadCanceled) return;
-      _similarArtists = List<Artist>.unmodifiable(
-        enriched
-            .map(
-              (Artist artist) =>
-                  userDataController?.withFavoriteStatus(artist) ?? artist,
-            )
-            .toList(growable: false),
-      );
+      if (!isCurrent()) return;
       _logSection(
         'similar_artists',
         'loaded count=${_similarArtists.length} elapsed_ms=${timer.elapsedMilliseconds}',
       );
     } catch (error) {
-      if (_isLoadCanceled) return;
+      if (!isCurrent()) return;
       _logSection(
         'similar_artists',
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
         level: LogLevelPreference.warn,
       );
-      _similarArtists = const <Artist>[];
     } finally {
-      if (!_isLoadCanceled) {
+      if (isCurrent() && _isLoadingSimilarArtists) {
         _isLoadingSimilarArtists = false;
         _relatedNotifier.notifyListeners();
         notifyListeners();
       }
     }
+  }
+
+  // Every observed value owns its follow-ups; newer values retire older projections.
+  Future<void> _observeSimilarArtistTracks(
+    Track seed, {
+    required bool Function() isCurrent,
+    required bool shouldLookupVersions,
+  }) => _observeRelatedTracks(
+    CatalogQueryKind.similarTracks,
+    seed,
+    isCurrent: isCurrent,
+    load: () => coreBridge.getSimilarTracks(
+      seed.itemId,
+      seed.provider,
+      limit: 50,
+      allowLookup: true,
+    ),
+    onTracks: (tracks, isValueCurrent) async {
+      if (tracks.isNotEmpty || !shouldLookupVersions) {
+        await _projectSimilarArtists(tracks, isValueCurrent);
+        return;
+      }
+      await _observeRelatedTracks(
+        CatalogQueryKind.trackVersions,
+        seed,
+        isCurrent: isValueCurrent,
+        load: () => coreBridge.getTrackVersions(seed.itemId, seed.provider),
+        onTracks: (versions, isVersionCurrent) async {
+          if (versions.isEmpty) {
+            if (isVersionCurrent()) _publishSimilarArtists(const []);
+            return;
+          }
+          final fallback = versions.firstWhere(
+            (version) => version.provider != seed.provider,
+            orElse: () => versions.first,
+          );
+          await _observeSimilarArtistTracks(
+            fallback,
+            isCurrent: isVersionCurrent,
+            shouldLookupVersions: false,
+          );
+        },
+      );
+    },
+  );
+
+  Future<void> _observeRelatedTracks(
+    CatalogQueryKind kind,
+    Track seed, {
+    required bool Function() isCurrent,
+    required Future<List<Track>> Function() load,
+    required Future<void> Function(List<Track>, bool Function()) onTracks,
+  }) => _observeCatalogValues<List<Track>>(
+    kind,
+    seed,
+    isCurrent: isCurrent,
+    load: load,
+    hasSameValue: hasSameMediaListContent,
+    select: (update) =>
+        kind == CatalogQueryKind.similarTracks &&
+            (update.limit != 50 || update.allowLookup != true)
+        ? null
+        : update.tracks,
+    onValue: onTracks,
+  );
+
+  Future<void> _observeCatalogValues<T>(
+    CatalogQueryKind kind,
+    MediaItem seed, {
+    T? initialValue,
+    required bool Function() isCurrent,
+    required T? Function(CatalogUpdate) select,
+    required bool Function(T, T) hasSameValue,
+    required Future<T> Function() load,
+    required Future<void> Function(T, bool Function()) onValue,
+  }) async {
+    final scope = CoreQueryScope.current ?? _sectionsQueryScope;
+    CoreQueryScope? valueScope;
+    T? previous;
+    var revision = 0;
+    final projections = <Future<void>>[];
+    void accept(T value) {
+      if (!isCurrent() ||
+          previous != null && hasSameValue(previous as T, value)) {
+        return;
+      }
+      previous = value;
+      final valueRevision = ++revision;
+      valueScope?.cancel();
+      final branch = scope.createChild();
+      valueScope = branch;
+      bool isValueCurrent() =>
+          isCurrent() && !branch.isCanceled && valueRevision == revision;
+      projections.add(
+        branch
+            .run(() async {
+              try {
+                if (isValueCurrent()) await onValue(value, isValueCurrent);
+              } catch (error) {
+                if (isValueCurrent()) {
+                  _logSection(
+                    'similar_artists',
+                    'projection failed error=$error',
+                    level: LogLevelPreference.warn,
+                  );
+                }
+              }
+            })
+            .whenComplete(branch.cancel),
+      );
+    }
+
+    final subscription = coreBridge.catalogUpdates.listen((update) {
+      if (update.matches(kind, seed.itemId, seed.provider)) {
+        final value = select(update);
+        if (value != null) accept(value);
+      }
+    });
+    final readSubscription = coreBridge.catalogReadChanges.listen((change) {
+      if (isCurrent() &&
+          change.matches(kind, seed.itemId, seed.provider) &&
+          change.phase == CatalogLoadPhase.invalidated) {
+        _invalidateServerContext();
+      }
+    });
+    try {
+      if (initialValue != null) accept(initialValue);
+      accept(await load());
+    } catch (error) {
+      if (isCurrent()) {
+        _logSection(
+          'similar_artists',
+          'read=${kind.name} failed error=$error',
+          level: LogLevelPreference.warn,
+        );
+      }
+    } finally {
+      await subscription.cancel();
+      await readSubscription.cancel();
+      await Future.wait(projections);
+      valueScope?.cancel();
+    }
+  }
+
+  // Embedded artists are immediately usable; enrichment never gates their first publication.
+  Future<void> _projectSimilarArtists(
+    List<Track> tracks,
+    bool Function() isCurrent,
+  ) async {
+    final albumArtistId = _album?.artists.firstOrNull?.itemId;
+    final unique = <String, Artist>{};
+    for (final track in tracks) {
+      for (final artist in track.artists) {
+        if (artist.itemId != albumArtistId) {
+          unique.putIfAbsent(artist.itemId, () => artist);
+        }
+      }
+    }
+    final artists = unique.values.take(15).toList(growable: false);
+    if (!isCurrent()) return;
+    _publishSimilarArtists(artists);
+    await Future.wait(
+      List.generate(artists.length, (index) async {
+        if (!isCurrent()) return;
+        final artist = artists[index];
+        await _observeCatalogValues<Artist>(
+          CatalogQueryKind.artist,
+          artist,
+          isCurrent: isCurrent,
+          select: (update) =>
+              update.item is Artist ? update.item! as Artist : null,
+          hasSameValue: hasSameMediaContent,
+          load: () => coreBridge.getArtist(artist.itemId, artist.provider),
+          onValue: (enriched, isArtistCurrent) async {
+            if (!isArtistCurrent()) return;
+            artists[index] = enriched;
+            _publishSimilarArtists(artists);
+          },
+        );
+      }),
+    );
+  }
+
+  void _publishSimilarArtists(List<Artist> artists) {
+    final incoming = List<Artist>.unmodifiable(
+      artists.map(
+        (artist) => userDataController?.withFavoriteStatus(artist) ?? artist,
+      ),
+    );
+    if (hasSameMediaListContent(_similarArtists, incoming) &&
+        !_isLoadingSimilarArtists) {
+      return;
+    }
+    _similarArtists = incoming;
+    _isLoadingSimilarArtists = false;
+    _relatedNotifier.notifyListeners();
+    notifyListeners();
   }
 
   // A single load generation owns all sequential and parallel section requests.
@@ -755,6 +924,24 @@ class AlbumDetailController extends ChangeNotifier {
   Future<void> startItemRadio(MediaItem item) async {
     await coreBridge.startRadio(<MediaItem>[item]);
   }
+
+  // Related-album projection is identical for early observations and final responses.
+  List<Album> _projectOtherAlbums(List<Album> albums) =>
+      List<Album>.unmodifiable(
+        albums
+            .where(
+              (album) =>
+                  !(album.itemId == itemId &&
+                      album.provider == providerInstanceIdOrDomain) &&
+                  !(album.itemId == sectionProvider.selectedItemId &&
+                      album.provider == sectionProvider.selectedProvider),
+            )
+            .map(
+              (album) => userDataController?.withFavoriteStatus(album) ?? album,
+            )
+            .toList(growable: false)
+          ..sort((left, right) => (right.year ?? 0).compareTo(left.year ?? 0)),
+      );
 
   String _favoriteKey(MediaItem item) =>
       '${item.mediaType.name}|${item.provider}|${item.itemId}';

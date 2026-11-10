@@ -62,6 +62,21 @@ pub(super) fn initialize_track_list_schema(
     Ok(())
 }
 
+// Mutations retire exact content coverage for the canonical identity and observed aliases.
+pub(super) fn invalidate_confirmed_playlist_content_reads(
+    transaction: &Transaction<'_>,
+    playlist: &crate::domain::media::Playlist,
+) -> Result<(), CacheError> {
+    transaction.execute("WITH identities(provider,item_id) AS (
+        SELECT ?1,?2 UNION SELECT provider_instance,item_id FROM playlist_provider_mappings WHERE provider=?1 AND playlist_id=?2
+        UNION SELECT provider_domain,item_id FROM playlist_provider_mappings WHERE provider=?1 AND playlist_id=?2)
+        DELETE FROM track_list_states AS state WHERE EXISTS(SELECT 1 FROM identities identity WHERE
+            json_extract(state.query,'$.PlaylistTracks.provider')=identity.provider AND
+            json_extract(state.query,'$.PlaylistTracks.item_id')=identity.item_id)",
+        params![playlist.media.provider.as_str(),playlist.media.item_id.as_str()])?;
+    Ok(())
+}
+
 // Removal retires the playlist's content knowledge, not its canonical tracks.
 pub(super) fn invalidate_removed_playlist_content_reads(
     transaction: &Transaction<'_>,
@@ -79,6 +94,7 @@ pub(crate) fn supports_track_read(query: &CatalogQuery) -> bool {
             | CatalogQuery::TrackVersions { .. }
             | CatalogQuery::SimilarTracks { .. }
             | CatalogQuery::RecentlyPlayed { .. }
+            | CatalogQuery::LibraryTracks { .. }
             | CatalogQuery::PlaylistTracks { .. }
             | CatalogQuery::Search {
                 media_type: MediaType::Track,
@@ -100,6 +116,7 @@ pub(super) fn is_track_list_read(query: &CatalogQuery) -> bool {
         } | CatalogQuery::TrackVersions { .. }
             | CatalogQuery::SimilarTracks { .. }
             | CatalogQuery::RecentlyPlayed { .. }
+            | CatalogQuery::LibraryTracks { .. }
             | CatalogQuery::PlaylistTracks { .. }
     )
 }
@@ -179,6 +196,7 @@ pub(crate) fn commit_confirmed_track(
     )?;
     transaction.execute(
         "DELETE FROM track_list_states AS state WHERE state.user_id=?1 AND (
+            json_type(state.query,'$.LibraryTracks') IS NOT NULL OR
             EXISTS(SELECT 1 FROM json_each(state.query) selector WHERE selector.key IN ('TrackVersions','SimilarTracks') AND (
                 (json_extract(selector.value,'$.provider')=?2 AND json_extract(selector.value,'$.item_id')=?3)
                 OR EXISTS(SELECT 1 FROM track_provider_mappings mapping WHERE mapping.track_provider=?2 AND mapping.track_item_id=?3
@@ -314,6 +332,7 @@ fn write_track_list(
                 CatalogQuery::TrackVersions { .. }
                     | CatalogQuery::SimilarTracks { .. }
                     | CatalogQuery::RecentlyPlayed { .. }
+                    | CatalogQuery::LibraryTracks { .. }
                     | CatalogQuery::PlaylistTracks { .. },
                 CatalogValue::Tracks(_)
             )
@@ -421,6 +440,87 @@ mod tests {
     }
 
     // Exact context, canonical merges and per-user coverage.
+    #[test]
+    fn library_tracks_preserve_page_scope_reopen_empty_and_mutation_invalidation() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("tracks.db");
+        let user = UserId("user".into());
+        let query: CatalogQuery = serde_json::from_value(json!({"LibraryTracks": {
+            "favorite": true, "limit": 2, "offset": 0, "summary": false
+        }}))
+        .unwrap();
+        let empty_page: CatalogQuery = serde_json::from_value(json!({"LibraryTracks": {
+            "favorite": true, "limit": 2, "offset": 2, "summary": false
+        }}))
+        .unwrap();
+        let value = CatalogValue::Tracks(vec![track("album-a", 4), track("album-b", 8)]);
+        {
+            let mut connection = Connection::open(&path).unwrap();
+            connection
+                .pragma_update(None, "foreign_keys", true)
+                .unwrap();
+            let transaction = connection.transaction().unwrap();
+            super::super::database::initialize_media_schema(&transaction).unwrap();
+            assert!(supports_track_read(&query));
+            write_track_read(&transaction, &query, &user, &value, 100).unwrap();
+            write_track_read(
+                &transaction,
+                &empty_page,
+                &user,
+                &CatalogValue::Tracks(Vec::new()),
+                101,
+            )
+            .unwrap();
+            transaction.commit().unwrap();
+        }
+        let mut connection = Connection::open(&path).unwrap();
+        super::super::artist_candidates::initialize_artist_query_functions(&connection).unwrap();
+        let transaction = connection.transaction().unwrap();
+        let observed = read_track_read(&transaction, &query, &user)
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed.value, value);
+        assert_eq!(observed.observed_at, 100);
+        assert_eq!(
+            read_track_read(&transaction, &empty_page, &user)
+                .unwrap()
+                .unwrap()
+                .value,
+            CatalogValue::Tracks(Vec::new())
+        );
+        assert!(
+            read_track_read(&transaction, &query, &UserId("other".into()))
+                .unwrap()
+                .is_none()
+        );
+        for (favorite, limit, offset, summary) in [
+            (None, 2, 0, false),
+            (Some(false), 2, 0, false),
+            (Some(true), 1, 0, false),
+            (Some(true), 2, 1, false),
+            (Some(true), 2, 0, true),
+        ] {
+            let different: CatalogQuery = serde_json::from_value(json!({"LibraryTracks": {
+                "favorite": favorite, "limit": limit, "offset": offset, "summary": summary
+            }}))
+            .unwrap();
+            assert!(read_track_read(&transaction, &different, &user)
+                .unwrap()
+                .is_none());
+            assert!(read_partial_track(&transaction, &different, &user)
+                .unwrap()
+                .is_none());
+        }
+        let mut added = track("album-c", 1);
+        added.media.item_id = MediaId("new-favorite".into());
+        commit_confirmed_track(&transaction, &added, &user).unwrap();
+        for page in [query, empty_page] {
+            assert!(read_track_read(&transaction, &page, &user)
+                .unwrap()
+                .is_none());
+        }
+    }
+
     #[test]
     fn playlist_tracks_preserve_occurrences_context_scope_and_known_empty() {
         for allow_dynamic_tracks in [false, true] {

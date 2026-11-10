@@ -43,9 +43,32 @@ fn publish_event(
     publish_to_flutter: impl FnOnce(&str),
 ) {
     if let Ok(text) = serde_json::to_string(event) {
+        if matches!(event, ApplicationEvent::SessionChanged) {
+            publish_to_android(&text);
+            return;
+        }
         if should_publish_to_android {
             publish_to_android(&text);
         }
         publish_to_flutter(&text);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn session_invalidation_reaches_only_android_for_every_origin() {
+        for background in [false, true] {
+            let android = std::cell::RefCell::new(Vec::new());
+            let flutter = std::cell::RefCell::new(Vec::new());
+            super::publish_event(
+                &crate::application::events::ApplicationEvent::SessionChanged,
+                background,
+                |event| android.borrow_mut().push(event.to_owned()),
+                |event| flutter.borrow_mut().push(event.to_owned()),
+            );
+            assert_eq!(*android.borrow(), [r#"{"type":"session_changed"}"#]);
+            assert!(flutter.borrow().is_empty());
+        }
     }
 }

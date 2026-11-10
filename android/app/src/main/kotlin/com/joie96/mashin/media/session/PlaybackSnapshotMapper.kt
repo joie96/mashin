@@ -13,7 +13,7 @@ internal object PlaybackSnapshotMapper {
     const val SERIALIZED_MEDIA_ITEM_KEY = "mashin.serializedMediaItem"
 
     // Canonical Rust state is projected without native calls or a second queue owner.
-    fun fromPlayerState(values: JSONObject, queue: JSONObject, musicAssistantUrl: String = "", userData: JSONObject? = null): PlaybackSnapshot {
+    fun fromPlayerState(values: JSONObject, queue: JSONObject, userData: JSONObject? = null): PlaybackSnapshot {
         val queueItemId = values.optString("currentQueueItemId")
         val queueItems = queue.optJSONArray("items")
             ?.let { items -> (0 until items.length()).mapNotNull(items::optJSONObject) }
@@ -47,7 +47,7 @@ internal object PlaybackSnapshotMapper {
                         .setTitle(currentItem.optString("name"))
                         .setArtist(mediaItem?.artistNames())
                         .setAlbumTitle(mediaItem?.optJSONObject("album")?.optString("name"))
-                        .setArtworkUri(currentItem.artworkUri(musicAssistantUrl))
+                        .setArtworkUri(MediaArtworkContentProvider.buildUri(currentItem)?.let(android.net.Uri::parse))
                         .setDurationMs(if (currentItem.optString("queue_item_id") == queueItemId) durationMillis else mediaItem?.optLong("duration")?.times(1_000L))
                         .setExtras(mediaItem?.let { Bundle().apply { putString(SERIALIZED_MEDIA_ITEM_KEY, it.toString()) } })
                         .build(),
@@ -91,33 +91,4 @@ internal object PlaybackSnapshotMapper {
         ?.joinToString(", ")
         ?.takeIf(String::isNotBlank)
 
-    private fun JSONObject.artworkUri(musicAssistantUrl: String): android.net.Uri? {
-        val mediaItem = optJSONObject("media_item")
-        val album = mediaItem?.optJSONObject("album")
-        val images = album?.artworkImages().orEmpty() + artworkImages() + mediaItem?.artworkImages().orEmpty()
-        val baseUrl = musicAssistantUrl.trim().trimEnd('/')
-        for (image in images) {
-            val proxyId = image.optString("proxy_id").trim().takeUnless { it == "null" }
-            val path = image.optString("path").trim().takeUnless { it == "null" }.orEmpty()
-            val source = if (!proxyId.isNullOrEmpty() && baseUrl.isNotEmpty()) {
-                android.net.Uri.parse(baseUrl).buildUpon().appendPath("imageproxy").appendPath(proxyId).build().toString()
-            } else {
-                path
-            }
-            if (source.isNotEmpty() && android.net.Uri.parse(source).scheme?.lowercase() in listOf("http", "https", "data", "file")) {
-                return android.net.Uri.parse(MediaArtworkContentProvider.buildUri(source))
-            }
-        }
-        return null
-    }
-
-    // Album artwork has the same precedence as in Flutter; unusable entries must not hide later covers.
-    private fun JSONObject.artworkImages(): List<JSONObject> {
-        val metadataImages = optJSONObject("metadata")?.optJSONArray("images")
-        val images = metadataImages?.let { values ->
-            (0 until values.length()).mapNotNull(values::optJSONObject)
-                .sortedBy { if (it.optString("type", "thumb") == "thumb") 0 else 1 }
-        }.orEmpty()
-        return listOfNotNull(optJSONObject("image")) + images
-    }
 }

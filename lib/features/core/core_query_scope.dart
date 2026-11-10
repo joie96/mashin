@@ -21,6 +21,19 @@ class CoreQueryScope {
   Future<T> run<T>(Future<T> Function() operation) =>
       runZoned(operation, zoneValues: {_zoneKey: this});
 
+  // Replaceable branches inherit cancellation and detach when they are retired.
+  CoreQueryScope createChild() {
+    final child = CoreQueryScope();
+    if (_isCanceled) {
+      child.cancel();
+      return child;
+    }
+    void cancelChild() => child.cancel();
+    _cancelRequests.add(cancelChild);
+    child._cancelRequests.add(() => _cancelRequests.remove(cancelChild));
+    return child;
+  }
+
   void cancel() {
     if (_isCanceled) return;
     _isCanceled = true;

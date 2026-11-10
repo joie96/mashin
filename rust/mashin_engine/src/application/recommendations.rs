@@ -2,7 +2,9 @@
 use super::errors::ApplicationError;
 use super::repositories::CatalogClient;
 use super::Application;
-use crate::domain::catalog::{CatalogLoadPhase, CatalogLoadSnapshot, CatalogQuery, CatalogValue};
+use crate::domain::catalog::{
+    CatalogLoadPhase, CatalogLoadSnapshot, CatalogQuery, CatalogReadKnowledge, CatalogValue,
+};
 use crate::domain::identifiers::MediaId;
 use crate::domain::media::{MediaItem, Track};
 use crate::domain::recommendations::{
@@ -39,6 +41,7 @@ struct PlaylistRead {
 struct FolderRead {
     value: RecommendationFolder,
     items_are_finished: bool,
+    has_embedded_items: bool,
     revision: u64,
     playlists: HashMap<usize, PlaylistRead>,
 }
@@ -95,16 +98,45 @@ impl Recommendations {
             view_publication_revisions: [AtomicU64::new(0), AtomicU64::new(0)],
         }
     }
-    // Startup checks the endpoint without retaining a second recommendation inventory.
+    // Startup owns its observation through refresh and only signals changed known folders.
     pub(crate) async fn load_recommendation_data(
         &self,
         mut on_update: impl FnMut(),
     ) -> Result<(), String> {
-        self.catalog
-            .load_catalog(CatalogQuery::RecommendationFolders, false)
-            .await?;
-        on_update();
-        Ok(())
+        let mut observations = self
+            .catalog
+            .observe_catalog(CatalogQuery::RecommendationFolders, false);
+        let mut published = None;
+        while let Some(observation) = observations.next().await {
+            if observation.phase == CatalogLoadPhase::Invalidated {
+                return Err(observation
+                    .error
+                    .unwrap_or_else(|| "startup recommendations invalidated".into()));
+            }
+            let mut has_observed_folders = false;
+            if observation.knowledge == CatalogReadKnowledge::ObservedResponse {
+                if let Some(CatalogValue::RecommendationFolders(folders)) = observation.value {
+                    has_observed_folders = true;
+                    if published.as_ref() != Some(&folders) {
+                        published = Some(folders);
+                        on_update();
+                    }
+                }
+            }
+            match observation.phase {
+                CatalogLoadPhase::Ready if has_observed_folders => return Ok(()),
+                CatalogLoadPhase::Ready => {
+                    return Err("startup recommendation folders unavailable".into())
+                }
+                CatalogLoadPhase::Failed => {
+                    return Err(observation
+                        .error
+                        .unwrap_or_else(|| "startup recommendation refresh failed".into()))
+                }
+                _ => {}
+            }
+        }
+        Err("startup recommendations ended before completion".into())
     }
     // View assembly publishes each changed projection without waiting for sibling reads.
     pub(crate) async fn get_recommendation_data(
@@ -175,12 +207,49 @@ impl Recommendations {
                                     read.value.subtitle = folder.subtitle;
                                     read.value.knowledge.subtitle = true;
                                 }
+                                if folder.knowledge.items && !folder.items.is_empty() {
+                                    if let Some(handle) =
+                                        handles.remove(&ReadTarget::Items(key.clone()))
+                                    {
+                                        handle.abort();
+                                    }
+                                    read.items_are_finished = true;
+                                    read.has_embedded_items = true;
+                                    if !read.value.knowledge.items
+                                        || read.value.items != folder.items
+                                    {
+                                        read.value.items = folder.items;
+                                        read.value.knowledge.items = true;
+                                        read.value.has_load_error = folder.has_load_error;
+                                        self.start_playlist_reads(
+                                            &key,
+                                            &mut read,
+                                            &mut streams,
+                                            &mut handles,
+                                            force_refresh,
+                                        );
+                                    }
+                                } else if folder.knowledge.items && read.has_embedded_items {
+                                    read.has_embedded_items = false;
+                                    read.items_are_finished = false;
+                                    self.start_read(
+                                        &mut streams,
+                                        &mut handles,
+                                        ReadTarget::Items(key.clone()),
+                                        CatalogQuery::RecommendationItems {
+                                            provider: key.0.clone().into(),
+                                            item_id: MediaId(key.1.clone()),
+                                        },
+                                        force_refresh,
+                                    );
+                                }
                                 read
                             } else {
                                 let needs_items = folder.items.is_empty();
                                 let mut read = FolderRead {
                                     value: folder,
                                     items_are_finished: !needs_items,
+                                    has_embedded_items: !needs_items,
                                     revision: 0,
                                     playlists: HashMap::new(),
                                 };
@@ -413,6 +482,399 @@ mod tests {
             observed_at: Some(100),
             error: None,
         }
+    }
+
+    #[tokio::test]
+    async fn startup_recommendations_publish_cache_before_terminal_and_suppress_duplicates() {
+        let cached: Vec<RecommendationFolder> = serde_json::from_value(serde_json::json!([{
+            "provider":"source", "item_id":"user_recommendations", "name":"Cached",
+            "items":[{"media_type":"track","provider":"source","item_id":"track","name":"Cached track"}]
+        }])).unwrap();
+        let mut changed = cached.clone();
+        changed[0].title = "Server".into();
+        for (phase, folders, expected_additional_updates) in [
+            (CatalogLoadPhase::Ready, cached.clone(), 0),
+            (CatalogLoadPhase::Ready, changed.clone(), 1),
+            (CatalogLoadPhase::Ready, Vec::new(), 1),
+            (CatalogLoadPhase::Failed, cached.clone(), 0),
+            (CatalogLoadPhase::Invalidated, changed, 0),
+        ] {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let catalog = Arc::new(ObservedCatalog {
+                reads: Mutex::new(HashMap::from([(
+                    format!("{:?}", CatalogQuery::RecommendationFolders),
+                    std::collections::VecDeque::from([receiver]),
+                )])),
+                starts: Mutex::new(Vec::new()),
+            });
+            sender
+                .send(observation(
+                    Some(CatalogValue::RecommendationFolders(cached.clone())),
+                    CatalogLoadPhase::Refreshing,
+                ))
+                .unwrap();
+            let service = Recommendations::new(catalog.clone());
+            let (updates, mut received) = mpsc::unbounded_channel();
+            let task = tokio::spawn(async move {
+                service
+                    .load_recommendation_data(|| {
+                        updates.send(()).unwrap();
+                    })
+                    .await
+            });
+            tokio::time::timeout(std::time::Duration::from_secs(2), received.recv())
+                .await
+                .unwrap()
+                .expect("cached folders must notify before refresh completion");
+            assert!(!task.is_finished());
+            assert_eq!(
+                *catalog.starts.lock().unwrap(),
+                vec![(CatalogQuery::RecommendationFolders, false)]
+            );
+            sender
+                .send(observation(
+                    Some(CatalogValue::RecommendationFolders(cached.clone())),
+                    CatalogLoadPhase::Refreshing,
+                ))
+                .unwrap();
+            let mut terminal =
+                observation(Some(CatalogValue::RecommendationFolders(folders)), phase);
+            terminal.source = Some(CatalogDataSource::Server);
+            if phase != CatalogLoadPhase::Ready {
+                terminal.error = Some("controlled startup failure".into());
+            }
+            sender.send(terminal).unwrap();
+            let result = tokio::time::timeout(std::time::Duration::from_secs(2), task)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(result.is_ok(), phase == CatalogLoadPhase::Ready);
+            let mut additional_updates = 0;
+            while received.try_recv().is_ok() {
+                additional_updates += 1;
+            }
+            assert_eq!(additional_updates, expected_additional_updates);
+            assert!(sender.is_closed());
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_recommendations_distinguish_known_empty_from_missing_or_incomplete_reads() {
+        for (knowledge, phase, value, expected_updates, should_succeed) in [
+            (
+                CatalogReadKnowledge::Unknown,
+                CatalogLoadPhase::Refreshing,
+                None,
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::Partial,
+                CatalogLoadPhase::Ready,
+                Some(CatalogValue::RecommendationFolders(Vec::new())),
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::Unknown,
+                CatalogLoadPhase::Ready,
+                Some(CatalogValue::RecommendationFolders(Vec::new())),
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::ObservedResponse,
+                CatalogLoadPhase::Ready,
+                None,
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::ObservedResponse,
+                CatalogLoadPhase::Ready,
+                Some(CatalogValue::Albums(Vec::new())),
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::ObservedResponse,
+                CatalogLoadPhase::Ready,
+                Some(CatalogValue::RecommendationFolders(Vec::new())),
+                1,
+                true,
+            ),
+            (
+                CatalogReadKnowledge::ObservedResponse,
+                CatalogLoadPhase::Failed,
+                None,
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::ObservedResponse,
+                CatalogLoadPhase::Invalidated,
+                Some(CatalogValue::RecommendationFolders(Vec::new())),
+                0,
+                false,
+            ),
+            (
+                CatalogReadKnowledge::ObservedResponse,
+                CatalogLoadPhase::Refreshing,
+                Some(CatalogValue::RecommendationFolders(Vec::new())),
+                1,
+                false,
+            ),
+        ] {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            let mut snapshot = observation(value, phase);
+            snapshot.knowledge = knowledge;
+            sender.send(snapshot).unwrap();
+            drop(sender);
+            let catalog = Arc::new(ObservedCatalog {
+                reads: Mutex::new(HashMap::from([(
+                    format!("{:?}", CatalogQuery::RecommendationFolders),
+                    std::collections::VecDeque::from([receiver]),
+                )])),
+                starts: Mutex::new(Vec::new()),
+            });
+            let service = Recommendations::new(catalog);
+            let mut updates = 0;
+            let result = service.load_recommendation_data(|| updates += 1).await;
+            assert_eq!(result.is_ok(), should_succeed, "{knowledge:?} {phase:?}");
+            assert_eq!(updates, expected_updates, "{knowledge:?} {phase:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn startup_recommendations_drop_subscription_when_canceled() {
+        let (sender, receiver) = mpsc::unbounded_channel();
+        sender
+            .send(observation(
+                Some(CatalogValue::RecommendationFolders(Vec::new())),
+                CatalogLoadPhase::Refreshing,
+            ))
+            .unwrap();
+        let catalog = Arc::new(ObservedCatalog {
+            reads: Mutex::new(HashMap::from([(
+                format!("{:?}", CatalogQuery::RecommendationFolders),
+                std::collections::VecDeque::from([receiver]),
+            )])),
+            starts: Mutex::new(Vec::new()),
+        });
+        let service = Recommendations::new(catalog);
+        let (updates, mut received) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            service
+                .load_recommendation_data(|| {
+                    updates.send(()).unwrap();
+                })
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), received.recv())
+            .await
+            .unwrap()
+            .expect("cached folders must be observed before cancellation");
+        task.abort();
+        assert!(task.await.unwrap_err().is_cancelled());
+        assert!(sender.is_closed());
+        assert!(received.try_recv().is_err());
+    }
+
+    #[tokio::test]
+    async fn recommendation_embedded_refresh_replaces_items_and_preserves_partial_neighbors() {
+        let catalog = Arc::new(ObservedCatalog {
+            reads: Mutex::new(HashMap::new()),
+            starts: Mutex::new(Vec::new()),
+        });
+        let (sender, receiver) = mpsc::unbounded_channel();
+        catalog.reads.lock().unwrap().insert(
+            format!("{:?}", CatalogQuery::RecommendationFolders),
+            std::collections::VecDeque::from([receiver]),
+        );
+        let (items_sender, items_receiver) = mpsc::unbounded_channel();
+        catalog.reads.lock().unwrap().insert(
+            format!(
+                "{:?}",
+                CatalogQuery::RecommendationItems {
+                    provider: "source".into(),
+                    item_id: MediaId("user_recommendations".into()),
+                }
+            ),
+            std::collections::VecDeque::from([items_receiver]),
+        );
+        let service = Recommendations::new(catalog.clone());
+        let (updates, mut observed) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            service
+                .get_recommendation_data(
+                    RecommendationView::Home,
+                    false,
+                    |snapshot| {
+                        updates.send(snapshot).unwrap();
+                    },
+                    |_, _| {},
+                )
+                .await
+        });
+        let folders = |name| {
+            serde_json::from_value(serde_json::json!([
+            {"provider":"source","item_id":"user_recommendations","name":"Header",
+             "items":[{"media_type":"track","provider":"source","item_id":"track","name":name}]},
+            {"provider":"source","item_id":"user_top_tracks_monthly","name":"Neighbor",
+             "items":[{"media_type":"track","provider":"source","item_id":"neighbor","name":"Unchanged"}]}
+        ])).unwrap()
+        };
+        sender
+            .send(observation(
+                Some(CatalogValue::RecommendationFolders(folders("Cached"))),
+                CatalogLoadPhase::Refreshing,
+            ))
+            .unwrap();
+        let cached = observed.recv().await.unwrap();
+        assert_eq!(cached.folders[0].items[0].fields().name, "Cached");
+        let mut refreshed = observation(
+            Some(CatalogValue::RecommendationFolders(folders("Server"))),
+            CatalogLoadPhase::Refreshing,
+        );
+        refreshed.source = Some(CatalogDataSource::Server);
+        sender.send(refreshed).unwrap();
+        let server = observed.recv().await.unwrap();
+        assert_eq!(server.folders[0].items[0].fields().name, "Server");
+        assert_eq!(server.folders[1], cached.folders[1]);
+        let partial = serde_json::from_value(serde_json::json!([
+            {"provider":"source","item_id":"user_recommendations","name":"Updated header"},
+            {"provider":"source","item_id":"user_top_tracks_monthly"}
+        ]))
+        .unwrap();
+        sender
+            .send(observation(
+                Some(CatalogValue::RecommendationFolders(partial)),
+                CatalogLoadPhase::Refreshing,
+            ))
+            .unwrap();
+        let partial = observed.recv().await.unwrap();
+        assert_eq!(partial.folders[0].items, server.folders[0].items);
+        assert_eq!(partial.folders[0].title, "Updated header");
+        assert_eq!(partial.folders[1], cached.folders[1]);
+        assert_eq!(catalog.starts.lock().unwrap().len(), 1);
+        let lazy = serde_json::from_value(serde_json::json!([
+            {"provider":"source","item_id":"user_recommendations","items":[]},
+            {"provider":"source","item_id":"user_top_tracks_monthly"}
+        ]))
+        .unwrap();
+        sender
+            .send(observation(
+                Some(CatalogValue::RecommendationFolders(lazy)),
+                CatalogLoadPhase::Ready,
+            ))
+            .unwrap();
+        drop(sender);
+        items_sender
+            .send(observation(
+                Some(CatalogValue::RecommendationItems(Vec::new())),
+                CatalogLoadPhase::Ready,
+            ))
+            .unwrap();
+        drop(items_sender);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(catalog.starts.lock().unwrap().len(), 2);
+        assert!(result.folders[0].items.is_empty());
+        assert_eq!(result.folders[1], cached.folders[1]);
+    }
+
+    #[tokio::test]
+    async fn recommendation_embedded_playlist_replacement_cancels_old_content_reads() {
+        let catalog = Arc::new(ObservedCatalog {
+            reads: Mutex::new(HashMap::new()),
+            starts: Mutex::new(Vec::new()),
+        });
+        let mut senders = Vec::new();
+        for query in [
+            CatalogQuery::RecommendationFolders,
+            CatalogQuery::PlaylistTracks {
+                provider: "source".into(),
+                item_id: MediaId("old".into()),
+                allow_dynamic_tracks: false,
+            },
+            CatalogQuery::PlaylistTracks {
+                provider: "source".into(),
+                item_id: MediaId("new".into()),
+                allow_dynamic_tracks: false,
+            },
+        ] {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            catalog
+                .reads
+                .lock()
+                .unwrap()
+                .entry(format!("{query:?}"))
+                .or_default()
+                .push_back(receiver);
+            senders.push(sender);
+        }
+        let folders = |item_id| {
+            serde_json::from_value(serde_json::json!([{
+            "provider":"source","item_id":"user_exploration_weekly","name":"Header",
+            "items":[{"media_type":"playlist","provider":"source","item_id":item_id,"name":item_id}]
+        }])).unwrap()
+        };
+        senders[0]
+            .send(observation(
+                Some(CatalogValue::RecommendationFolders(folders("old"))),
+                CatalogLoadPhase::Refreshing,
+            ))
+            .unwrap();
+        let service = Recommendations::new(catalog.clone());
+        let (updates, mut observed) = mpsc::unbounded_channel();
+        let task = tokio::spawn(async move {
+            service
+                .get_recommendation_data(
+                    RecommendationView::Explore,
+                    false,
+                    |snapshot| {
+                        updates.send(snapshot).unwrap();
+                    },
+                    |_, _| {},
+                )
+                .await
+        });
+        let early = tokio::time::timeout(std::time::Duration::from_secs(5), observed.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(early.folders[0].items[0].fields().item_id.as_str(), "old");
+        assert_eq!(catalog.starts.lock().unwrap().len(), 2);
+        let tracks: Vec<Track> = serde_json::from_value(serde_json::json!([
+            {"provider":"source","item_id":"new-track","name":"New track"}
+        ]))
+        .unwrap();
+        senders[2]
+            .send(observation(
+                Some(CatalogValue::Tracks(tracks.clone())),
+                CatalogLoadPhase::Ready,
+            ))
+            .unwrap();
+        senders[0]
+            .send(observation(
+                Some(CatalogValue::RecommendationFolders(folders("new"))),
+                CatalogLoadPhase::Ready,
+            ))
+            .unwrap();
+        let old_sender = senders.remove(1);
+        drop(senders);
+        let result = tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert!(old_sender.is_closed());
+        assert_eq!(result.folders[0].items[0].fields().item_id.as_str(), "new");
+        assert_eq!(result.folders[0].playlist_tracks, tracks);
+        assert_eq!(catalog.starts.lock().unwrap().len(), 3);
     }
 
     #[tokio::test]

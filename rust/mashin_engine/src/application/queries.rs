@@ -278,6 +278,11 @@ pub(crate) enum ApplicationQuery {
     MediaArtwork {
         item: MediaItem,
     },
+    ReadImage {
+        request: crate::domain::artwork::ImageRequest,
+        #[serde(default)]
+        refresh: bool,
+    },
     RecentlyPlayedTracks {
         #[serde(default = "default_limit")]
         limit: u32,
@@ -354,6 +359,7 @@ pub(crate) enum QueryResult {
     ProviderManifests(Vec<ProviderManifest>),
     ProviderIconData(Option<String>),
     MediaArtwork(Option<MediaItemImage>),
+    ImageRead(ImageReadSnapshot),
     MediaItems(Vec<MediaItem>),
     SearchMedia(MusicAssistantSearchResults),
     Artist(Artist),
@@ -362,6 +368,52 @@ pub(crate) enum QueryResult {
     Playlist(Playlist),
     Albums(Vec<Album>),
     Artists(Vec<Artist>),
+}
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct ImageReadSnapshot {
+    #[serde(skip)]
+    pub(crate) did_publish_change: bool,
+    bytes: Option<String>,
+    cache_error: Option<String>,
+    has_refresh: bool,
+}
+
+impl ImageReadSnapshot {
+    // The local query drops its unpolled refresh; the scoped follow-up owns network cancellation.
+    pub(crate) async fn load(
+        loader: &dyn super::repositories::ImageLoader,
+        request: &crate::domain::artwork::ImageRequest,
+        refresh: bool,
+    ) -> Result<Self, String> {
+        use base64::Engine;
+        let mut load = loader.read_image(request).await?;
+        let has_refresh = load.refresh.is_some() && !refresh;
+        let mut did_publish_change = false;
+        let update = if refresh {
+            match load.refresh.take() {
+                Some(refresh) => {
+                    let update = refresh.await?;
+                    did_publish_change = update.cache_error.is_none()
+                        && update.bytes.is_some()
+                        && update.bytes != load.current.bytes;
+                    update
+                }
+                None => load.current,
+            }
+        } else {
+            load.current
+        };
+        Ok(Self {
+            did_publish_change,
+            bytes: update
+                .bytes
+                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)),
+            cache_error: update.cache_error,
+            has_refresh,
+        })
+    }
 }
 
 impl QueryResult {
@@ -448,6 +500,7 @@ pub(crate) fn project_catalog_availability(
 ) {
     use crate::domain::catalog::CatalogValue;
     match value {
+        CatalogValue::ProviderInstances(_) | CatalogValue::ProviderManifests(_) => {}
         CatalogValue::Artist(item) => project_fields_availability(&mut item.media, providers),
         CatalogValue::Album(item) => project_album_availability(item, providers),
         CatalogValue::Playlist(item) => project_fields_availability(&mut item.media, providers),
@@ -490,4 +543,66 @@ pub(crate) fn project_catalog_availability(
 
 fn default_limit() -> u32 {
     50
+}
+
+#[cfg(test)]
+mod image_read_tests {
+    use super::*;
+    use crate::application::repositories::{ImageLoad, ImageLoader, ImageUpdate};
+    use futures_util::future::BoxFuture;
+
+    struct ImageReadFixture {
+        bytes: Option<Vec<u8>>,
+        cache_error: Option<String>,
+    }
+
+    impl ImageLoader for ImageReadFixture {
+        fn read_image<'request>(
+            &'request self,
+            _: &'request crate::domain::artwork::ImageRequest,
+        ) -> BoxFuture<'request, Result<ImageLoad, String>> {
+            let bytes = self.bytes.clone();
+            let cache_error = self.cache_error.clone();
+            Box::pin(async move {
+                Ok(ImageLoad {
+                    current: ImageUpdate {
+                        bytes: Some(vec![1]),
+                        cache_error: None,
+                    },
+                    refresh: Some(Box::pin(
+                        async move { Ok(ImageUpdate { bytes, cache_error }) },
+                    )),
+                })
+            })
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn image_change_signal_requires_changed_bytes_and_successful_publication() {
+        let request = serde_json::from_value(serde_json::json!({"image":{"type":"thumb","provider":"builtin","proxy_id":"a".repeat(64)},"position":0})).unwrap();
+        for (bytes, cache_error, expected) in [
+            (Some(vec![2]), None, true),
+            (Some(vec![1]), None, false),
+            (None, None, false),
+            (
+                Some(vec![2]),
+                Some("synthetic commit failure".to_owned()),
+                false,
+            ),
+        ] {
+            let fixture = ImageReadFixture { bytes, cache_error };
+            let local = ImageReadSnapshot::load(&fixture, &request, false)
+                .await
+                .unwrap();
+            assert!(!local.did_publish_change);
+            let refreshed = ImageReadSnapshot::load(&fixture, &request, true)
+                .await
+                .unwrap();
+            assert_eq!(refreshed.did_publish_change, expected);
+            assert!(serde_json::to_value(refreshed)
+                .unwrap()
+                .get("didPublishChange")
+                .is_none());
+        }
+    }
 }

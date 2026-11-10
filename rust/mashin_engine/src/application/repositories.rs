@@ -1,4 +1,4 @@
-//! Online capabilities; completed media responses belong to their requesting page.
+//! Session-scoped data capabilities; display consumers observe, commands may await completion.
 use crate::domain::catalog::{CatalogQuery, CatalogValue};
 use crate::domain::identifiers::{MediaId, UserId};
 use crate::domain::library::{Favorites, PrivatePlaylist, UserDataSnapshot};
@@ -30,6 +30,12 @@ pub(crate) fn current_priority() -> RequestPriority {
 }
 
 pub(crate) trait CatalogClient: Send + Sync {
+    fn clear_database_cache(&self) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(std::future::ready(Err(
+            "database cache maintenance is unavailable".into(),
+        )))
+    }
+
     /// Persists only a server-confirmed media readback after an online mutation.
     fn commit_confirmed_media(&self, _item: MediaItem) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(std::future::ready(Ok(())))
@@ -39,6 +45,38 @@ pub(crate) trait CatalogClient: Send + Sync {
     fn commit_confirmed_playlist_removal(
         &self,
         _playlist: Playlist,
+    ) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(std::future::ready(Ok(())))
+    }
+
+    /// Reads confirmed contents without publishing a partial metadata/content cache update.
+    fn read_confirmed_playlist_contents(
+        &self,
+        playlist: Playlist,
+    ) -> BoxFuture<'_, Result<Vec<Track>, String>> {
+        Box::pin(async move {
+            let CatalogValue::Tracks(tracks) = self
+                .load_catalog(
+                    CatalogQuery::PlaylistTracks {
+                        item_id: playlist.media.item_id,
+                        provider: playlist.media.provider.as_str().to_owned(),
+                        allow_dynamic_tracks: false,
+                    },
+                    true,
+                )
+                .await?
+            else {
+                return Err("playlist tracks unavailable".into());
+            };
+            Ok(tracks)
+        })
+    }
+
+    /// Commits metadata and contents together after the caller publishes server confirmation.
+    fn commit_confirmed_playlist_contents(
+        &self,
+        _playlist: Playlist,
+        _tracks: Vec<Track>,
     ) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(std::future::ready(Ok(())))
     }
@@ -89,31 +127,73 @@ pub(crate) trait CatalogClient: Send + Sync {
 }
 pub(crate) trait ProviderClient: Send + Sync {
     // Provider metadata and icon queries.
-    fn get_manifests(&self) -> BoxFuture<'_, Result<Vec<ProviderManifest>, String>>;
-    fn get_instances(&self) -> BoxFuture<'_, Result<Vec<ProviderInstance>, String>>;
+    fn read_manifests(&self) -> BoxFuture<'_, Result<ProviderRead<ProviderManifest>, String>>;
+    fn read_instances(&self) -> BoxFuture<'_, Result<ProviderRead<ProviderInstance>, String>>;
     fn get_icon_data<'request>(
         &'request self,
         provider: &'request str,
     ) -> BoxFuture<'request, Result<Option<String>, String>>;
 }
-pub(crate) trait ArtworkClient: Send + Sync {
-    // Resolve artwork from item metadata or online provider mappings.
-    fn get_media_artwork<'request>(
-        &'request self,
-        item: &'request MediaItem,
-    ) -> BoxFuture<'request, Option<crate::domain::media::MediaItemImage>>;
+
+pub(crate) struct ProviderUpdate<T> {
+    pub(crate) items: Option<Vec<T>>,
+    pub(crate) cache_error: Option<String>,
 }
-pub(crate) trait NetworkImages: Send + Sync {
-    // Network bytes belong to the caller, not a persistent image store.
-    fn load_bytes<'request>(
-        &'request self,
-        source: &'request str,
-    ) -> BoxFuture<'request, Option<Vec<u8>>>;
+
+pub(crate) struct ProviderRead<T> {
+    pub(crate) current: ProviderUpdate<T>,
+    pub(crate) refresh: Option<BoxFuture<'static, Result<ProviderUpdate<T>, ProviderRefreshError>>>,
 }
+
+#[derive(Debug)]
+pub(crate) enum ProviderRefreshError {
+    Failed(String),
+    Invalidated(String),
+}
+
+impl<T> ProviderRead<T> {
+    // Commands may require completion; read projections can consume current and retain refresh.
+    pub(crate) async fn resolve(self) -> Result<ProviderUpdate<T>, String> {
+        match self.refresh {
+            Some(refresh) => match refresh.await {
+                Ok(update) => Ok(update),
+                Err(ProviderRefreshError::Failed(_)) if self.current.items.is_some() => {
+                    Ok(self.current)
+                }
+                Err(
+                    ProviderRefreshError::Failed(error) | ProviderRefreshError::Invalidated(error),
+                ) => Err(error),
+            },
+            None => Ok(self.current),
+        }
+    }
+}
+pub(crate) struct ImageUpdate {
+    pub(crate) bytes: Option<Vec<u8>>,
+    pub(crate) cache_error: Option<String>,
+}
+
+pub(crate) struct ImageLoad {
+    pub(crate) current: ImageUpdate,
+    pub(crate) refresh: Option<BoxFuture<'static, Result<ImageUpdate, String>>>,
+}
+
+pub(crate) trait ImageLoader: Send + Sync {
+    fn clear_image_cache(&self) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(std::future::ready(Err(
+            "image cache maintenance is unavailable".into(),
+        )))
+    }
+
+    fn read_image<'request>(
+        &'request self,
+        request: &'request crate::domain::artwork::ImageRequest,
+    ) -> BoxFuture<'request, Result<ImageLoad, String>>;
+}
+
 #[derive(Clone)]
 pub(crate) struct SessionServices {
-    pub(crate) images: Arc<dyn NetworkImages>,
-    pub(crate) artwork: Arc<dyn ArtworkClient>,
+    pub(crate) images: Arc<dyn ImageLoader>,
     pub(crate) recommendations: Arc<crate::application::recommendations::Recommendations>,
     pub(crate) library: Arc<dyn LibraryClient>,
     pub(crate) providers: Arc<dyn ProviderClient>,
@@ -138,6 +218,29 @@ impl<Publish: FnMut(InitialUserDataUpdate) -> Result<(), String> + Send> UserDat
         Box::pin(std::future::ready(self(update)))
     }
 }
+// Concurrent section loaders publish through one ordered snapshot writer.
+pub(crate) struct SharedUserDataPublisher<'publisher, Publisher: UserDataPublisher + ?Sized> {
+    publisher: &'publisher tokio::sync::Mutex<&'publisher mut Publisher>,
+}
+
+impl<'publisher, Publisher: UserDataPublisher + ?Sized>
+    SharedUserDataPublisher<'publisher, Publisher>
+{
+    pub(crate) fn new(
+        publisher: &'publisher tokio::sync::Mutex<&'publisher mut Publisher>,
+    ) -> Self {
+        Self { publisher }
+    }
+}
+
+impl<Publisher: UserDataPublisher + ?Sized> UserDataPublisher
+    for SharedUserDataPublisher<'_, Publisher>
+{
+    fn publish(&mut self, update: InitialUserDataUpdate) -> BoxFuture<'_, Result<(), String>> {
+        Box::pin(async move { self.publisher.lock().await.publish(update).await })
+    }
+}
+
 pub(crate) trait LibraryClient: Send + Sync {
     // Server-confirmed library reads and ownership checks.
     fn get_current_user_id(&self) -> BoxFuture<'_, Result<UserId, String>>;

@@ -76,8 +76,8 @@ impl From<HttpCommandError> for String {
 pub(crate) struct MusicAssistantClient {
     base_url: String,
     endpoint: String,
-    access_token: Option<AccessToken>,
-    http_client: reqwest::Client,
+    pub(super) access_token: Option<AccessToken>,
+    pub(super) http_client: reqwest::Client,
     pub(super) current_user_id: tokio::sync::OnceCell<UserId>,
     pub(super) request_scheduler: RequestScheduler,
 }
@@ -174,30 +174,6 @@ impl MusicAssistantClient {
         serde_json::from_value(response).map_err(|error| HttpCommandError::InvalidResponse {
             command: command.to_owned(),
             details: error.to_string(),
-        })
-    }
-}
-
-impl crate::application::repositories::NetworkImages for MusicAssistantClient {
-    // Credentials are attached only to the configured server's origin.
-    fn load_bytes<'request>(
-        &'request self,
-        source: &'request str,
-    ) -> futures_util::future::BoxFuture<'request, Option<Vec<u8>>> {
-        Box::pin(async move {
-            let url = reqwest::Url::parse(source).ok()?;
-            if !matches!(url.scheme(), "http" | "https") {
-                return None;
-            }
-            let mut request = self.http_client.get(url.clone());
-            let server = reqwest::Url::parse(&self.base_url).ok()?;
-            if url.origin() == server.origin() {
-                if let Some(token) = &self.access_token {
-                    request = request.bearer_auth(token.as_str());
-                }
-            }
-            let response = request.send().await.ok()?.error_for_status().ok()?;
-            response.bytes().await.ok().map(|bytes| bytes.to_vec())
         })
     }
 }

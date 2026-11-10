@@ -35,7 +35,9 @@ impl Application {
 
         if matches!(
             &command,
-            SetUserDataFavorites { .. }
+            ClearDatabaseCache {}
+                | ClearImageCache {}
+                | SetUserDataFavorites { .. }
                 | AddPlaylistTracks { .. }
                 | RemovePlaylistTracks { .. }
                 | CreatePrivatePlaylist { .. }
@@ -101,6 +103,70 @@ impl Application {
             Shutdown {} => {
                 self.shutdown()?;
                 Vec::new()
+            }
+            ClearDatabaseCache {} => {
+                let context = self.query_context()?;
+                let generation = context.generation;
+                let catalog = self.catalog_repository(generation)?;
+                self.runtime
+                    .block_on(catalog.clear_database_cache())
+                    .map_err(ApplicationError::command_failed)?;
+                if self.query_context()?.generation != generation {
+                    return Err(ApplicationError::command_failed(
+                        "session changed during database cache maintenance",
+                    ));
+                }
+                let application = self.clone();
+                let _ = context.tasks.spawn(&self.runtime, async move {
+                    if let Err(error) = application
+                        .refresh_user_data_for_session(
+                            Some(generation),
+                            super::library::UserDataRefresh::All,
+                        )
+                        .await
+                    {
+                        crate::logging::Logger::new(module_path!()).debug(format_args!(
+                            "User data refresh after cache maintenance failed: {}",
+                            error.message
+                        ));
+                    }
+                });
+                vec![ApplicationEvent::CacheCleared {
+                    cache: super::events::CacheArea::Database,
+                }]
+            }
+            ClearImageCache {} => {
+                let generation = self.query_context()?.generation;
+                self.ensure_session_repositories_sync(generation)?;
+                let images = {
+                    let coordinator = self.coordinator.lock().map_err(|_| {
+                        ApplicationError::internal("core coordinator lock poisoned")
+                    })?;
+                    if coordinator.session_generation != generation {
+                        return Err(ApplicationError::command_failed(
+                            "session changed before image cache maintenance",
+                        ));
+                    }
+                    coordinator
+                        .repositories
+                        .as_ref()
+                        .ok_or_else(|| {
+                            ApplicationError::command_failed("session images are unavailable")
+                        })?
+                        .images
+                        .clone()
+                };
+                self.runtime
+                    .block_on(images.clear_image_cache())
+                    .map_err(ApplicationError::command_failed)?;
+                if self.query_context()?.generation != generation {
+                    return Err(ApplicationError::command_failed(
+                        "session changed during image cache maintenance",
+                    ));
+                }
+                vec![ApplicationEvent::CacheCleared {
+                    cache: super::events::CacheArea::Images,
+                }]
             }
             SelectLocalOutput {} => self.execute_command_and_collect_events(|coordinator| {
                 coordinator.select_local_output()
@@ -426,36 +492,60 @@ impl Application {
                     .await
                     .map(QueryResult::Recommendations)
             }
-            ProviderManifests {} => self
-                .provider_repository(generation)?
-                .get_manifests()
-                .await
-                .map(QueryResult::ProviderManifests),
+            ProviderManifests {} => {
+                self.refresh_catalog(generation, CatalogQuery::ProviderManifests {}, false)
+                    .await
+            }
             ProviderIconData { provider } => self
                 .provider_repository(generation)?
                 .get_icon_data(&provider)
                 .await
                 .map(QueryResult::ProviderIconData),
-            MediaArtwork { item } => {
-                let repository = {
+            ReadImage { request, refresh } => {
+                let images = {
                     let coordinator = self.coordinator.lock().map_err(|_| {
                         ApplicationError::internal("core coordinator lock poisoned")
                     })?;
                     if coordinator.session_generation != generation {
                         return Err(ApplicationError::command_failed(
-                            "session changed before artwork read",
+                            "session changed before image read",
                         ));
                     }
                     coordinator
                         .repositories
                         .as_ref()
                         .ok_or_else(|| {
-                            ApplicationError::command_failed("session artwork is unavailable")
+                            ApplicationError::command_failed("session images are unavailable")
                         })?
-                        .artwork
+                        .images
                         .clone()
                 };
-                let artwork = repository.get_media_artwork(&item).await;
+                let snapshot =
+                    super::queries::ImageReadSnapshot::load(images.as_ref(), &request, refresh)
+                        .await?;
+                if snapshot.did_publish_change {
+                    if let Some(proxy_id) = request.image.proxy_id.filter(|proxy_id| {
+                        proxy_id.len() == 64
+                            && proxy_id.bytes().all(|value| value.is_ascii_hexdigit())
+                    }) {
+                        let events = {
+                            let coordinator = self.coordinator.lock().map_err(|_| {
+                                ApplicationError::internal("core coordinator lock poisoned")
+                            })?;
+                            if coordinator.session_generation != generation {
+                                return Err(ApplicationError::command_failed(
+                                    "session changed during image publication",
+                                ));
+                            }
+                            coordinator.session_events()
+                        };
+                        events.publish(ApplicationEvent::ImageSourceChanged { proxy_id });
+                    }
+                }
+                Ok(QueryResult::ImageRead(snapshot))
+            }
+            MediaArtwork { item } => {
+                let artwork = self.resolve_media_artwork(generation, &item).await?;
                 if self.query_context()?.generation != generation {
                     return Err(ApplicationError::command_failed(
                         "session changed during artwork read",
@@ -636,7 +726,44 @@ impl Application {
         .await
     }
 
+    // Mapping reads share the catalog cache and publish early metadata to visible artwork consumers.
+    async fn resolve_media_artwork(
+        &self,
+        generation: u64,
+        item: &MediaItem,
+    ) -> Result<Option<crate::domain::media::MediaItemImage>, String> {
+        use futures_util::{stream::FuturesOrdered, StreamExt};
+        if let Some(image) = crate::domain::artwork::select_artwork(item) {
+            return Ok(Some(image));
+        }
+        let media_type = item.media_type();
+        let mut reads = FuturesOrdered::new();
+        for mapping in &item.fields().provider_mappings {
+            reads.push_back(self.refresh_catalog(
+                generation,
+                CatalogQuery::ProviderItem {
+                    item_id: mapping.item_id.clone(),
+                    provider: mapping.provider_instance.as_str().to_owned(),
+                    media_type,
+                },
+                false,
+            ));
+        }
+        while let Some(result) = reads.next().await {
+            if let Ok(QueryResult::MediaItems(items)) = result {
+                if let Some(image) = items
+                    .iter()
+                    .find_map(crate::domain::artwork::select_artwork)
+                {
+                    return Ok(Some(image));
+                }
+            }
+        }
+        Ok(None)
+    }
+
     // Observations publish cached data before remote completion while the request remains cancellable.
+
     async fn refresh_catalog(
         &self,
         generation: u64,
@@ -647,27 +774,6 @@ impl Application {
             .catalog_repository(generation)
             .map_err(|error| error.message)?;
         let is_recently_played = matches!(query, CatalogQuery::RecentlyPlayed { .. });
-        let should_publish_observations = matches!(
-            query,
-            CatalogQuery::Artist { .. }
-                | CatalogQuery::Album { .. }
-                | CatalogQuery::AlbumTracks { .. }
-                | CatalogQuery::PlaylistTracks { .. }
-                | CatalogQuery::SimilarArtists { .. }
-                | CatalogQuery::ArtistAlbums { .. }
-                | CatalogQuery::ArtistTopTracks { .. }
-                | CatalogQuery::ArtistTracks { .. }
-                | CatalogQuery::ProviderItem {
-                    media_type: crate::domain::media::MediaType::Artist
-                        | crate::domain::media::MediaType::Album,
-                    ..
-                }
-                | CatalogQuery::Search {
-                    media_type: crate::domain::media::MediaType::Artist
-                        | crate::domain::media::MediaType::Album,
-                    ..
-                }
-        );
         let events = {
             let coordinator = self
                 .coordinator
@@ -692,25 +798,23 @@ impl Application {
             {
                 return Err("session changed during catalog observation".to_owned());
             }
-            if should_publish_observations {
-                if let Some(value) = snapshot.value.clone() {
-                    if published_value.as_ref() != Some(&value) {
-                        published_value = Some(value.clone());
-                        events.publish(
-                            crate::application::events::ApplicationEvent::CatalogUpdated {
-                                query: query.clone(),
-                                value,
-                            },
-                        );
-                    }
+            if let Some(value) = snapshot.value.clone() {
+                if published_value.as_ref() != Some(&value) {
+                    published_value = Some(value.clone());
+                    events.publish(
+                        crate::application::events::ApplicationEvent::CatalogUpdated {
+                            query: query.clone(),
+                            value,
+                        },
+                    );
                 }
-                events.publish(
-                    crate::application::events::ApplicationEvent::CatalogReadChanged {
-                        query: query.clone(),
-                        snapshot: snapshot.clone(),
-                    },
-                );
             }
+            events.publish(
+                crate::application::events::ApplicationEvent::CatalogReadChanged {
+                    query: query.clone(),
+                    snapshot: snapshot.clone(),
+                },
+            );
             match snapshot.phase {
                 CatalogLoadPhase::Ready => {
                     completed = snapshot.value;
@@ -735,6 +839,12 @@ impl Application {
             return Err("session changed during catalog request".into());
         }
         match value {
+            CatalogValue::ProviderManifests(manifests) => {
+                Ok(QueryResult::ProviderManifests(manifests))
+            }
+            CatalogValue::ProviderInstances(_) => {
+                Err("provider instances require their provider projection".into())
+            }
             CatalogValue::Artist(item) => Ok(QueryResult::Artist(item)),
             CatalogValue::Item(item) => Ok(QueryResult::MediaItems(vec![item])),
             CatalogValue::Album(item) => Ok(QueryResult::Album(item)),
@@ -764,7 +874,58 @@ impl Application {
     ) -> Result<QueryResult, ApplicationError> {
         if result.has_media() {
             let repository = self.provider_repository(generation)?;
-            let providers = repository.get_instances().await.ok();
+            let context = self.query_context()?;
+            if context.generation != generation {
+                return Err(ApplicationError::command_failed(
+                    "session changed before provider read",
+                ));
+            }
+            let events = {
+                let coordinator = self
+                    .coordinator
+                    .lock()
+                    .map_err(|_| ApplicationError::internal("core coordinator lock poisoned"))?;
+                if coordinator.session_generation != generation {
+                    return Err(ApplicationError::command_failed(
+                        "session changed before provider read",
+                    ));
+                }
+                coordinator.session_events()
+            };
+            let providers = match repository.read_instances().await {
+                Ok(read) => {
+                    if let Some(error) = read.current.cache_error {
+                        events.publish(crate::application::events::ApplicationEvent::Error {
+                            error: ApplicationError::command_failed(error),
+                        });
+                    }
+                    let current = read.current.items;
+                    if let (Some(refresh), Some(refresh_guard)) =
+                        (read.refresh, context.tasks.try_lock_provider_refresh())
+                    {
+                        let previous = current.clone();
+                        context.tasks.spawn(&self.runtime, async move {
+                            let _refresh_guard = refresh_guard;
+                            match refresh.await {
+                                Ok(update) => {
+                                    if let Some(error) = update.cache_error {
+                                        events.publish(crate::application::events::ApplicationEvent::Error { error: ApplicationError::command_failed(error) });
+                                    }
+                                    if update.items != previous {
+                                        events.publish(crate::application::events::ApplicationEvent::ProviderInstancesChanged);
+                                        events.publish(crate::application::events::ApplicationEvent::UserDataChanged);
+                                        events.publish(crate::application::events::ApplicationEvent::RecommendationsChanged);
+                                    }
+                                }
+                                Err(crate::application::repositories::ProviderRefreshError::Failed(error)) => events.publish(crate::application::events::ApplicationEvent::Error { error: ApplicationError::command_failed(error) }),
+                                Err(crate::application::repositories::ProviderRefreshError::Invalidated(_)) => {}
+                            }
+                        })?;
+                    }
+                    current
+                }
+                Err(_) => None,
+            };
             if self.query_context()?.generation != generation {
                 return Err(ApplicationError::command_failed(
                     "session changed during provider request",
@@ -785,6 +946,167 @@ mod phase_e_tests {
     use crate::domain::session::AccessToken;
     use serde_json::json;
     use std::sync::Arc;
+
+    struct DelayedProviders {
+        release: Arc<tokio::sync::Notify>,
+        outcome: usize,
+    }
+
+    impl crate::application::repositories::ProviderClient for DelayedProviders {
+        fn read_manifests(
+            &self,
+        ) -> futures_util::future::BoxFuture<
+            '_,
+            Result<
+                crate::application::repositories::ProviderRead<
+                    crate::domain::providers::ProviderManifest,
+                >,
+                String,
+            >,
+        > {
+            Box::pin(async { Err("unexpected manifest read".into()) })
+        }
+
+        fn read_instances(
+            &self,
+        ) -> futures_util::future::BoxFuture<
+            '_,
+            Result<
+                crate::application::repositories::ProviderRead<
+                    crate::domain::providers::ProviderInstance,
+                >,
+                String,
+            >,
+        > {
+            use crate::application::repositories::{
+                ProviderRead, ProviderRefreshError, ProviderUpdate,
+            };
+            let release = self.release.clone();
+            let outcome = self.outcome;
+            Box::pin(async move {
+                let instances = vec![crate::domain::providers::ProviderInstance {
+                    instance_id: crate::domain::identifiers::ProviderInstanceId("source".into()),
+                    available: true,
+                }];
+                let previous = instances.clone();
+                Ok(ProviderRead {
+                    current: ProviderUpdate {
+                        items: if outcome == 4 { None } else { Some(instances) },
+                        cache_error: None,
+                    },
+                    refresh: Some(Box::pin(async move {
+                        release.notified().await;
+                        match outcome {
+                            0 => Ok(ProviderUpdate {
+                                items: Some(previous),
+                                cache_error: None,
+                            }),
+                            1 | 4 | 5 => Ok(ProviderUpdate {
+                                items: Some(Vec::new()),
+                                cache_error: None,
+                            }),
+                            2 => Err(ProviderRefreshError::Failed("offline".into())),
+                            _ => Err(ProviderRefreshError::Invalidated("retired".into())),
+                        }
+                    })),
+                })
+            })
+        }
+
+        fn get_icon_data<'request>(
+            &'request self,
+            _provider: &'request str,
+        ) -> futures_util::future::BoxFuture<'request, Result<Option<String>, String>> {
+            Box::pin(async { Err("unexpected icon read".into()) })
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_projection_returns_cache_before_refresh_and_notifies_only_changed_instances()
+    {
+        for outcome in 0..6 {
+            let (client, worker) = server(Vec::new());
+            let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+            let published = events.clone();
+            let application = application(
+                client.base_url(),
+                EventPublisher::new(move |event| published.lock().unwrap().push(event)),
+            );
+            let release = Arc::new(tokio::sync::Notify::new());
+            let mut services = crate::bootstrap::session::online_services(Arc::new(client));
+            services.providers = Arc::new(DelayedProviders {
+                release: release.clone(),
+                outcome,
+            });
+            application.coordinator.lock().unwrap().repositories = Some(services);
+            let context = application.query_context().unwrap();
+            for _ in 0..2 {
+                let tracks = serde_json::from_value(json!([{
+                    "item_id":"track", "provider":"library", "name":"Cached", "provider_mappings":[{
+                        "item_id":"track", "provider_domain":"test", "provider_instance":"source", "available":true
+                    }]
+                }])).unwrap();
+                let projected = tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    application.project_provider_availability(
+                        context.generation,
+                        QueryResult::Tracks(tracks),
+                    ),
+                )
+                .await
+                .unwrap()
+                .unwrap();
+                let QueryResult::Tracks(tracks) = projected else {
+                    panic!("expected tracks")
+                };
+                assert_eq!(tracks[0].media.available, Some(true));
+            }
+            assert!(events.lock().unwrap().is_empty());
+            if outcome == 5 {
+                context.tasks.close();
+            }
+            release.notify_one();
+            tokio::time::timeout(std::time::Duration::from_secs(2), async {
+                while context.tasks.try_lock_provider_refresh().is_none() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .unwrap();
+            let events = events.lock().unwrap();
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, ApplicationEvent::ProviderInstancesChanged))
+                    .count(),
+                usize::from(matches!(outcome, 1 | 4))
+            );
+            assert_eq!(
+                events
+                    .iter()
+                    .filter(|event| matches!(event, ApplicationEvent::Error { .. }))
+                    .count(),
+                usize::from(outcome == 2)
+            );
+            worker.join().unwrap();
+        }
+    }
+
+    #[tokio::test]
+    async fn provider_completion_preserves_cached_failure_but_rejects_invalidated_session() {
+        use crate::application::repositories::ProviderClient;
+        for outcome in [2, 3] {
+            let release = Arc::new(tokio::sync::Notify::new());
+            let providers = DelayedProviders {
+                release: release.clone(),
+                outcome,
+            };
+            let read = providers.read_instances().await.unwrap();
+            release.notify_one();
+            let result = read.resolve().await;
+            assert_eq!(result.is_ok(), outcome == 2);
+        }
+    }
 
     fn application(base_url: &str, events: EventPublisher) -> Application {
         let application = Application::new(
@@ -808,6 +1130,8 @@ mod phase_e_tests {
         let root = crate::bootstrap::session::application_data_directory().unwrap();
         std::fs::create_dir_all(&root).unwrap();
         let (client, worker) = server(vec![
+            ("auth/me", json!({"test_http_status":503})),
+            ("auth/me", json!({"test_http_status":503})),
             ("auth/me", json!({"test_http_status":503})),
             ("auth/me", json!({"test_http_status":503})),
             (
@@ -841,24 +1165,190 @@ mod phase_e_tests {
             .is_none());
         assert!(!root.join("Cache").exists());
         let requests = worker.join().unwrap();
-        assert_eq!(requests.len(), 6);
+        assert_eq!(requests.len(), 8);
         assert_eq!(
             requests
                 .iter()
                 .filter(|request| request["command"] == "auth/me")
                 .count(),
-            2
+            4
         );
     }
 
     #[test]
     fn phase_e_playlist_publishes_cached_tracks_before_delayed_server_response() {
+        assert_cached_catalog_publication(
+            json!({"kind":"playlistTracks","itemId":"playlist","provider":"library"}),
+            "music/playlists/playlist_tracks",
+            json!({"item_id":"playlist","provider_instance_id_or_domain":"library","force_refresh":false,"allow_dynamic_tracks":false}),
+            json!([{"media_type":"track","provider":"source-a","item_id":"track","name":"Cached","position":1}]),
+            json!([{"media_type":"track","provider":"source-a","item_id":"track","name":"Server","position":4}]),
+        );
+    }
+
+    #[test]
+    fn catalog_searches_and_playlist_headers_publish_cache_before_remote_completion() {
+        assert_cached_catalog_publication(
+            json!({"kind":"playlist","itemId":"playlist","provider":"library"}),
+            "music/playlists/get",
+            json!({"item_id":"playlist","provider_instance_id_or_domain":"library"}),
+            json!({"media_type":"playlist","provider":"library","item_id":"playlist","name":"Cached"}),
+            json!({"media_type":"playlist","provider":"library","item_id":"playlist","name":"Server"}),
+        );
+        for (media_type, field) in [("track", "tracks"), ("playlist", "playlists")] {
+            assert_cached_catalog_publication(
+                json!({"kind":"searchMedia","query":"query","mediaType":media_type,"limit":10}),
+                "music/search",
+                json!({"search_query":"query","media_types":[media_type],"limit":10,"library_only":false}),
+                json!({field:[{"media_type":media_type,"provider":"source-a","item_id":"item","name":"Cached"}]}),
+                json!({field:[{"media_type":media_type,"provider":"source-a","item_id":"item","name":"Server"}]}),
+            );
+        }
+    }
+
+    #[test]
+    fn artwork_mappings_publish_cached_metadata_before_remote_completion() {
+        assert_cached_catalog_publication(
+            json!({"kind":"mediaArtwork","item":{
+                "media_type":"artist","item_id":"canonical","provider":"library","name":"Artist",
+                "provider_mappings":[{"item_id":"mapped","provider_domain":"source","provider_instance":"source--one"}]
+            }}),
+            "music/item",
+            json!({"media_type":"artist","item_id":"mapped","provider_instance_id_or_domain":"source--one","allow_update_metadata":false}),
+            json!({"media_type":"artist","item_id":"mapped","provider":"source--one","name":"Cached",
+                "metadata":{"images":[{"type":"thumb","provider":"source","path":"Cached"}]}}),
+            json!({"media_type":"artist","item_id":"mapped","provider":"source--one","name":"Server",
+                "metadata":{"images":[{"type":"thumb","provider":"source","path":"Server"}]}}),
+        );
+    }
+
+    struct ArtworkMappings {
+        started: Arc<std::sync::Mutex<Vec<CatalogQuery>>>,
+        dropped: Arc<std::sync::atomic::AtomicUsize>,
+    }
+
+    struct ArtworkReadGuard(Arc<std::sync::atomic::AtomicUsize>);
+
+    impl Drop for ArtworkReadGuard {
+        fn drop(&mut self) {
+            self.0.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+
+    impl crate::application::repositories::CatalogClient for ArtworkMappings {
+        fn begin_startup(&self) -> Box<dyn Send> {
+            Box::new(())
+        }
+
+        fn load_catalog(
+            &self,
+            _: CatalogQuery,
+            _: bool,
+        ) -> futures_util::future::BoxFuture<'_, Result<CatalogValue, String>> {
+            Box::pin(async { panic!("artwork must observe the existing catalog") })
+        }
+
+        fn observe_catalog(
+            &self,
+            query: CatalogQuery,
+            _: bool,
+        ) -> futures_util::stream::BoxStream<'_, crate::domain::catalog::CatalogLoadSnapshot>
+        {
+            use crate::domain::catalog::{
+                CatalogDataSource, CatalogFreshness, CatalogLoadPhase, CatalogLoadSnapshot,
+                CatalogReadKnowledge,
+            };
+            use futures_util::StreamExt;
+            self.started.lock().unwrap().push(query.clone());
+            let CatalogQuery::ProviderItem {
+                item_id,
+                provider,
+                media_type,
+            } = query
+            else {
+                panic!("expected mapping")
+            };
+            assert_eq!(media_type, crate::domain::media::MediaType::Artist);
+            let item = serde_json::from_value(json!({"media_type":"artist","item_id":item_id,
+                "provider":provider,"name":"Cached","metadata":{"images":[{"type":"thumb","provider":"source","path":"Cached"}]}})).unwrap();
+            let snapshot = CatalogLoadSnapshot {
+                value: Some(CatalogValue::Item(item)),
+                source: Some(CatalogDataSource::Cache),
+                cache_error: None,
+                phase: CatalogLoadPhase::Refreshing,
+                knowledge: CatalogReadKnowledge::ObservedResponse,
+                freshness: CatalogFreshness::Stale,
+                observed_at: None,
+                error: None,
+            };
+            let guard = ArtworkReadGuard(self.dropped.clone());
+            Box::pin(
+                futures_util::stream::once(async move { snapshot })
+                    .chain(futures_util::stream::pending())
+                    .inspect(move |_| {
+                        let _ = &guard;
+                    }),
+            )
+        }
+    }
+
+    #[test]
+    fn artwork_opens_every_mapping_before_refresh_and_drop_releases_every_observer() {
+        use futures_util::FutureExt;
+        let events = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let published = events.clone();
+        let application = application(
+            "http://127.0.0.1:1",
+            EventPublisher::new(move |event| published.lock().unwrap().push(event)),
+        );
+        let started = Arc::new(std::sync::Mutex::new(Vec::new()));
+        let dropped = Arc::new(std::sync::atomic::AtomicUsize::new(0));
+        let client = crate::data::music_assistant::client::MusicAssistantClient::new(
+            "http://127.0.0.1:1",
+            Some(crate::domain::session::AccessToken("synthetic".into())),
+        );
+        let mut services = crate::bootstrap::session::online_services(Arc::new(client));
+        services.catalog = Arc::new(ArtworkMappings {
+            started: started.clone(),
+            dropped: dropped.clone(),
+        });
+        application.coordinator.lock().unwrap().repositories = Some(services);
+        let item = serde_json::from_value(json!({"media_type":"artist","item_id":"canonical","provider":"library","name":"Artist",
+            "provider_mappings": (0..5).map(|id| json!({"item_id":format!("mapped-{id}"),"provider_domain":"source","provider_instance":"source--one"})).collect::<Vec<_>>()
+        })).unwrap();
+        let context = application.query_context().unwrap();
+        let result = crate::application::tests::runtime().block_on(async {
+            application
+                .resolve_media_artwork(context.generation, &item)
+                .now_or_never()
+        });
+        assert!(result.is_none());
+        assert_eq!(started.lock().unwrap().len(), 5);
+        assert_eq!(
+            events
+                .lock()
+                .unwrap()
+                .iter()
+                .filter(|event| matches!(event, ApplicationEvent::CatalogUpdated { .. }))
+                .count(),
+            5
+        );
+        assert_eq!(dropped.load(std::sync::atomic::Ordering::SeqCst), 5);
+    }
+
+    fn assert_cached_catalog_publication(
+        request: serde_json::Value,
+        command: &'static str,
+        arguments: serde_json::Value,
+        cached_response: serde_json::Value,
+        server_response: serde_json::Value,
+    ) {
         use crate::application::events::ApplicationEvent;
         use crate::domain::catalog::{CatalogDataSource, CatalogValue};
         use std::time::Duration;
         let directory = tempfile::tempdir().unwrap();
         let root = directory.path().to_owned();
-        let owner = Arc::new(crate::data::cache::catalog::CatalogCacheOwner::new(
+        let owner = Arc::new(crate::data::cache::catalog::SessionCacheOwner::new(
             move || Ok(root.clone()),
         ));
         let shutdown_owner = owner.clone();
@@ -878,31 +1368,21 @@ mod phase_e_tests {
         let (entered, arrival) = std::sync::mpsc::channel();
         let (release, gate) = std::sync::mpsc::channel();
         let mut reads = 0;
+        let is_artwork = request["kind"] == "mediaArtwork";
+        let mut responses = vec![
+            ("auth/me", json!({"user_id":"user","username":"synthetic","role":"user","enabled":true})),
+            ("info", json!({"server_id":"server","schema_version":42})),
+            (command, cached_response),
+        ];
+        if !is_artwork { responses.push(("providers", json!([]))); }
+        responses.push((command, server_response));
+        if !is_artwork { responses.push(("providers", json!([]))); }
         let (client, worker) =
             crate::data::music_assistant::client::tests::server_with_request_handler(
-                vec![
-                    (
-                        "auth/me",
-                        json!({"user_id":"user","username":"synthetic","role":"user","enabled":true}),
-                    ),
-                    ("info", json!({"server_id":"server","schema_version":42})),
-                    (
-                        "music/playlists/playlist_tracks",
-                        json!([{"media_type":"track","provider":"source-a","item_id":"track","name":"Cached","position":1}]),
-                    ),
-                    ("providers", json!([])),
-                    (
-                        "music/playlists/playlist_tracks",
-                        json!([{"media_type":"track","provider":"source-a","item_id":"track","name":"Server","position":4}]),
-                    ),
-                    ("providers", json!([])),
-                ],
+                responses,
                 move |request| {
-                    if request["command"] == "music/playlists/playlist_tracks" {
-                        assert_eq!(
-                            request["args"],
-                            json!({"item_id":"playlist","provider_instance_id_or_domain":"library","force_refresh":false,"allow_dynamic_tracks":false})
-                        );
+                    if request["command"] == command {
+                        assert_eq!(request["args"], arguments);
                         reads += 1;
                         if reads == 2 {
                             entered.send(()).unwrap();
@@ -927,16 +1407,8 @@ mod phase_e_tests {
             )
             .unwrap(),
         ));
-        let query = || ApplicationQuery::PlaylistTracks {
-            item_id: "playlist".into(),
-            provider: "library".into(),
-            force_refresh: false,
-            allow_dynamic_tracks: false,
-        };
-        assert!(matches!(
-            application.execute_query_sync(query()).unwrap(),
-            QueryResult::Tracks(_)
-        ));
+        let query = || serde_json::from_value::<ApplicationQuery>(request.clone()).unwrap();
+        application.execute_query_sync(query()).unwrap();
         while let Ok(event) = events.try_recv() {
             if let ApplicationEvent::CatalogReadChanged { snapshot, .. } = event {
                 assert!(
@@ -947,29 +1419,52 @@ mod phase_e_tests {
             }
         }
         let pending_application = application.clone();
-        let pending = std::thread::spawn(move || pending_application.execute_query_sync(query()));
+        let pending_query = query();
+        let pending =
+            std::thread::spawn(move || pending_application.execute_query_sync(pending_query));
         arrival.recv_timeout(Duration::from_secs(2)).unwrap();
+        let mut published_cache = false;
         loop {
-            if let ApplicationEvent::CatalogReadChanged { snapshot, .. } =
-                events.recv_timeout(Duration::from_secs(2)).unwrap()
-            {
-                if snapshot.source == Some(CatalogDataSource::Cache) {
-                    let Some(CatalogValue::Tracks(tracks)) = snapshot.value else {
-                        panic!("expected cached tracks")
+            match events.recv_timeout(Duration::from_secs(2)).unwrap() {
+                ApplicationEvent::CatalogUpdated { value, .. } => {
+                    let name = match &value {
+                        CatalogValue::Tracks(items) => &items[0].media.name,
+                        CatalogValue::Playlist(item) => &item.media.name,
+                        CatalogValue::Item(item) => &item.fields().name,
+                        CatalogValue::Search(items) if !items.tracks.is_empty() => {
+                            &items.tracks[0].media.name
+                        }
+                        CatalogValue::Search(items) => &items.playlists[0].media.name,
+                        _ => panic!("unexpected cached value"),
                     };
-                    assert_eq!(tracks[0].media.name, "Cached");
+                    assert_eq!(name, "Cached");
+                    published_cache = true;
+                }
+                ApplicationEvent::CatalogReadChanged { snapshot, .. }
+                    if snapshot.source == Some(CatalogDataSource::Cache) =>
+                {
+                    assert!(published_cache);
                     assert!(!pending.is_finished());
                     break;
                 }
+                _ => {}
             }
         }
         release.send(()).unwrap();
-        let QueryResult::Tracks(tracks) = pending.join().unwrap().unwrap() else {
-            panic!("expected server tracks")
+        let result = pending.join().unwrap().unwrap();
+        let name = match &result {
+            QueryResult::Tracks(items) => &items[0].media.name,
+            QueryResult::Playlist(item) => &item.media.name,
+            QueryResult::MediaArtwork(Some(image)) => &image.path,
+            QueryResult::SearchMedia(items) if !items.tracks.is_empty() => {
+                &items.tracks[0].media.name
+            }
+            QueryResult::SearchMedia(items) => &items.playlists[0].media.name,
+            _ => panic!("unexpected server value"),
         };
-        assert_eq!(tracks[0].media.name, "Server");
+        assert_eq!(name, "Server");
         application.shutdown().unwrap();
-        assert_eq!(worker.join().unwrap().len(), 6);
+        assert_eq!(worker.join().unwrap().len(), if is_artwork { 4 } else { 6 });
     }
 
     #[test]

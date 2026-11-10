@@ -76,6 +76,8 @@ impl ApplicationState {
         self.repositories = None;
         self.user_data = None;
         self.session_generation = self.session_generation.wrapping_add(1);
+        self.event_publisher
+            .publish(super::events::ApplicationEvent::SessionChanged);
     }
 
     // Platform state reads project the active engine without storing duplicate core state.
@@ -153,6 +155,35 @@ impl ApplicationState {
 
 #[cfg(test)]
 pub(super) mod tests {
+    #[test]
+    fn session_generation_change_publishes_android_owner_invalidation() {
+        use crate::application::{
+            events::{ApplicationEvent, EventPublisher},
+            tests, Application,
+        };
+        use std::sync::{
+            atomic::{AtomicUsize, Ordering},
+            Arc,
+        };
+        let changes = Arc::new(AtomicUsize::new(0));
+        let sink = changes.clone();
+        let application = Application::new(
+            tests::environment(),
+            tests::runtime().handle().clone(),
+            EventPublisher::new(move |event| {
+                if matches!(event, ApplicationEvent::SessionChanged) {
+                    sink.fetch_add(1, Ordering::SeqCst);
+                }
+            }),
+            Box::new(tests::EmptySessionStorage),
+        );
+        application
+            .coordinator
+            .lock()
+            .unwrap()
+            .invalidate_session_data();
+        assert_eq!(changes.load(Ordering::SeqCst), 1);
+    }
     use super::ApplicationState;
     use crate::application::session::SessionStorage;
 
