@@ -14,6 +14,12 @@ class UserData extends ChangeNotifier {
   }
 
   final MashinCoreBridgeApi _coreBridge;
+  final ChangeNotifier _favoritesChanges = ChangeNotifier();
+  final ChangeNotifier _playlistsChanges = ChangeNotifier();
+  final Map<String, ChangeNotifier> _playlistChanges = {};
+  bool _hasAppliedSnapshot = false;
+  int _nativeSnapshotRevision = 0;
+  final Map<String, int> _playlistRevisions = {};
   late final StreamSubscription<Map<String, dynamic>> _eventSubscription;
   Future<void>? _snapshotRefresh;
   bool _needsSnapshotRefresh = false;
@@ -45,6 +51,10 @@ class UserData extends ChangeNotifier {
   List<Playlist> get favoritePlaylists => _favoritePlaylists;
   List<Artist> get favoriteArtists => _favoriteArtists;
   List<Playlist> get playlists => _playlists;
+  Listenable get favoritesChanges => _favoritesChanges;
+  Listenable get playlistsChanges => _playlistsChanges;
+  Listenable playlistChanges(String playlistId) =>
+      _playlistChanges.putIfAbsent(playlistId, ChangeNotifier.new);
 
   bool isPrivatePlaylist(Playlist playlist) => _playlists.any(
     (candidate) =>
@@ -59,8 +69,7 @@ class UserData extends ChangeNotifier {
     if (_isDisposed) return;
     final snapshotRevision = ++_snapshotRevision;
     _isLoadingLibraryData = true;
-    _isLoadingFavorites = true;
-    _isLoadingPlaylists = true;
+    _setLibraryLoading(true);
     notifyListeners();
     try {
       if (_isDisposed) return;
@@ -70,9 +79,12 @@ class UserData extends ChangeNotifier {
       }
     } catch (_) {
       if (!_isDisposed && snapshotRevision == _snapshotRevision) {
+        final loadingIds = _loadingPlaylistIds;
         _loadingPlaylistIds = <String>{};
-        _isLoadingFavorites = false;
-        _isLoadingPlaylists = false;
+        _setLibraryLoading(false);
+        for (final itemId in loadingIds) {
+          _playlistChanges[itemId]?.notifyListeners();
+        }
       }
       rethrow;
     } finally {
@@ -184,7 +196,21 @@ class UserData extends ChangeNotifier {
     if (_isDisposed) return;
     try {
       if (event['type'] == 'user_data_changed') {
-        await _refreshSnapshot();
+        final playlist = event['playlist'];
+        if (playlist is! Map) {
+          await _refreshSnapshot();
+        } else {
+          final revision = event['revision'] as int;
+          if (revision <= _nativeSnapshotRevision ||
+              revision <= (_playlistRevisions[playlist['item_id']] ?? 0)) {
+            return;
+          }
+          if (!_applyPlaylistSnapshot(_map(playlist), revision) ||
+              _snapshotRefresh != null ||
+              _isLoadingLibraryData) {
+            await _refreshSnapshot();
+          }
+        }
       }
     } catch (error, stackTrace) {
       FlutterError.reportError(
@@ -221,7 +247,34 @@ class UserData extends ChangeNotifier {
     }
   }
 
+  void _setLibraryLoading(bool isLoading) {
+    final favoritesChanged = _isLoadingFavorites != isLoading;
+    final playlistsChanged = _isLoadingPlaylists != isLoading;
+    _isLoadingFavorites = isLoading;
+    _isLoadingPlaylists = isLoading;
+    if (favoritesChanged) _favoritesChanges.notifyListeners();
+    if (playlistsChanged) _playlistsChanges.notifyListeners();
+  }
+
   void _applySnapshot(Map<String, dynamic> snapshot) {
+    final revision = snapshot['revision'] as int? ?? 0;
+    if (revision < _nativeSnapshotRevision ||
+        _playlistRevisions.values.any((value) => value > revision)) {
+      return;
+    }
+    _nativeSnapshotRevision = revision;
+    _playlistRevisions.removeWhere((_, value) => value <= revision);
+    final previousLoadingFavorites = _isLoadingFavorites;
+    final previousLoadedFavorites = _hasLoadedFavorites;
+    final previousOverrides = _favoriteOverrides;
+    final previousLoadingPlaylists = _isLoadingPlaylists;
+    final previousLoadingIds = _loadingPlaylistIds;
+    final previousTracks = _playlistTracksByPlaylistId;
+    final previousPlaylists = _playlists;
+    final previousFavoriteTracks = _favoriteTracks;
+    final previousFavoriteAlbums = _favoriteAlbums;
+    final previousFavoritePlaylists = _favoritePlaylists;
+    final previousFavoriteArtists = _favoriteArtists;
     _isLoadingFavorites = snapshot['is_loading_favorites'] == true;
     _hasLoadedFavorites = snapshot['has_loaded_favorites'] == true;
     _favoriteOverrides = {
@@ -233,10 +286,22 @@ class UserData extends ChangeNotifier {
     };
     _isLoadingPlaylists = snapshot['is_loading_playlists'] == true;
     final Map<String, dynamic> favorites = _map(snapshot['favorites']);
-    _favoriteTracks = _readTracks(favorites['tracks'], true);
-    _favoriteAlbums = _readAlbums(favorites['albums'], true);
-    _favoritePlaylists = _readPlaylists(favorites['playlists'], true);
-    _favoriteArtists = _readArtists(favorites['artists'], true);
+    _favoriteTracks = _retainMediaList(
+      _favoriteTracks,
+      _readTracks(favorites['tracks'], true),
+    );
+    _favoriteAlbums = _retainMediaList(
+      _favoriteAlbums,
+      _readAlbums(favorites['albums'], true),
+    );
+    _favoritePlaylists = _retainMediaList(
+      _favoritePlaylists,
+      _readPlaylists(favorites['playlists'], true),
+    );
+    _favoriteArtists = _retainMediaList(
+      _favoriteArtists,
+      _readArtists(favorites['artists'], true),
+    );
     final favoriteItems = <MediaItem>[
       ..._favoriteTracks,
       ..._favoriteAlbums,
@@ -262,19 +327,103 @@ class UserData extends ChangeNotifier {
         if (value['is_loading_tracks'] == true) {
           loadingPlaylistIds.add(playlist.itemId);
         }
-        tracksByPlaylist[playlist.itemId] = _readTracks(value['items'], null);
+        tracksByPlaylist[playlist.itemId] = _retainMediaList(
+          previousTracks[playlist.itemId] ?? const <Track>[],
+          _readTracks(value['items'], null),
+        );
       } on FormatException {
         continue;
       }
     }
     playlists.sort(_comparePlaylists);
-    _playlists = List<Playlist>.unmodifiable(playlists);
+    _playlists = _retainMediaList(
+      _playlists,
+      List<Playlist>.unmodifiable(playlists),
+    );
     _loadingPlaylistIds = loadingPlaylistIds;
     _playlistTracksByPlaylistId = Map<String, List<Track>>.unmodifiable(
       tracksByPlaylist,
     );
-    notifyListeners();
+    final favoritesChanged =
+        previousLoadingFavorites != _isLoadingFavorites ||
+        previousLoadedFavorites != _hasLoadedFavorites ||
+        !mapEquals(previousOverrides, _favoriteOverrides) ||
+        !identical(previousFavoriteTracks, _favoriteTracks) ||
+        !identical(previousFavoriteAlbums, _favoriteAlbums) ||
+        !identical(previousFavoritePlaylists, _favoritePlaylists) ||
+        !identical(previousFavoriteArtists, _favoriteArtists);
+    final playlistsChanged =
+        previousLoadingPlaylists != _isLoadingPlaylists ||
+        !identical(previousPlaylists, _playlists);
+    final changedPlaylistIds = <String>{
+      for (final itemId in {...previousTracks.keys, ...tracksByPlaylist.keys})
+        if (!identical(previousTracks[itemId], tracksByPlaylist[itemId]) ||
+            previousLoadingIds.contains(itemId) !=
+                loadingPlaylistIds.contains(itemId))
+          itemId,
+    };
+    final shouldNotify =
+        !_hasAppliedSnapshot ||
+        favoritesChanged ||
+        playlistsChanged ||
+        changedPlaylistIds.isNotEmpty;
+    _hasAppliedSnapshot = true;
+    if (favoritesChanged) _favoritesChanges.notifyListeners();
+    if (playlistsChanged) _playlistsChanges.notifyListeners();
+    for (final itemId in changedPlaylistIds) {
+      _playlistChanges[itemId]?.notifyListeners();
+    }
+    if (shouldNotify) notifyListeners();
   }
+
+  bool _applyPlaylistSnapshot(Map<String, dynamic> value, int revision) {
+    final playlist = Playlist.fromJson(value);
+    final index = _playlists.indexWhere(
+      (item) =>
+          item.itemId == playlist.itemId && item.provider == playlist.provider,
+    );
+    if (index < 0) return false;
+    _playlistRevisions[playlist.itemId] = revision;
+    final previous =
+        _playlistTracksByPlaylistId[playlist.itemId] ?? const <Track>[];
+    final tracks = _retainMediaList(
+      previous,
+      _readTracks(value['items'], null),
+    );
+    final isLoading = value['is_loading_tracks'] == true;
+    final tracksChanged =
+        !identical(previous, tracks) ||
+        _loadingPlaylistIds.contains(playlist.itemId) != isLoading;
+    final metadataChanged = !hasSameMediaContent(_playlists[index], playlist);
+    if (!tracksChanged && !metadataChanged) return true;
+    if (metadataChanged) {
+      final playlists = _playlists.toList();
+      playlists[index] = playlist;
+      playlists.sort(_comparePlaylists);
+      _playlists = List.unmodifiable(playlists);
+    }
+    if (tracksChanged) {
+      _playlistTracksByPlaylistId = Map.unmodifiable({
+        ..._playlistTracksByPlaylistId,
+        playlist.itemId: tracks,
+      });
+      _loadingPlaylistIds = {..._loadingPlaylistIds};
+      if (isLoading) {
+        _loadingPlaylistIds.add(playlist.itemId);
+      } else {
+        _loadingPlaylistIds.remove(playlist.itemId);
+      }
+    }
+    if (metadataChanged) _playlistsChanges.notifyListeners();
+    if (tracksChanged) _playlistChanges[playlist.itemId]?.notifyListeners();
+    notifyListeners();
+    return true;
+  }
+
+  List<T> _retainMediaList<T extends MediaItem>(
+    List<T> previous,
+    List<T> incoming,
+  ) => hasSameMediaListContent(previous, incoming) ? previous : incoming;
 
   List<Track> _readTracks(Object? value, bool? favorite) =>
       List<Track>.unmodifiable(
@@ -414,6 +563,11 @@ class UserData extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     unawaited(_eventSubscription.cancel());
+    _favoritesChanges.dispose();
+    _playlistsChanges.dispose();
+    for (final changes in _playlistChanges.values) {
+      changes.dispose();
+    }
     super.dispose();
   }
 

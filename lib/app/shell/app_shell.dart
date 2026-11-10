@@ -240,7 +240,7 @@ class _AppShellState extends State<AppShell> {
   @override
   void dispose() {
     _desktopSearchController.dispose();
-    _observedUserData?.removeListener(_onUserDataChanged);
+    _observedUserData?.playlistsChanges.removeListener(_onUserDataChanged);
     widget.session.removeListener(_onSessionChanged);
     widget.navigationObserver.removeListener(_onNavigationChanged);
     super.dispose();
@@ -401,12 +401,12 @@ class _AppShellState extends State<AppShell> {
                                   _sidebarPlaylists[index];
 
                               return _DesktopSidebarPlaylistItem(
+                                key: ValueKey((
+                                  playlist.provider,
+                                  playlist.itemId,
+                                )),
                                 playlist: playlist,
-                                tracks:
-                                    _userDataController?.tracksForPlaylist(
-                                      playlist.itemId,
-                                    ) ??
-                                    const <Track>[],
+                                userDataController: _userDataController,
                                 onTap: () => _openPlaylist(playlist),
                                 onPlay: () => _playSidebarPlaylist(playlist),
                                 onContextMenu: (Offset position) =>
@@ -1183,9 +1183,9 @@ class _AppShellState extends State<AppShell> {
   void _observeUserData() {
     final UserData? controller = _userDataController;
     if (identical(controller, _observedUserData)) return;
-    _observedUserData?.removeListener(_onUserDataChanged);
+    _observedUserData?.playlistsChanges.removeListener(_onUserDataChanged);
     _observedUserData = controller;
-    controller?.addListener(_onUserDataChanged);
+    controller?.playlistsChanges.addListener(_onUserDataChanged);
   }
 
   void _onUserDataChanged() {
@@ -1500,15 +1500,16 @@ class _DesktopNavItemState extends State<_DesktopNavItem> {
 
 class _DesktopSidebarPlaylistItem extends StatefulWidget {
   const _DesktopSidebarPlaylistItem({
+    super.key,
     required this.playlist,
-    required this.tracks,
+    required this.userDataController,
     required this.onTap,
     required this.onPlay,
     required this.onContextMenu,
   });
 
   final Playlist playlist;
-  final List<Track> tracks;
+  final UserData? userDataController;
   final VoidCallback onTap;
   final VoidCallback onPlay;
   final ValueChanged<Offset> onContextMenu;
@@ -1523,6 +1524,8 @@ class _DesktopSidebarPlaylistItemState
   bool _isHovered = false;
   bool _isCoverHovered = false;
   bool _isPlayHovered = false;
+  List<Track>? _durationTracks;
+  int _totalSeconds = 0;
 
   void _setHovered(bool value) {
     if (_isHovered == value) {
@@ -1556,19 +1559,30 @@ class _DesktopSidebarPlaylistItemState
 
   @override
   Widget build(BuildContext context) {
+    final controller = widget.userDataController;
+    if (controller == null) return _buildItem(context);
+    return ListenableBuilder(
+      listenable: controller.playlistChanges(widget.playlist.itemId),
+      builder: (context, _) => _buildItem(context),
+    );
+  }
+
+  Widget _buildItem(BuildContext context) {
     final colors = context.mashinColors;
     final Playlist playlist = widget.playlist;
-    final List<Track> tracks = widget.tracks;
+    final tracks =
+        widget.userDataController?.tracksForPlaylist(playlist.itemId) ??
+        const <Track>[];
     final String title = playlist.name.trim().isEmpty
         ? 'Unknown Playlist'
         : playlist.name.trim();
     final String? coverUrl = playlist.imageUriForSize(40)?.trim();
-    final int totalSeconds = tracks.fold<int>(
-      0,
-      (int sum, Track track) => sum + track.duration,
-    );
-    final int hours = totalSeconds ~/ 3600;
-    final int minutes = (totalSeconds % 3600) ~/ 60;
+    if (!identical(_durationTracks, tracks)) {
+      _durationTracks = tracks;
+      _totalSeconds = tracks.fold<int>(0, (sum, track) => sum + track.duration);
+    }
+    final int hours = _totalSeconds ~/ 3600;
+    final int minutes = (_totalSeconds % 3600) ~/ 60;
     final String totalDurationText = hours > 0
         ? '$hours Std. $minutes Min.'
         : '$minutes Min.';

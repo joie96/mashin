@@ -49,7 +49,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
-    widget.userDataController?.addListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.addListener(_onUserDataChanged);
 
     if (widget.desktopSearchDriven) {
       _syncDesktopQuery(widget.desktopSearchQuery);
@@ -79,7 +79,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
   void dispose() {
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
-    widget.userDataController?.removeListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.removeListener(
+      _onUserDataChanged,
+    );
     super.dispose();
   }
 

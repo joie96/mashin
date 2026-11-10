@@ -48,7 +48,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     )..addListener(_onControllerChanged);
-    widget.userDataController?.addListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.addListener(_onUserDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
         _searchFocusNode.requestFocus();
@@ -68,7 +68,9 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
     _searchFocusNode.dispose();
     _controller.removeListener(_onControllerChanged);
     _controller.dispose();
-    widget.userDataController?.removeListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.removeListener(
+      _onUserDataChanged,
+    );
     super.dispose();
   }
 

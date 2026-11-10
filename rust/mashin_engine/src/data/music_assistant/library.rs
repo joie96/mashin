@@ -288,6 +288,7 @@ impl MusicAssistantClient {
             .load_private_playlist_metadata(catalog, user_id, true, &mut publisher)
             .await?;
         Ok(UserDataSnapshot {
+            revision: 0,
             favorites,
             playlists,
             is_loading_favorites: false,

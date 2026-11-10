@@ -104,8 +104,23 @@ pub(crate) async fn load_initial_playlist_tracks(
                     provider: "library".into(),
                     allow_dynamic_tracks: false,
                 };
+                let mut previous_items = playlist.items;
+                let mut has_published = !playlist.is_loading_tracks;
                 catalog
                     .observe_catalog(query, false)
+                    .filter_map(move |mut snapshot| {
+                        if snapshot.knowledge == CatalogReadKnowledge::ObservedResponse {
+                            if let Some(CatalogValue::Tracks(items)) = &snapshot.value {
+                                if has_published && previous_items == *items {
+                                    snapshot.value = None;
+                                } else {
+                                    previous_items = items.clone();
+                                    has_published = true;
+                                }
+                            }
+                        }
+                        futures_util::future::ready(Some(snapshot))
+                    })
                     .map(move |snapshot| (item_id.clone(), snapshot))
             });
         let mut pending = stream::select_all(observations);
@@ -215,7 +230,7 @@ pub(super) mod tests {
                 self.release.notified().await;
                 completed
             });
-            Box::pin(stream::iter([cached]).chain(remote))
+            Box::pin(stream::iter([cached.clone(), cached]).chain(remote))
         }
     }
 
@@ -285,11 +300,8 @@ pub(super) mod tests {
             assert_eq!(result.is_ok(), phase == CatalogLoadPhase::Ready);
             if phase == CatalogLoadPhase::Ready {
                 assert!(received.recv().await.unwrap().is_empty());
-            } else {
-                while let Some(items) = received.recv().await {
-                    assert_eq!(items, cached);
-                }
             }
+            assert!(received.recv().await.is_none());
         }
     }
 }

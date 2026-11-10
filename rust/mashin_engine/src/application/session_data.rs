@@ -123,7 +123,7 @@ impl Application {
             )
             .await;
             if refreshed.is_ok() {
-                events.publish(ApplicationEvent::UserDataChanged);
+                events.publish(ApplicationEvent::UserDataChanged { playlist: None, revision: None });
             }
         })?;
         result.map_err(ApplicationError::command_failed)

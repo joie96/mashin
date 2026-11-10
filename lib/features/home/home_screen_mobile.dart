@@ -50,7 +50,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     );
-    widget.userDataController?.addListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.addListener(_onUserDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) unawaited(_controller.load());
     });
@@ -71,7 +71,9 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
   @override
   void dispose() {
     _controller.dispose();
-    widget.userDataController?.removeListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.removeListener(
+      _onUserDataChanged,
+    );
     super.dispose();
   }
 

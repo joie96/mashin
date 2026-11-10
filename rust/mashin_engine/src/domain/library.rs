@@ -28,6 +28,9 @@ pub(crate) struct PrivatePlaylist {
 
 #[derive(Debug, Clone, Default, PartialEq, Serialize, Deserialize)]
 pub(crate) struct UserDataSnapshot {
+    /// Orders session-local UI publications, not server data or persisted cache entries.
+    #[serde(default)]
+    pub(crate) revision: u64,
     #[serde(default)]
     pub(crate) favorites: Favorites,
     #[serde(default)]

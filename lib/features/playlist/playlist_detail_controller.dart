@@ -21,7 +21,8 @@ class PlaylistDetailController extends ChangeNotifier {
          itemId: itemId,
          provider: providerInstanceIdOrDomain,
        ) {
-    userDataController?.addListener(_onUserDataChanged);
+    userDataController?.favoritesChanges.addListener(_onUserDataChanged);
+    userDataController?.playlistsChanges.addListener(_onUserDataChanged);
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
     _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
       _onMediaReadInvalidated,
@@ -58,6 +59,7 @@ class PlaylistDetailController extends ChangeNotifier {
   bool _isPlaylistDeleted = false;
   bool _isDisposed = false;
   bool _isReadingSnapshot = false;
+  String? _observedPrivatePlaylistId;
   int _loadGeneration = 0;
   bool _isPageVisible = true;
   bool _requiresReload = false;
@@ -119,7 +121,14 @@ class PlaylistDetailController extends ChangeNotifier {
     _readStatusNotifier.dispose();
     _queryScope.cancel();
     _loadGeneration++;
-    userDataController?.removeListener(_onUserDataChanged);
+    userDataController?.favoritesChanges.removeListener(_onUserDataChanged);
+    userDataController?.playlistsChanges.removeListener(_onUserDataChanged);
+    final playlistId = _observedPrivatePlaylistId;
+    if (playlistId != null) {
+      userDataController
+          ?.playlistChanges(playlistId)
+          .removeListener(_onUserDataChanged);
+    }
     super.dispose();
   }
 
@@ -460,6 +469,18 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   void _loadPrivatePlaylist(Playlist playlist, List<Track> storedTracks) {
+    if (_observedPrivatePlaylistId != playlist.itemId) {
+      final previousId = _observedPrivatePlaylistId;
+      if (previousId != null) {
+        userDataController
+            ?.playlistChanges(previousId)
+            .removeListener(_onUserDataChanged);
+      }
+      _observedPrivatePlaylistId = playlist.itemId;
+      userDataController
+          ?.playlistChanges(playlist.itemId)
+          .addListener(_onUserDataChanged);
+    }
     _hasLoadedPrivatePlaylist = true;
     _playlist = userDataController?.withFavoriteStatus(playlist) ?? playlist;
 

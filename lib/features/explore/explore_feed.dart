@@ -55,7 +55,7 @@ class _ExploreFeedState extends State<ExploreFeed> {
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
     );
-    widget.userDataController?.addListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.addListener(_onUserDataChanged);
     final controller = _controller;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted && identical(controller, _controller)) {
@@ -81,7 +81,9 @@ class _ExploreFeedState extends State<ExploreFeed> {
     super.didUpdateWidget(oldWidget);
     if (oldWidget.userDataController != widget.userDataController ||
         oldWidget.coreBridge != widget.coreBridge) {
-      oldWidget.userDataController?.removeListener(_onUserDataChanged);
+      oldWidget.userDataController?.favoritesChanges.removeListener(
+        _onUserDataChanged,
+      );
       _controller.dispose();
       _initializeController();
     }
@@ -89,7 +91,9 @@ class _ExploreFeedState extends State<ExploreFeed> {
 
   @override
   void dispose() {
-    widget.userDataController?.removeListener(_onUserDataChanged);
+    widget.userDataController?.favoritesChanges.removeListener(
+      _onUserDataChanged,
+    );
     _controller.dispose();
     super.dispose();
   }

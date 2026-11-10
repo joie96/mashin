@@ -913,7 +913,7 @@ impl Application {
                                     }
                                     if update.items != previous {
                                         events.publish(crate::application::events::ApplicationEvent::ProviderInstancesChanged);
-                                        events.publish(crate::application::events::ApplicationEvent::UserDataChanged);
+                                        events.publish(crate::application::events::ApplicationEvent::UserDataChanged { playlist: None, revision: None });
                                         events.publish(crate::application::events::ApplicationEvent::RecommendationsChanged);
                                     }
                                 }

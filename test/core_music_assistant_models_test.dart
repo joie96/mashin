@@ -86,7 +86,9 @@ class _PendingUserDataBridge extends _CatalogEventBridge {
   Map<String, dynamic> createSnapshot({
     bool hasItems = true,
     bool isLoading = false,
+    int revision = 0,
   }) => {
+    'revision': revision,
     'has_loaded_favorites': true,
     'is_loading_favorites': isLoading,
     'is_loading_playlists': isLoading,
@@ -713,6 +715,218 @@ void main() {
       expect(item.imageUriForSize(80), isNotNull);
       expect(item.imageUriForSize(80), item.mediaItem.imageUriForSize(80));
     }
+  });
+
+  test(
+    'playlist deltas retain unrelated data and notify only their own listeners',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final loading = userData.loadLibraryData();
+      bridge.initial.complete(bridge.createSnapshot(isLoading: true));
+      await loading;
+      final favorites = userData.favoriteTracks;
+      final playlists = userData.playlists;
+      var favoriteChanges = 0;
+      var playlistChanges = 0;
+      var trackChanges = 0;
+      userData.favoritesChanges.addListener(() => favoriteChanges++);
+      userData.playlistsChanges.addListener(() => playlistChanges++);
+      userData.playlistChanges('playlist-id').addListener(() => trackChanges++);
+      var revision = 0;
+      void publish({String name = 'track', bool isEmpty = false}) {
+        bridge.updates.add({
+          'type': 'user_data_changed',
+          'revision': ++revision,
+          'playlist': _mediaJson('playlist')
+            ..['is_loading_tracks'] = false
+            ..['items'] = [if (!isEmpty) _mediaJson('track')..['name'] = name],
+        });
+      }
+
+      publish();
+      await Future<void>.delayed(Duration.zero);
+      final tracks = userData.tracksForPlaylist('playlist-id');
+      expect(tracks, hasLength(1));
+      expect(userData.isLoadingPlaylistTracks('playlist-id'), isFalse);
+      publish();
+      await Future<void>.delayed(Duration.zero);
+      expect(userData.tracksForPlaylist('playlist-id'), same(tracks));
+      expect(trackChanges, 1);
+      publish(name: 'Changed');
+      await Future<void>.delayed(Duration.zero);
+      expect(userData.tracksForPlaylist('playlist-id').single.name, 'Changed');
+      publish(isEmpty: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(userData.tracksForPlaylist('playlist-id'), isEmpty);
+      expect(trackChanges, 3);
+      expect(favoriteChanges, 0);
+      expect(playlistChanges, 0);
+      expect(userData.favoriteTracks, same(favorites));
+      expect(userData.playlists, same(playlists));
+      expect(bridge.snapshots, isEmpty);
+    },
+  );
+
+  test('playlist deltas retire older in-flight full snapshots', () async {
+    final bridge = _PendingUserDataBridge();
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(() async {
+      userData.dispose();
+      await bridge.updates.close();
+    });
+    final loading = userData.loadLibraryData();
+    bridge.initial.complete(bridge.createSnapshot());
+    await loading;
+    final refresh = userData.refreshLibrarySnapshot();
+    await Future<void>.delayed(Duration.zero);
+    final updatedPlaylist = _mediaJson('playlist')
+      ..['items'] = [_mediaJson('track')..['name'] = 'New'];
+    bridge.updates.add({
+      'type': 'user_data_changed',
+      'playlist': updatedPlaylist,
+      'revision': 1,
+    });
+    expect(userData.tracksForPlaylist('playlist-id').single.name, 'New');
+    bridge.snapshots.first.complete(bridge.createSnapshot());
+    await Future<void>.delayed(Duration.zero);
+    expect(userData.tracksForPlaylist('playlist-id').single.name, 'New');
+    expect(bridge.snapshots, hasLength(2));
+    bridge.snapshots.last.complete(
+      bridge.createSnapshot(revision: 1)..['playlists'] = [updatedPlaylist],
+    );
+    await refresh;
+    expect(userData.tracksForPlaylist('playlist-id').single.name, 'New');
+  });
+
+  test(
+    'targeted metadata changes notify playlists without changing favorites',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final loading = userData.loadLibraryData();
+      bridge.initial.complete(bridge.createSnapshot());
+      await loading;
+      var playlistsChanged = 0;
+      var favoritesChanged = 0;
+      userData.playlistsChanges.addListener(() => playlistsChanged++);
+      userData.favoritesChanges.addListener(() => favoritesChanged++);
+      bridge.updates.add({
+        'type': 'user_data_changed',
+        'revision': 1,
+        'playlist': _mediaJson('playlist')..['name'] = 'Renamed',
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(userData.playlists.single.name, 'Renamed');
+      expect(playlistsChanged, 1);
+      expect(favoritesChanged, 0);
+      expect(bridge.snapshots, isEmpty);
+    },
+  );
+
+  test(
+    'playlist revisions reject stale deltas without losing other playlists',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      Map<String, dynamic> playlist(String itemId, String name) =>
+          _mediaJson('playlist')
+            ..['item_id'] = itemId
+            ..['items'] = [_mediaJson('track')..['name'] = name];
+      final loading = userData.loadLibraryData();
+      bridge.initial.complete(
+        bridge.createSnapshot(revision: 4)
+          ..['playlists'] = [
+            playlist('playlist-id', 'Original'),
+            playlist('other', 'Original'),
+          ],
+      );
+      await loading;
+      void publish(String itemId, String name, int revision) =>
+          bridge.updates.add({
+            'type': 'user_data_changed',
+            'revision': revision,
+            'playlist': playlist(itemId, name),
+          });
+      publish('other', 'Other new', 6);
+      publish('playlist-id', 'First new', 5);
+      publish('other', 'Stale', 5);
+      expect(userData.tracksForPlaylist('other').single.name, 'Other new');
+      expect(
+        userData.tracksForPlaylist('playlist-id').single.name,
+        'First new',
+      );
+      final refresh = userData.refreshLibrarySnapshot();
+      await Future<void>.delayed(Duration.zero);
+      bridge.snapshots.single.complete(
+        bridge.createSnapshot(revision: 8)
+          ..['playlists'] = [
+            playlist('playlist-id', 'Snapshot'),
+            playlist('other', 'Snapshot'),
+          ],
+      );
+      await refresh;
+      publish('playlist-id', 'Delayed', 7);
+      expect(userData.tracksForPlaylist('playlist-id').single.name, 'Snapshot');
+      expect(bridge.snapshots, hasLength(1));
+    },
+  );
+
+  test('area listeners observe loading starts and failures', () async {
+    final bridge = _PendingUserDataBridge();
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(() async {
+      userData.dispose();
+      await bridge.updates.close();
+    });
+    final favoriteLoading = <bool>[];
+    final playlistLoading = <bool>[];
+    userData.favoritesChanges.addListener(
+      () => favoriteLoading.add(userData.isLoadingFavorites),
+    );
+    userData.playlistsChanges.addListener(
+      () => playlistLoading.add(userData.isLoadingPlaylists),
+    );
+    final loading = userData.loadLibraryData();
+    bridge.initial.completeError(StateError('load failed'));
+    await expectLater(loading, throwsStateError);
+    expect(favoriteLoading, [true, false]);
+    expect(playlistLoading, [true, false]);
+  });
+
+  test('identical full snapshots preserve lists and do not notify', () async {
+    final bridge = _PendingUserDataBridge();
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(() async {
+      userData.dispose();
+      await bridge.updates.close();
+    });
+    final loading = userData.loadLibraryData();
+    bridge.initial.complete(bridge.createSnapshot());
+    await loading;
+    final tracks = userData.favoriteTracks;
+    final playlists = userData.playlists;
+    var changes = 0;
+    userData.addListener(() => changes++);
+    final refresh = userData.refreshLibrarySnapshot();
+    await Future<void>.delayed(Duration.zero);
+    bridge.snapshots.single.complete(bridge.createSnapshot());
+    await refresh;
+    expect(changes, 0);
+    expect(userData.favoriteTracks, same(tracks));
+    expect(userData.playlists, same(playlists));
   });
 
   test(

@@ -413,7 +413,17 @@ impl Application {
             &update,
             InitialUserDataUpdate::PlaylistPage(_) | InitialUserDataUpdate::Playlists(_)
         );
-        self.publish_initial_user_data(generation, |data| match update {
+        let is_playlist_update = matches!(&update, InitialUserDataUpdate::PlaylistTracks { .. });
+        let mut changed_playlist = None;
+        let mut coordinator = self
+            .coordinator
+            .lock()
+            .map_err(|_| "coordinator lock poisoned")?;
+        let revision = coordinator
+            .user_data
+            .as_ref()
+            .map_or(1, |data| data.snapshot.revision + 1);
+        coordinator.update_initial_user_data(generation, |data| match update {
             InitialUserDataUpdate::Favorites(favorites) => {
                 data.snapshot.favorites = favorites;
                 data.snapshot.has_loaded_favorites = true;
@@ -440,11 +450,28 @@ impl Application {
                     if playlist.is_loading_tracks || playlist.items != items {
                         playlist.items = items;
                         playlist.is_loading_tracks = false;
+                        changed_playlist = Some(playlist.clone());
                     }
                 }
             }
             InitialUserDataUpdate::UserIdentity(_) => unreachable!(),
         })?;
+        if !is_playlist_update || changed_playlist.is_some() {
+            coordinator
+                .user_data
+                .as_mut()
+                .expect("library state initialized")
+                .snapshot
+                .revision = revision;
+        }
+        let events = coordinator.session_events();
+        drop(coordinator);
+        if !is_playlist_update || changed_playlist.is_some() {
+            events.publish(ApplicationEvent::UserDataChanged {
+                playlist: changed_playlist,
+                revision: Some(revision),
+            });
+        }
         if should_hydrate {
             self.schedule_playlist_hydration(generation)?;
         }
@@ -459,10 +486,23 @@ impl Application {
             .coordinator
             .lock()
             .map_err(|_| "coordinator lock poisoned")?;
+        let revision = coordinator
+            .user_data
+            .as_ref()
+            .map_or(1, |data| data.snapshot.revision + 1);
         coordinator.update_initial_user_data(generation, update)?;
+        coordinator
+            .user_data
+            .as_mut()
+            .expect("library state initialized")
+            .snapshot
+            .revision = revision;
         let events = coordinator.session_events();
         drop(coordinator);
-        events.publish(ApplicationEvent::UserDataChanged);
+        events.publish(ApplicationEvent::UserDataChanged {
+            playlist: None,
+            revision: None,
+        });
         Ok(())
     }
     pub(crate) fn publish_recommendations_changed(&self, generation: u64) -> Result<(), String> {
@@ -790,10 +830,19 @@ mod tests {
         services.catalog = catalog.clone();
         let changed = Arc::new(tokio::sync::Notify::new());
         let published = changed.clone();
+        let playlist_events = Arc::new(Mutex::new(Vec::new()));
+        let recorded = playlist_events.clone();
         let application = Application::new(
             crate::application::tests::environment(),
             tokio::runtime::Handle::current(),
-            EventPublisher::new(move |_| {
+            EventPublisher::new(move |event| {
+                if let ApplicationEvent::UserDataChanged {
+                    playlist: Some(playlist),
+                    ..
+                } = event
+                {
+                    recorded.lock().unwrap().push(playlist);
+                }
                 published.notify_one();
             }),
             Box::new(crate::application::tests::EmptySessionStorage),
@@ -845,6 +894,45 @@ mod tests {
         })
         .await
         .unwrap();
+        let cached_tracks = playlist_events.lock().unwrap()[0].items.clone();
+        assert_eq!(playlist_events.lock().unwrap().len(), 1);
+        application
+            .apply_initial_user_data_update(
+                generation,
+                InitialUserDataUpdate::PlaylistTracks {
+                    item_id: MediaId("42".into()),
+                    items: cached_tracks.clone(),
+                },
+            )
+            .unwrap();
+        assert_eq!(playlist_events.lock().unwrap().len(), 1);
+        let mut updated_tracks = cached_tracks;
+        updated_tracks[0].duration = 121;
+        application
+            .apply_initial_user_data_update(
+                generation,
+                InitialUserDataUpdate::PlaylistTracks {
+                    item_id: MediaId("42".into()),
+                    items: updated_tracks,
+                },
+            )
+            .unwrap();
+        application
+            .apply_initial_user_data_update(
+                generation,
+                InitialUserDataUpdate::PlaylistTracks {
+                    item_id: MediaId("42".into()),
+                    items: Vec::new(),
+                },
+            )
+            .unwrap();
+        {
+            let events = playlist_events.lock().unwrap();
+            assert_eq!(events.len(), 3);
+            assert_eq!(events[1].items[0].duration, 121);
+            assert!(events[2].items.is_empty());
+            assert!(events.iter().all(|playlist| !playlist.is_loading_tracks));
+        }
         application
             .apply_initial_user_data_update(
                 generation,
@@ -1343,7 +1431,7 @@ mod tests {
                         .lock()
                         .unwrap()
                         .iter()
-                        .filter(|event| matches!(event, ApplicationEvent::UserDataChanged))
+                        .filter(|event| matches!(event, ApplicationEvent::UserDataChanged { .. }))
                         .count(),
                     1
                 );
@@ -1443,7 +1531,7 @@ mod tests {
                         .lock()
                         .unwrap()
                         .iter()
-                        .filter(|event| matches!(event, ApplicationEvent::UserDataChanged))
+                        .filter(|event| matches!(event, ApplicationEvent::UserDataChanged { .. }))
                         .count(),
                     if should_create_playlist && !should_change_session {
                         2

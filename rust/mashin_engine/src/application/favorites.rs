@@ -74,7 +74,7 @@ impl Application {
                 return Err(error);
             }
         }
-        events.publish(ApplicationEvent::UserDataChanged);
+        events.publish(ApplicationEvent::UserDataChanged { playlist: None, revision: None });
         self.read_user_data_sync()
     }
     // Mutation success and authoritative rating must both hold before publication.
@@ -163,7 +163,7 @@ impl Application {
                     }
                 }
             };
-            events.publish(ApplicationEvent::UserDataChanged);
+            events.publish(ApplicationEvent::UserDataChanged { playlist: None, revision: None });
             changes.notify_waiters();
             if let Err(error) = outcome {
                 events.publish(ApplicationEvent::Error {

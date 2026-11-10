@@ -102,6 +102,174 @@ void main() {
   });
 
   testWidgets(
+    'remounted images reuse bytes immediately while native validation is pending',
+    (tester) async {
+      final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+      final pending = Completer<ImageReadSnapshot>();
+      var reads = 0;
+      MediaImage.configureImageLoader((request, refresh) async {
+        reads++;
+        return reads == 1 ? ImageReadSnapshot(bytes: bytes) : pending.future;
+      });
+      final source = MediaItemImage(
+        type: 'thumb',
+        path: '',
+        provider: 'builtin',
+        remotelyAccessible: false,
+        proxyId: 'a' * 64,
+      ).getProxyPath()!;
+      Widget image() => MaterialApp(
+        home: MediaImage(
+          source: source,
+          fit: BoxFit.cover,
+          fallback: const Text('fallback'),
+        ),
+      );
+      await tester.pumpWidget(image());
+      await tester.pumpAndSettle();
+      final original =
+          tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(image());
+      expect(find.byType(Image), findsOneWidget);
+      expect(reads, 2);
+      final restored =
+          tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+      expect(restored.bytes, same(original.bytes));
+      pending.complete(ImageReadSnapshot(bytes: Uint8List.fromList(bytes)));
+      await tester.pumpAndSettle();
+      final validated =
+          tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+      expect(validated.bytes, same(original.bytes));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets(
+    'retained images evict the least recently used entry at the entry limit',
+    (tester) async {
+      final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+      final pending = Completer<ImageReadSnapshot>();
+      var isBlocked = false;
+      MediaImage.configureImageLoader(
+        (request, refresh) async => isBlocked
+            ? pending.future
+            : ImageReadSnapshot(bytes: Uint8List.fromList(bytes)),
+      );
+      Widget image(int index) => MaterialApp(
+        home: MediaImage(
+          source: MediaItemImage(
+            type: 'thumb',
+            path: '',
+            provider: 'builtin',
+            remotelyAccessible: false,
+            proxyId: index.toRadixString(16).padLeft(64, '0'),
+          ).getProxyPath()!,
+          fit: BoxFit.cover,
+          fallback: const Text('fallback'),
+        ),
+      );
+      for (var index = 0; index < 256; index++) {
+        await tester.pumpWidget(image(index));
+        await tester.pumpAndSettle();
+      }
+      await tester.pumpWidget(image(0));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(image(256));
+      await tester.pumpAndSettle();
+      isBlocked = true;
+      await tester.pumpWidget(image(1));
+      expect(find.text('fallback'), findsOneWidget);
+      await tester.pumpWidget(image(0));
+      expect(find.byType(Image), findsOneWidget);
+      pending.complete(ImageReadSnapshot(bytes: bytes));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
+  testWidgets('retained image bytes stay within the presentation byte budget', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    final padded = Uint8List(4 * 1024 * 1024 + bytes.length)
+      ..setRange(0, bytes.length, bytes);
+    final pending = Completer<ImageReadSnapshot>();
+    var isBlocked = false;
+    MediaImage.configureImageLoader(
+      (request, refresh) async => isBlocked
+          ? pending.future
+          : ImageReadSnapshot(bytes: Uint8List.fromList(padded)),
+    );
+    Widget image(int index) => MaterialApp(
+      home: MediaImage(
+        source: MediaItemImage(
+          type: 'thumb',
+          path: '',
+          provider: 'builtin',
+          remotelyAccessible: false,
+          proxyId: index.toRadixString(16).padLeft(64, '0'),
+        ).getProxyPath()!,
+        fit: BoxFit.cover,
+        fallback: const Text('fallback'),
+      ),
+    );
+    for (var index = 0; index < 4; index++) {
+      await tester.pumpWidget(image(index));
+      await tester.pumpAndSettle();
+    }
+    isBlocked = true;
+    await tester.pumpWidget(image(0));
+    expect(find.text('fallback'), findsOneWidget);
+    await tester.pumpWidget(image(1));
+    expect(find.byType(Image), findsOneWidget);
+    pending.complete(ImageReadSnapshot(bytes: bytes));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets(
+    'source invalidation discards retained bytes even without a visible subscriber',
+    (tester) async {
+      final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+      final pending = Completer<ImageReadSnapshot>();
+      final changes = StreamController<String>.broadcast(sync: true);
+      var reads = 0;
+      MediaImage.configureImageLoader((request, refresh) async {
+        reads++;
+        return reads == 1 ? ImageReadSnapshot(bytes: bytes) : pending.future;
+      }, sourceChanges: changes.stream);
+      final proxyId = 'a' * 64;
+      final source = MediaItemImage(
+        type: 'thumb',
+        path: '',
+        provider: 'builtin',
+        remotelyAccessible: false,
+        proxyId: proxyId,
+      ).getProxyPath()!;
+      Widget image() => MaterialApp(
+        home: MediaImage(
+          source: source,
+          fit: BoxFit.cover,
+          fallback: const Text('fallback'),
+        ),
+      );
+      await tester.pumpWidget(image());
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      changes.add(proxyId);
+      await tester.pumpWidget(image());
+      expect(find.text('fallback'), findsOneWidget);
+      expect(find.byType(Image), findsNothing);
+      pending.complete(ImageReadSnapshot(bytes: bytes));
+      await tester.pumpAndSettle();
+      expect(find.byType(Image), findsOneWidget);
+      await tester.pumpWidget(const SizedBox.shrink());
+      await changes.close();
+    },
+  );
+
+  testWidgets(
     'image cache clearing reloads the same source and rejects late refresh',
     (tester) async {
       final original = (await tester.runAsync(() => bitmap(Colors.red)))!;

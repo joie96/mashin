@@ -10,7 +10,7 @@ class FavoritesController extends ChangeNotifier {
     required this.coreBridge,
     required this.userDataController,
   }) {
-    userDataController.addListener(_onUserDataChanged);
+    userDataController.favoritesChanges.addListener(_onUserDataChanged);
   }
 
   final MashinCoreBridgeApi coreBridge;
@@ -52,7 +52,7 @@ class FavoritesController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
-    userDataController.removeListener(_onUserDataChanged);
+    userDataController.favoritesChanges.removeListener(_onUserDataChanged);
     super.dispose();
   }
 

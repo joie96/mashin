@@ -62,6 +62,10 @@ class MediaArtworkBackground extends StatelessWidget {
 
 /// Visible subscribers own local image reads and their optional native refresh.
 class MediaImage extends StatefulWidget {
+  static const _maximumRetainedBytes = 16 * 1024 * 1024;
+  static const _maximumRetainedImages = 256;
+  static final _retainedImages = <String, _RetainedImage>{};
+  static int _retainedByteCount = 0;
   static Future<MediaItemImage?> Function(MediaItem)? _loadArtwork;
   static Stream<CatalogUpdate>? _artworkUpdates;
   static Stream<CatalogReadChange>? _artworkReadChanges;
@@ -86,6 +90,7 @@ class MediaImage extends StatefulWidget {
     _imageInvalidationSubscription = null;
     unawaited(_sourceChangeSubscription?.cancel());
     _sourceChangeSubscription = null;
+    _clearRetainedImages();
     _loadImage = loader;
     MediaItemImage.cachedImageSource = loader == null
         ? null
@@ -97,16 +102,64 @@ class MediaImage extends StatefulWidget {
     final generation = _imageGeneration;
     if (loader != null && invalidations != null) {
       _imageInvalidationSubscription = invalidations.listen((_) {
-        if (generation == _imageGeneration) _cacheChanges.value++;
+        if (generation == _imageGeneration) {
+          _clearRetainedImages();
+          _cacheChanges.value++;
+        }
       });
     }
     if (loader != null && sourceChanges != null) {
       _sourceChangeSubscription = sourceChanges.listen((proxyId) {
         if (generation == _imageGeneration) {
+          for (final source in _retainedImages.keys.toList()) {
+            if (_retainedImages[source]!.proxyId == proxyId) {
+              _retainedByteCount -= _retainedImages
+                  .remove(source)!
+                  .bytes
+                  .length;
+            }
+          }
           _sourceChanges.value = (_sourceChanges.value.$1 + 1, proxyId);
         }
       });
     }
+  }
+
+  // Retained bytes are presentation-only; every new subscriber still validates natively.
+  static Uint8List? _readRetainedImage(String source) {
+    final image = _retainedImages.remove(source);
+    if (image == null) return null;
+    _retainedImages[source] = image;
+    return image.bytes;
+  }
+
+  static Uint8List _retainImage(
+    String source,
+    String? proxyId,
+    Uint8List bytes,
+  ) {
+    final previous = _retainedImages.remove(source);
+    if (previous != null) _retainedByteCount -= previous.bytes.length;
+    final retained = previous != null && listEquals(previous.bytes, bytes)
+        ? previous.bytes
+        : bytes;
+    if (retained.length > _maximumRetainedBytes) return retained;
+    while (_retainedImages.isNotEmpty &&
+        (_retainedImages.length >= _maximumRetainedImages ||
+            _retainedByteCount + retained.length > _maximumRetainedBytes)) {
+      _retainedByteCount -= _retainedImages
+          .remove(_retainedImages.keys.first)!
+          .bytes
+          .length;
+    }
+    _retainedImages[source] = _RetainedImage(retained, proxyId);
+    _retainedByteCount += retained.length;
+    return retained;
+  }
+
+  static void _clearRetainedImages() {
+    _retainedImages.clear();
+    _retainedByteCount = 0;
   }
 
   static String _createImageSource(ImageRequest request) => Uri(
@@ -210,6 +263,13 @@ class MediaImage extends StatefulWidget {
 
   @override
   State<MediaImage> createState() => _MediaImageState();
+}
+
+class _RetainedImage {
+  const _RetainedImage(this.bytes, this.proxyId);
+
+  final Uint8List bytes;
+  final String? proxyId;
 }
 
 class _MediaImageState extends State<MediaImage>
@@ -518,16 +578,30 @@ class _MediaImageState extends State<MediaImage>
         return;
       }
       _proxyId = request.image.proxyId;
+      final retained = MediaImage._readRetainedImage(source);
+      if (retained != null && !listEquals(_bytes, retained)) {
+        setState(() => _bytes = retained);
+      }
       var snapshot = await _imageScope.run(() => loader(request, false));
       if (!isCurrent()) return;
-      if (snapshot.bytes != null && !listEquals(_bytes, snapshot.bytes)) {
-        setState(() => _bytes = snapshot.bytes);
+      if (snapshot.bytes != null) {
+        final bytes = MediaImage._retainImage(
+          source,
+          _proxyId,
+          snapshot.bytes!,
+        );
+        if (!listEquals(_bytes, bytes)) setState(() => _bytes = bytes);
       }
       if (snapshot.hasRefresh) {
         snapshot = await _imageScope.run(() => loader(request, true));
         if (!isCurrent()) return;
-        if (snapshot.bytes != null && !listEquals(_bytes, snapshot.bytes)) {
-          setState(() => _bytes = snapshot.bytes);
+        if (snapshot.bytes != null) {
+          final bytes = MediaImage._retainImage(
+            source,
+            _proxyId,
+            snapshot.bytes!,
+          );
+          if (!listEquals(_bytes, bytes)) setState(() => _bytes = bytes);
         }
       }
       _hasLoadedImage = true;

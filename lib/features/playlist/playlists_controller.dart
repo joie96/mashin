@@ -9,7 +9,7 @@ class PlaylistsController extends ChangeNotifier {
     required this.coreBridge,
     required this.userDataController,
   }) {
-    userDataController.addListener(_onUserDataChanged);
+    userDataController.playlistsChanges.addListener(_onUserDataChanged);
   }
 
   final MashinCoreBridgeApi coreBridge;
@@ -85,7 +85,7 @@ class PlaylistsController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
-    userDataController.removeListener(_onUserDataChanged);
+    userDataController.playlistsChanges.removeListener(_onUserDataChanged);
     super.dispose();
   }
 }
