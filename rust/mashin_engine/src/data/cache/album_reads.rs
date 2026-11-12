@@ -113,20 +113,25 @@ pub(crate) fn write_album_read(
     )?;
     transaction.execute(
         "INSERT INTO album_read_states(user_id,query,observed_at) VALUES (?1,?2,?3)
-         ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at",
+         ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at
+         WHERE observed_at IS NOT excluded.observed_at",
         params![user_id.as_str(), query_key, observed_at],
     )?;
     transaction.execute(
-        "DELETE FROM album_read_items WHERE user_id=?1 AND query=?2",
-        params![user_id.as_str(), query_key],
+        "DELETE FROM album_read_items WHERE user_id=?1 AND query=?2 AND position>=?3",
+        params![user_id.as_str(), query_key, albums.len() as i64],
     )?;
     if matches!(query, CatalogQuery::AlbumTracks { .. }) {
         return write_catalog_section(transaction, query, user_id, value);
     }
+    let mut statement = transaction.prepare_cached(
+        "INSERT INTO album_read_items(user_id,query,position,provider,item_id) VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(user_id,query,position) DO UPDATE SET provider=excluded.provider,item_id=excluded.item_id
+         WHERE (provider,item_id) IS NOT (excluded.provider,excluded.item_id)",
+    )?;
     for (position, album) in albums.iter().enumerate() {
         write_album_observation(transaction, album, user_id)?;
-        transaction.execute(
-            "INSERT INTO album_read_items(user_id,query,position,provider,item_id) VALUES (?1,?2,?3,?4,?5)",
+        statement.execute(
             params![user_id.as_str(),query_key,position as i64,album.media.provider.as_str(),album.media.item_id.as_str()],
         )?;
     }

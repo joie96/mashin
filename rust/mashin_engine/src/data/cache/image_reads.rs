@@ -105,7 +105,20 @@ impl ImageLease {
         force_refresh: bool,
     ) -> Result<ImageRead, CacheError> {
         self.require_active()?;
-        let (state, cache_error) = match self.read_refresh_state(key.clone()).await {
+        let state = self.read_refresh_state(key.clone()).await;
+        self.begin_read_with_state(key, client, fresh_for, force_refresh, state)
+    }
+
+    // Prepared inline variants retain the same refresh and invalidation policy as ordinary reads.
+    pub(super) fn begin_read_with_state(
+        &self,
+        key: ImageVariantKey,
+        client: Option<Arc<MusicAssistantClient>>,
+        fresh_for: Duration,
+        force_refresh: bool,
+        state: Result<ImageRefreshState, CacheError>,
+    ) -> Result<ImageRead, CacheError> {
+        let (state, cache_error) = match state {
             Ok(state) => (state, None),
             Err(CacheError::Invalidated | CacheError::ShuttingDown) => {
                 return Err(CacheError::Invalidated)
@@ -121,20 +134,13 @@ impl ImageLease {
             ),
         };
         self.require_active()?;
+        let is_fresh = state.is_fresh_for(fresh_for);
         let ImageRefreshState {
             cached,
             source_revision,
-            confirmed_at,
+            confirmed_at: _,
             is_recently_not_found,
         } = state;
-        let now = chrono::Utc::now().timestamp();
-        let is_fresh = cached.as_ref().is_some_and(|cached| {
-            cached.read.is_current_source()
-                && now
-                    .checked_sub(confirmed_at.unwrap_or(cached.read.observed_at))
-                    .and_then(|age| u64::try_from(age).ok())
-                    .is_some_and(|age| Duration::from_secs(age) < fresh_for)
-        });
         let refresh = client
             .filter(|_| force_refresh || (!is_fresh && !is_recently_not_found))
             .map(|client| {
@@ -166,9 +172,9 @@ impl ImageLease {
                                 .await
                                 .map_err(decode_error)?;
                             let result = images
-                                .publish_variant(
+                                .publish_payload(
                                     key,
-                                    payload.bytes.clone(),
+                                    payload.clone(),
                                     chrono::Utc::now().timestamp(),
                                 )
                                 .await;

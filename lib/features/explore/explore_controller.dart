@@ -48,6 +48,7 @@ class ExploreController extends ChangeNotifier {
   RecommendationSnapshot _snapshot = const RecommendationSnapshot(
     isLoading: true,
   );
+  int _recommendationSequence = 0;
   bool _hasLoadedExploration = false;
   bool _hasLoadedSimilarUsersJam = false;
   bool _hasStartedLoading = false;
@@ -121,6 +122,50 @@ class ExploreController extends ChangeNotifier {
 
   void _applySnapshot(RecommendationSnapshot snapshot) {
     if (_isDisposed) return;
+    if (snapshot.revision != 0 && snapshot.revision < _snapshot.revision) {
+      return;
+    }
+    Set<String>? changedFolderIds;
+    final delta = snapshot.delta;
+    if (delta != null) {
+      if (snapshot.revision == _snapshot.revision &&
+          delta.sequence <= _recommendationSequence) {
+        return;
+      }
+      final isNewRead = snapshot.revision > _snapshot.revision;
+      if (delta.sequence != (isNewRead ? 1 : _recommendationSequence + 1)) {
+        unawaited(load(refresh: false));
+        return;
+      }
+      final update = snapshot;
+      try {
+        snapshot = snapshot.applyTo(
+          isNewRead ? const RecommendationSnapshot() : _snapshot,
+        );
+      } on StateError {
+        unawaited(load(refresh: false));
+        return;
+      }
+      final retained = snapshot.folders
+          .map((folder) => (folder.provider, folder.itemId))
+          .toSet();
+      changedFolderIds = {
+        for (final folder in update.folders) folder.itemId,
+        for (final folder in _snapshot.folders)
+          if (!retained.contains((folder.provider, folder.itemId)))
+            folder.itemId,
+      };
+      _recommendationSequence = delta.sequence;
+    } else {
+      if (snapshot.revision != 0 &&
+          snapshot.revision == _snapshot.revision &&
+          _recommendationSequence > 0) {
+        return;
+      }
+      _recommendationSequence = 0;
+    }
+    bool hasChanged(String identity) =>
+        changedFolderIds == null || changedFolderIds.contains(identity);
     final previous = _snapshot;
     final exploration = _weeklyExploration;
     final albums = _weeklyAlbums;
@@ -131,7 +176,8 @@ class ExploreController extends ChangeNotifier {
     _isLoading = snapshot.isLoading;
     _hasLoadError = snapshot.hasLoadError;
     final folders = snapshot.folders;
-    if (!snapshot.isFolderLoading('user_exploration_weekly') &&
+    if (hasChanged('user_exploration_weekly') &&
+        !snapshot.isFolderLoading('user_exploration_weekly') &&
         !snapshot.hasFolderLoadError('user_exploration_weekly')) {
       _weeklyExploration = _tracksFromPlaylistFolders(
         folders,
@@ -144,13 +190,15 @@ class ExploreController extends ChangeNotifier {
       }
       _hasLoadedExploration = true;
     }
-    if (_canApplyFolder(snapshot, 'sitewide_top_albums_weekly')) {
+    if (hasChanged('sitewide_top_albums_weekly') &&
+        _canApplyFolder(snapshot, 'sitewide_top_albums_weekly')) {
       _weeklyAlbums = _itemsFromFolders<Album>(
         folders,
         'sitewide_top_albums_weekly',
       );
     }
-    if (!snapshot.isFolderLoading('similarusers_jam_weekly') &&
+    if (hasChanged('similarusers_jam_weekly') &&
+        !snapshot.isFolderLoading('similarusers_jam_weekly') &&
         !snapshot.hasFolderLoadError('similarusers_jam_weekly')) {
       _similarUsersJam = _tracksFromPlaylistFolders(
         folders,
@@ -163,13 +211,15 @@ class ExploreController extends ChangeNotifier {
       }
       _hasLoadedSimilarUsersJam = true;
     }
-    if (_canApplyFolder(snapshot, 'sitewide_top_tracks_weekly')) {
+    if (hasChanged('sitewide_top_tracks_weekly') &&
+        _canApplyFolder(snapshot, 'sitewide_top_tracks_weekly')) {
       _weeklyTracks = _itemsFromFolders<Track>(
         folders,
         'sitewide_top_tracks_weekly',
       );
     }
-    if (_canApplyFolder(snapshot, 'sitewide_top_artists_weekly')) {
+    if (hasChanged('sitewide_top_artists_weekly') &&
+        _canApplyFolder(snapshot, 'sitewide_top_artists_weekly')) {
       _weeklyArtists = _itemsFromFolders<Artist>(
         folders,
         'sitewide_top_artists_weekly',
@@ -184,19 +234,14 @@ class ExploreController extends ChangeNotifier {
         previous.isLoading != snapshot.isLoading ||
         previous.hasLoadError != snapshot.hasLoadError ||
         previous.folders.length != snapshot.folders.length ||
-        List.generate(
-          snapshot.folders.length,
-          (index) =>
-              index >= previous.folders.length ||
-              previous.folders[index].itemId !=
-                  snapshot.folders[index].itemId ||
-              previous.folders[index].provider !=
-                  snapshot.folders[index].provider ||
-              previous.folders[index].isLoading !=
-                  snapshot.folders[index].isLoading ||
-              previous.folders[index].hasLoadError !=
-                  snapshot.folders[index].hasLoadError,
-        ).any((hasChanged) => hasChanged);
+        snapshot.folders.indexed.any((entry) {
+          final (index, folder) = entry;
+          return index >= previous.folders.length ||
+              previous.folders[index].itemId != folder.itemId ||
+              previous.folders[index].provider != folder.provider ||
+              previous.folders[index].isLoading != folder.isLoading ||
+              previous.folders[index].hasLoadError != folder.hasLoadError;
+        });
     if (hasChangedStatus ||
         !identical(exploration, _weeklyExploration) ||
         !identical(albums, _weeklyAlbums) ||

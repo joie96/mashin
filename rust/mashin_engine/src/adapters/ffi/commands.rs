@@ -34,10 +34,26 @@ pub extern "C" fn mashin_core_start_operation(request_json: *const c_char) -> i3
         }
     };
 
+    let is_catalog_observed = match request.catalog_completion_requested() {
+        Ok(observed) => observed,
+        Err(error) => {
+            record_and_publish_error(error);
+            return -1;
+        }
+    };
     if let NativeOperation::Query(query) = request.operation {
         let request_id = request.request_id;
         return match crate::bootstrap::application().start_query(request_id, query, move |result| {
-            let result = result.and_then(|value| serialize_operation_result(Ok(value)));
+            let result = match result {
+                Ok(crate::application::queries::QueryResult::ImageRead(snapshot)) => {
+                    super::event_channel::publish_image_snapshot(
+                        json!({"type":"query_completed", "requestId":request_id}), snapshot,
+                    );
+                    return;
+                }
+                result => result,
+            };
+            let result = serialize_query_completion(result, is_catalog_observed);
             let payload = match result {
                 Ok(result) => {
                     json!({"type": "query_completed", "requestId": request_id, "result": result})
@@ -97,6 +113,38 @@ fn serialize_operation_result<T: serde::Serialize>(
             ApplicationError::internal(format!("serialize operation result failed: {error}"))
         })
     })
+}
+
+fn serialize_query_completion(
+    result: Result<crate::application::queries::QueryResult, ApplicationError>,
+    is_catalog_observed: bool,
+) -> Result<Value, ApplicationError> {
+    result.and_then(|value| {
+        if is_catalog_observed {
+            Ok(json!({"catalogResultDelivered": true}))
+        } else {
+            serialize_operation_result(Ok(value))
+        }
+    })
+}
+
+#[cfg(test)]
+mod query_completion_tests {
+    use super::*;
+    use crate::application::queries::QueryResult;
+
+    #[test]
+    fn observed_completion_omits_inventory_but_unobserved_reads_and_failures_remain_complete() {
+        let tracks: Vec<Track> = serde_json::from_value(json!([{
+            "item_id":"track", "provider":"library", "name":"Retained track"
+        }])).unwrap();
+        let completed = serialize_query_completion(Ok(QueryResult::Tracks(tracks.clone())), true).unwrap();
+        assert_eq!(completed, json!({"catalogResultDelivered":true}));
+        let full = serialize_query_completion(Ok(QueryResult::Tracks(tracks)), false).unwrap();
+        assert_eq!(full[0]["item_id"], "track");
+        assert_eq!(full[0]["name"], "Retained track");
+        assert!(serialize_query_completion(Err(ApplicationError::command_failed("failed")), true).is_err());
+    }
 }
 
 // Core configuration and engine lifecycle commands.

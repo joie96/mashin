@@ -29,7 +29,18 @@ pub(crate) fn current_priority() -> RequestPriority {
         .unwrap_or_default()
 }
 
+#[derive(Debug, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct CacheUsage {
+    pub(crate) metadata_bytes: u64,
+    pub(crate) image_bytes: u64,
+}
+
 pub(crate) trait CatalogClient: Send + Sync {
+    fn cache_usage(&self) -> BoxFuture<'_, Result<CacheUsage, String>> {
+        Box::pin(std::future::ready(Err("cache usage is unavailable".into())))
+    }
+
     fn clear_database_cache(&self) -> BoxFuture<'_, Result<(), String>> {
         Box::pin(std::future::ready(Err(
             "database cache maintenance is unavailable".into(),
@@ -101,7 +112,8 @@ pub(crate) trait CatalogClient: Send + Sync {
             futures_util::stream::once(self.load_catalog(query, force_refresh)).map(|result| {
                 match result {
                     Ok(value) => CatalogLoadSnapshot {
-                        value: Some(value),
+                        publication_revision: 0,
+                        value: Some(std::sync::Arc::new(value)),
                         source: Some(crate::domain::catalog::CatalogDataSource::Server),
                         cache_error: None,
                         phase: CatalogLoadPhase::Ready,
@@ -111,6 +123,7 @@ pub(crate) trait CatalogClient: Send + Sync {
                         error: None,
                     },
                     Err(error) => CatalogLoadSnapshot {
+                        publication_revision: 0,
                         value: None,
                         source: None,
                         cache_error: None,

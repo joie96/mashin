@@ -5,7 +5,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use rusqlite::{Connection, OpenFlags, Transaction};
 
@@ -20,6 +20,113 @@ use super::tracks::initialize_track_schema;
 pub(super) const DATABASE_FILE_NAME: &str = "metadata.sqlite3";
 const APPLICATION_ID: i32 = 0x4D534843;
 const SCHEMA_VERSION: i32 = 17;
+const WAL_CHECKPOINT_PAGES: i64 = 512;
+const WAL_RETAINED_BYTES: i64 = 4 * 1024 * 1024;
+const WAL_WARNING_BYTES: u64 = 32 * 1024 * 1024;
+
+pub(super) struct CacheWalMaintenance {
+    next_attempt: Option<Instant>,
+    has_warned: bool,
+}
+
+impl CacheWalMaintenance {
+    // Configuration and activity scheduling.
+    pub(super) fn new() -> Self {
+        Self {
+            next_attempt: Some(Instant::now() + Duration::from_secs(1)),
+            has_warned: false,
+        }
+    }
+
+    pub(super) fn record_activity(&mut self) {
+        self.next_attempt.get_or_insert_with(|| Instant::now() + Duration::from_secs(1));
+    }
+
+    pub(super) fn delay(&self) -> Option<Duration> {
+        self.next_attempt
+            .map(|deadline| deadline.saturating_duration_since(Instant::now()))
+    }
+
+    // Maintenance never waits for reader locks and never changes the caller's busy timeout.
+    pub(super) fn maintain(&mut self, connection: &Connection, area: &str) {
+        let logger = crate::logging::Logger::new("Cache.WAL");
+        logger.trace(format_args!(
+            "area={area} stage=started autocommit={} txn_state={:?}",
+            connection.is_autocommit(),
+            connection.transaction_state(Some(rusqlite::MAIN_DB))
+        ));
+        match self.checkpoint(connection, area) {
+            Ok((is_pending, bytes, frames, checkpointed)) => {
+                self.next_attempt = is_pending.then(|| Instant::now() + Duration::from_secs(5));
+                if bytes >= WAL_WARNING_BYTES && !self.has_warned {
+                    logger.warn(format_args!("area={area} wal_bytes={bytes} frames={frames} checkpointed={checkpointed} retry_pending={is_pending}"));
+                    self.has_warned = true;
+                } else if bytes < WAL_WARNING_BYTES {
+                    self.has_warned = false;
+                }
+                logger.trace(format_args!("area={area} checkpointed={checkpointed} frames={frames} wal_bytes={bytes} retry_pending={is_pending}"));
+            }
+            Err(error) => {
+                self.next_attempt = Some(Instant::now() + Duration::from_secs(5));
+                if !self.has_warned {
+                    logger.warn(format_args!(
+                        "area={area} checkpoint_failed={error} retry_pending=true"
+                    ));
+                    self.has_warned = true;
+                }
+            }
+        }
+    }
+
+    // SQLite owns checkpointing and truncation; file metadata is used only for the size threshold.
+    fn checkpoint(
+        &self,
+        connection: &Connection,
+        area: &str,
+    ) -> Result<(bool, u64, i64, i64), CacheError> {
+        let logger = crate::logging::Logger::new("Cache.WAL");
+        let started = Instant::now();
+        let busy_timeout: i64 =
+            connection.pragma_query_value(None, "busy_timeout", |row| row.get(0))?;
+        connection.busy_timeout(Duration::ZERO)?;
+        let result = (|| {
+            let (busy, frames, checkpointed): (i64, i64, i64) =
+                connection.query_row("PRAGMA wal_checkpoint(PASSIVE)", [], |row| {
+                    Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                })?;
+            logger.trace(format_args!("area={area} stage=passive busy={busy} frames={frames} checkpointed={checkpointed} elapsed_ms={}", started.elapsed().as_millis()));
+            let wal_path = format!(
+                "{}-wal",
+                connection.path().ok_or(CacheError::WorkerUnavailable)?
+            );
+            let bytes = match std::fs::metadata(&wal_path) {
+                Ok(metadata) => metadata.len(),
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => 0,
+                Err(error) => return Err(error.into()),
+            };
+            if frames != checkpointed {
+                return Ok((true, bytes, frames, checkpointed));
+            }
+            if bytes > WAL_RETAINED_BYTES as u64 {
+                let (busy, remaining, transferred): (i64, i64, i64) =
+                    connection.query_row("PRAGMA wal_checkpoint(TRUNCATE)", [], |row| {
+                        Ok((row.get(0)?, row.get(1)?, row.get(2)?))
+                    })?;
+                logger.trace(format_args!("area={area} stage=truncate busy={busy} frames={remaining} checkpointed={transferred} elapsed_ms={}", started.elapsed().as_millis()));
+                return Ok((
+                    busy != 0,
+                    std::fs::metadata(&wal_path)?.len(),
+                    frames,
+                    checkpointed,
+                ));
+            }
+            Ok((false, bytes, frames, checkpointed))
+        })();
+        let restored = connection.pragma_update(None, "busy_timeout", busy_timeout);
+        restored?;
+        result
+    }
+}
 
 #[derive(Clone, Debug)]
 pub(crate) enum CacheError {
@@ -209,12 +316,7 @@ impl MediaDatabase {
         transaction.commit()?;
         writer.pragma_update(None, "foreign_keys", true)?;
         writer.pragma_update(None, "locking_mode", "NORMAL")?;
-        let journal_mode: String =
-            writer.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
-        if !journal_mode.eq_ignore_ascii_case("wal") {
-            return Err(CacheError::ForeignFormat);
-        }
-        writer.pragma_update(None, "synchronous", "FULL")?;
+        configure_cache_wal(&writer)?;
         Ok(Self {
             writer,
             path,
@@ -255,6 +357,20 @@ impl MediaDatabase {
     pub(crate) fn metadata(&self) -> Result<CacheFileMetadata, CacheError> {
         read_metadata(&self.writer)
     }
+}
+
+// WAL configuration.
+/// Bounds retained WAL space without blocking readers or limiting active transactions.
+pub(super) fn configure_cache_wal(connection: &Connection) -> Result<(), CacheError> {
+    let journal_mode: String =
+        connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
+    if !journal_mode.eq_ignore_ascii_case("wal") {
+        return Err(CacheError::ForeignFormat);
+    }
+    connection.pragma_update(None, "synchronous", "FULL")?;
+    connection.pragma_update(None, "wal_autocheckpoint", WAL_CHECKPOINT_PAGES)?;
+    connection.pragma_update(None, "journal_size_limit", WAL_RETAINED_BYTES)?;
+    Ok(())
 }
 
 // Schema construction and format validation.
@@ -564,6 +680,179 @@ mod tests {
         let before = std::fs::read(&path).unwrap();
         assert!(MediaDatabase::open(directory.path(), "server-one").is_err());
         assert_eq!(std::fs::read(&path).unwrap(), before);
+    }
+
+    #[test]
+    fn wal_activity_cannot_postpone_due_maintenance_or_blocked_retries() {
+        let mut maintenance = CacheWalMaintenance::new();
+        let deadline = Instant::now() - Duration::from_secs(1);
+        maintenance.next_attempt = Some(deadline);
+        for _ in 0..100 { maintenance.record_activity(); }
+        assert_eq!(maintenance.next_attempt, Some(deadline));
+        assert_eq!(maintenance.delay(), Some(Duration::ZERO));
+        let retry = Instant::now() + Duration::from_secs(5);
+        maintenance.next_attempt = Some(retry);
+        maintenance.record_activity();
+        assert_eq!(maintenance.next_attempt, Some(retry));
+        maintenance.next_attempt = None;
+        maintenance.record_activity();
+        assert!(maintenance.delay().is_some());
+    }
+
+    #[test]
+    fn idle_wal_maintenance_retries_without_another_write_and_preserves_reader_snapshot() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = MediaDatabase::open(directory.path(), "server-one").unwrap();
+        database
+            .writer
+            .execute_batch(
+                "CREATE TABLE idle_wal_probe(value BLOB NOT NULL);
+             INSERT INTO idle_wal_probe VALUES(zeroblob(262144));
+             PRAGMA wal_checkpoint(TRUNCATE);",
+            )
+            .unwrap();
+        let mut reader = database.open_reader().unwrap();
+        let snapshot = reader.transaction().unwrap();
+        let read_byte = |connection: &Connection| -> Vec<u8> {
+            connection
+                .query_row("SELECT substr(value,1,1) FROM idle_wal_probe", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(read_byte(&snapshot), vec![0]);
+        for revision in 1..=32_u8 {
+            database
+                .writer
+                .execute(
+                    "UPDATE idle_wal_probe SET value=?1",
+                    [vec![revision; 262144]],
+                )
+                .unwrap();
+        }
+        let mut maintenance = CacheWalMaintenance::new();
+        let started = Instant::now();
+        maintenance.maintain(&database.writer, "test");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(maintenance.delay().is_some());
+        assert_eq!(read_byte(&snapshot), vec![0]);
+        snapshot.commit().unwrap();
+        maintenance.maintain(&database.writer, "test");
+        assert!(maintenance.delay().is_none());
+        assert_eq!(
+            std::fs::metadata(directory.path().join(format!("{DATABASE_FILE_NAME}-wal")))
+                .unwrap()
+                .len(),
+            0
+        );
+        assert_eq!(read_byte(&reader), vec![32]);
+        let timeout: i64 = database
+            .writer
+            .pragma_query_value(None, "busy_timeout", |row| row.get(0))
+            .unwrap();
+        assert_eq!(timeout, 5000);
+        maintenance.record_activity();
+        assert!(maintenance.delay().is_some());
+        reader.close().unwrap();
+        database.shutdown().unwrap();
+    }
+
+    #[test]
+    fn idle_wal_maintenance_does_not_wait_for_a_reader_blocking_truncation() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = MediaDatabase::open(directory.path(), "server-one").unwrap();
+        database
+            .writer
+            .pragma_update(None, "wal_autocheckpoint", 0)
+            .unwrap();
+        database
+            .writer
+            .execute_batch(
+                "CREATE TABLE idle_truncate_probe(value BLOB NOT NULL);
+             INSERT INTO idle_truncate_probe VALUES(zeroblob(8388608));",
+            )
+            .unwrap();
+        let mut reader = database.open_reader().unwrap();
+        let snapshot = reader.transaction().unwrap();
+        let length: i64 = snapshot
+            .query_row("SELECT length(value) FROM idle_truncate_probe", [], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        assert_eq!(length, 8388608);
+        let mut maintenance = CacheWalMaintenance::new();
+        let started = Instant::now();
+        maintenance.maintain(&database.writer, "test");
+        assert!(started.elapsed() < Duration::from_secs(1));
+        assert!(maintenance.delay().is_some());
+        snapshot.commit().unwrap();
+        maintenance.maintain(&database.writer, "test");
+        assert!(maintenance.delay().is_none());
+        assert_eq!(
+            std::fs::metadata(directory.path().join(format!("{DATABASE_FILE_NAME}-wal")))
+                .unwrap()
+                .len(),
+            0
+        );
+        reader.close().unwrap();
+        database.shutdown().unwrap();
+    }
+
+    #[test]
+    fn wal_reclaims_retained_space_after_a_pinned_reader_finishes() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = MediaDatabase::open(directory.path(), "server-one").unwrap();
+        let checkpoint_pages: i64 = database
+            .writer
+            .pragma_query_value(None, "wal_autocheckpoint", |row| row.get(0))
+            .unwrap();
+        let retained_bytes: i64 = database
+            .writer
+            .pragma_query_value(None, "journal_size_limit", |row| row.get(0))
+            .unwrap();
+        assert_eq!(checkpoint_pages, WAL_CHECKPOINT_PAGES);
+        assert_eq!(retained_bytes, WAL_RETAINED_BYTES);
+        database
+            .writer
+            .execute_batch(
+                "CREATE TABLE wal_probe (value BLOB NOT NULL);
+             INSERT INTO wal_probe VALUES(zeroblob(262144));
+             PRAGMA wal_checkpoint(TRUNCATE);",
+            )
+            .unwrap();
+        let mut reader = database.open_reader().unwrap();
+        let snapshot = reader.transaction().unwrap();
+        let read_first_byte = |connection: &Connection| -> Vec<u8> {
+            connection
+                .query_row("SELECT substr(value,1,1) FROM wal_probe", [], |row| {
+                    row.get(0)
+                })
+                .unwrap()
+        };
+        assert_eq!(read_first_byte(&snapshot), vec![0]);
+        for revision in 1..=32_u8 {
+            database
+                .writer
+                .execute("UPDATE wal_probe SET value=?1", [vec![revision; 262144]])
+                .unwrap();
+        }
+        let wal_path = directory.path().join(format!("{DATABASE_FILE_NAME}-wal"));
+        assert!(std::fs::metadata(&wal_path).unwrap().len() > WAL_RETAINED_BYTES as u64);
+        assert_eq!(read_first_byte(&snapshot), vec![0]);
+        snapshot.commit().unwrap();
+        for revision in 33..=48_u8 {
+            database
+                .writer
+                .execute("UPDATE wal_probe SET value=?1", [vec![revision; 262144]])
+                .unwrap();
+        }
+        assert!(std::fs::metadata(&wal_path).unwrap().len() <= WAL_RETAINED_BYTES as u64);
+        assert_eq!(read_first_byte(&reader), vec![48]);
+        reader.close().unwrap();
+        database.shutdown().unwrap();
+        let database = MediaDatabase::open(directory.path(), "server-one").unwrap();
+        assert_eq!(read_first_byte(&database.writer), vec![48]);
+        database.shutdown().unwrap();
     }
 
     #[test]

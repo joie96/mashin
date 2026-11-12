@@ -48,7 +48,8 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
     _controller = feature_search.SearchController(
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
-    )..addListener(_onControllerChanged);
+    );
+    _controller.requestChanges.addListener(_onControllerChanged);
     widget.userDataController?.favoritesChanges.addListener(_onUserDataChanged);
 
     if (widget.desktopSearchDriven) {
@@ -77,7 +78,7 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
 
   @override
   void dispose() {
-    _controller.removeListener(_onControllerChanged);
+    _controller.requestChanges.removeListener(_onControllerChanged);
     _controller.dispose();
     widget.userDataController?.favoritesChanges.removeListener(
       _onUserDataChanged,
@@ -445,8 +446,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             ),
           )
         else ...<Widget>[
-          _sectionSliver(
-            MediaTableSectionDesktop<Track>(
+          _resultSliver(
+            MediaType.track,
+            () => MediaTableSectionDesktop<Track>(
               title: 'Tracks',
               startsTrackRadio: true,
               items: _controller.tracks,
@@ -482,8 +484,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             ),
           ),
           const SliverPadding(padding: EdgeInsets.only(top: 20)),
-          _sectionSliver(
-            MediaRowSectionDesktop<Album>(
+          _resultSliver(
+            MediaType.album,
+            () => MediaRowSectionDesktop<Album>(
               title: 'Alben',
               isLoading: _controller.isLoadingAlbums,
               items: _controller.albums,
@@ -511,8 +514,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             ),
           ),
           const SliverPadding(padding: EdgeInsets.only(top: 20)),
-          _sectionSliver(
-            MediaRowSectionDesktop<Playlist>(
+          _resultSliver(
+            MediaType.playlist,
+            () => MediaRowSectionDesktop<Playlist>(
               title: 'Playlists',
               isLoading: _controller.isLoadingPlaylists,
               items: _controller.playlists,
@@ -540,8 +544,9 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
             ),
           ),
           const SliverPadding(padding: EdgeInsets.only(top: 20)),
-          _sectionSliver(
-            MediaRowSectionDesktop<Artist>(
+          _resultSliver(
+            MediaType.artist,
+            () => MediaRowSectionDesktop<Artist>(
               title: 'Artists',
               isLoading: _controller.isLoadingArtists,
               items: _controller.artists,
@@ -579,6 +584,14 @@ class _SearchScreenDesktopState extends State<SearchScreenDesktop> {
       sliver: SliverToBoxAdapter(child: child),
     );
   }
+
+  Widget _resultSliver(MediaType type, Widget Function() builder) =>
+      _sectionSliver(
+        ListenableBuilder(
+          listenable: _controller.sectionChanges(type),
+          builder: (context, child) => builder(),
+        ),
+      );
 
   void _syncDesktopQuery(String query) {
     unawaited(_controller.runSearch(query.trim()));

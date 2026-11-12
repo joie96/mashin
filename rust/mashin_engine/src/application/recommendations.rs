@@ -5,10 +5,11 @@ use super::Application;
 use crate::domain::catalog::{
     CatalogLoadPhase, CatalogLoadSnapshot, CatalogQuery, CatalogReadKnowledge, CatalogValue,
 };
-use crate::domain::identifiers::MediaId;
+use crate::domain::identifiers::{MediaId, ProviderInstanceId};
 use crate::domain::media::{MediaItem, Track};
 use crate::domain::recommendations::{
-    RecommendationFolder, RecommendationSnapshot, RecommendationView,
+    RecommendationDelta, RecommendationFolder, RecommendationFolderIdentity,
+    RecommendationSnapshot, RecommendationView,
 };
 use futures_util::future::AbortHandle;
 use futures_util::stream::{Abortable, BoxStream, SelectAll};
@@ -19,6 +20,7 @@ use std::sync::Arc;
 pub(crate) struct Recommendations {
     catalog: Arc<dyn CatalogClient>,
     view_publication_revisions: [AtomicU64; 2],
+    selected_artist_folders: std::sync::Mutex<[(Option<FolderKey>, Option<FolderKey>); 2]>,
 }
 
 type FolderKey = (String, String);
@@ -96,6 +98,7 @@ impl Recommendations {
         Self {
             catalog,
             view_publication_revisions: [AtomicU64::new(0), AtomicU64::new(0)],
+            selected_artist_folders: Default::default(),
         }
     }
     // Startup owns its observation through refresh and only signals changed known folders.
@@ -115,7 +118,7 @@ impl Recommendations {
             }
             let mut has_observed_folders = false;
             if observation.knowledge == CatalogReadKnowledge::ObservedResponse {
-                if let Some(CatalogValue::RecommendationFolders(folders)) = observation.value {
+                if let Some(CatalogValue::RecommendationFolders(folders)) = observation.value.map(Arc::unwrap_or_clone) {
                     has_observed_folders = true;
                     if published.as_ref() != Some(&folders) {
                         published = Some(folders);
@@ -165,7 +168,13 @@ impl Recommendations {
         let mut has_folders = false;
         let mut has_folder_error = false;
         let mut published = None;
+        let mut projected = HashMap::<FolderKey, RecommendationFolder>::new();
+        let mut sequence = 0;
         while let Some((target, query, observation)) = streams.next().await {
+            let dirty_keys = match &target {
+                ReadTarget::Folders => None,
+                ReadTarget::Items(key) | ReadTarget::Playlist(key, _, _) => Some(vec![key.clone()]),
+            };
             on_read(query, observation.clone());
             if observation.phase == CatalogLoadPhase::Invalidated {
                 return Err(observation
@@ -183,13 +192,17 @@ impl Recommendations {
             match target {
                 ReadTarget::Folders => {
                     has_folder_error = has_error;
-                    if let Some(CatalogValue::RecommendationFolders(folders)) = observation.value {
+                    if let Some(CatalogValue::RecommendationFolders(folders)) = observation.value.map(Arc::unwrap_or_clone) {
                         has_folders = true;
+                        let included = self.select_view_folders(view, &folders);
                         let mut previous = std::mem::take(&mut selected);
                         order.clear();
                         for folder in folders
                             .into_iter()
-                            .filter(|folder| view.includes(folder.item_id.as_str()))
+                            .filter(|folder| included.contains(&(
+                                folder.provider.as_str().to_owned(),
+                                folder.item_id.as_str().to_owned(),
+                            )))
                         {
                             let key = (
                                 folder.provider.as_str().to_owned(),
@@ -295,7 +308,7 @@ impl Recommendations {
                 }
                 ReadTarget::Items(key) => {
                     if let Some(read) = selected.get_mut(&key) {
-                        if let Some(CatalogValue::RecommendationItems(items)) = observation.value {
+                        if let Some(CatalogValue::RecommendationItems(items)) = observation.value.map(Arc::unwrap_or_clone) {
                             if !read.value.knowledge.items || read.value.items != items {
                                 read.value.items = items;
                                 read.value.knowledge.items = true;
@@ -318,7 +331,7 @@ impl Recommendations {
                         .filter(|read| read.revision == revision)
                     {
                         if let Some(playlist) = read.playlists.get_mut(&position) {
-                            if let Some(CatalogValue::Tracks(tracks)) = observation.value {
+                            if let Some(CatalogValue::Tracks(tracks)) = observation.value.map(Arc::unwrap_or_clone) {
                                 playlist.tracks = Some(tracks);
                             }
                             playlist.is_finished = is_finished;
@@ -327,27 +340,81 @@ impl Recommendations {
                     }
                 }
             }
-            let folders = order
-                .iter()
-                .filter_map(|key| selected.get(key).map(FolderRead::project))
-                .collect::<Vec<_>>();
-            let snapshot = RecommendationSnapshot {
-                has_load_error: has_folder_error
-                    || folders.iter().any(|folder| folder.has_load_error),
-                folders,
-                is_loading: !handles.is_empty(),
-            };
-            if published.as_ref() != Some(&snapshot) {
-                if publication_revision.load(Ordering::Acquire) == expected_publication_revision {
-                    on_update(snapshot.clone());
+            if !has_folders {
+                continue;
+            }
+            projected.retain(|key, _| selected.contains_key(key));
+            let mut changed = Vec::new();
+            for key in dirty_keys.unwrap_or_else(|| order.clone()) {
+                let Some(read) = selected.get(&key) else { continue; };
+                let folder = read.project();
+                if projected.get(&key) != Some(&folder) {
+                    changed.push(folder.clone());
+                    projected.insert(key, folder);
                 }
-                published = Some(snapshot);
+            }
+            let has_load_error = has_folder_error || projected.values().any(|folder| folder.has_load_error);
+            let status = (order.clone(), !handles.is_empty(), has_load_error);
+            if !changed.is_empty() || published.as_ref() != Some(&status) {
+                sequence += 1;
+                if publication_revision.load(Ordering::Acquire) == expected_publication_revision {
+                    on_update(RecommendationSnapshot {
+                        revision: expected_publication_revision,
+                        folders: changed,
+                        is_loading: status.1,
+                        has_load_error,
+                        delta: Some(RecommendationDelta {
+                            revision: expected_publication_revision,
+                            sequence,
+                            order: order.iter().map(|key| RecommendationFolderIdentity {
+                                provider: ProviderInstanceId(key.0.clone()),
+                                item_id: MediaId(key.1.clone()),
+                            }).collect(),
+                        }),
+                    });
+                }
+                published = Some(status);
             }
         }
         if !has_folders {
             return Err("recommendation folders unavailable".into());
         }
-        published.ok_or_else(|| "recommendations ended without a projection".into())
+        let (_, is_loading, has_load_error) = published
+            .ok_or_else(|| "recommendations ended without a projection".to_owned())?;
+        Ok(RecommendationSnapshot {
+            revision: expected_publication_revision,
+            folders: order.iter().filter_map(|key| projected.remove(key)).collect(),
+            is_loading,
+            has_load_error,
+            delta: None,
+        })
+    }
+
+    fn select_view_folders(
+        &self,
+        view: RecommendationView,
+        folders: &[RecommendationFolder],
+    ) -> std::collections::HashSet<FolderKey> {
+        let (identities, prefixes) = view.folder_selection();
+        let mut selected = self.selected_artist_folders.lock().unwrap_or_else(|error| error.into_inner());
+        let mut included = folders.iter().filter(|folder| identities.contains(&folder.item_id.as_str()))
+            .map(|folder| (folder.provider.as_str().to_owned(), folder.item_id.as_str().to_owned()))
+            .collect::<std::collections::HashSet<_>>();
+        assert!(prefixes.len() <= selected.len());
+        for (&prefix, chosen) in prefixes.iter().zip(selected.iter_mut()) {
+            let candidates = folders.iter().filter(|folder| folder.item_id.as_str().starts_with(prefix))
+                .map(|folder| (folder.provider.as_str().to_owned(), folder.item_id.as_str().to_owned()))
+                .collect::<std::collections::HashSet<_>>();
+            if candidates.is_empty() { continue; }
+            if chosen.0.is_none() && chosen.1.is_none() {
+                let mut ranked = candidates.into_iter().map(|identity| (uuid::Uuid::new_v4(), identity)).collect::<Vec<_>>();
+                ranked.sort_unstable_by_key(|entry| entry.0);
+                let mut identities = ranked.into_iter().map(|entry| entry.1);
+                *chosen = (identities.next(), identities.next());
+            }
+            included.extend(chosen.0.iter().chain(chosen.1.iter()).cloned());
+        }
+        included
     }
 
     // Observation participation is owned by this request, not a spawned feed worker.
@@ -473,7 +540,8 @@ mod tests {
 
     fn observation(value: Option<CatalogValue>, phase: CatalogLoadPhase) -> CatalogLoadSnapshot {
         CatalogLoadSnapshot {
-            value,
+            publication_revision: 0,
+            value: value.map(Arc::new),
             phase,
             source: Some(CatalogDataSource::Cache),
             cache_error: None,
@@ -482,6 +550,116 @@ mod tests {
             observed_at: Some(100),
             error: None,
         }
+    }
+
+    fn materialize_update(previous: &mut Option<RecommendationSnapshot>, mut update: RecommendationSnapshot) -> RecommendationSnapshot {
+        if let Some(delta) = update.delta.take() {
+            let mut folders = previous.as_ref().map(|snapshot| snapshot.folders.clone()).unwrap_or_default()
+                .into_iter().map(|folder| ((folder.provider.clone(), folder.item_id.clone()), folder)).collect::<HashMap<_, _>>();
+            for folder in update.folders {
+                folders.insert((folder.provider.clone(), folder.item_id.clone()), folder);
+            }
+            update.folders = delta.order.into_iter().map(|identity| {
+                folders.remove(&(identity.provider, identity.item_id)).expect("every ordered folder must be observed")
+            }).collect();
+        }
+        *previous = Some(update.clone());
+        update
+    }
+
+    fn collect_snapshots(sender: mpsc::UnboundedSender<RecommendationSnapshot>) -> impl FnMut(RecommendationSnapshot) + Send {
+        let mut previous = None;
+        move |snapshot| { sender.send(materialize_update(&mut previous, snapshot)).unwrap(); }
+    }
+
+    #[tokio::test]
+    async fn home_loads_only_selected_artist_folders_and_keeps_selection_across_reads() {
+        let folders: Vec<RecommendationFolder> = serde_json::from_value(serde_json::Value::Array(
+            ["user_genre_artists_", "user_similar_artists_"].into_iter().flat_map(|prefix| {
+                (0..6).map(move |index| serde_json::json!({
+                    "provider":"source", "item_id":format!("{prefix}{index}"), "name":"Artists", "items":[]
+                }))
+            }).collect()
+        )).unwrap();
+        let mut reads = HashMap::new();
+        let mut folder_receivers = std::collections::VecDeque::new();
+        for _ in 0..2 {
+            let (sender, receiver) = mpsc::unbounded_channel();
+            sender.send(observation(Some(CatalogValue::RecommendationFolders(folders.clone())), CatalogLoadPhase::Ready)).unwrap();
+            folder_receivers.push_back(receiver);
+        }
+        reads.insert(format!("{:?}", CatalogQuery::RecommendationFolders), folder_receivers);
+        for folder in &folders {
+            let query = CatalogQuery::RecommendationItems { provider: folder.provider.as_str().to_owned(), item_id: folder.item_id.clone() };
+            let mut receivers = std::collections::VecDeque::new();
+            for _ in 0..2 {
+                let (sender, receiver) = mpsc::unbounded_channel();
+                sender.send(observation(Some(CatalogValue::RecommendationItems(Vec::new())), CatalogLoadPhase::Ready)).unwrap();
+                receivers.push_back(receiver);
+            }
+            reads.insert(format!("{query:?}"), receivers);
+        }
+        let catalog = Arc::new(ObservedCatalog { reads: Mutex::new(reads), starts: Mutex::new(Vec::new()) });
+        let service = Recommendations::new(catalog.clone());
+        let mut previous = None;
+        for _ in 0..2 {
+            let mut publications = Vec::new();
+            let snapshot = tokio::time::timeout(std::time::Duration::from_secs(2),
+                service.get_recommendation_data(RecommendationView::Home, false, |snapshot| publications.push(snapshot), |_, _| {})
+            ).await.unwrap().unwrap();
+            assert_eq!(snapshot.folders.len(), 4);
+            assert!(!snapshot.is_loading);
+            assert!(snapshot.delta.is_none());
+            assert_eq!(publications[0].folders.len(), 4);
+            for (index, update) in publications.iter().enumerate() {
+                let delta = update.delta.as_ref().expect("Home publishes section deltas");
+                assert_eq!(delta.sequence, index as u64 + 1);
+                assert_eq!(delta.order.len(), 4);
+                if index > 0 { assert_eq!(update.folders.len(), 1); }
+            }
+            let identities = snapshot.folders.iter().map(|folder| folder.item_id.clone()).collect::<Vec<_>>();
+            if let Some(previous) = &previous { assert_eq!(previous, &identities); }
+            previous = Some(identities);
+        }
+        assert_eq!(catalog.starts.lock().unwrap().len(), 10);
+    }
+
+    #[tokio::test]
+    async fn explore_publishes_only_changed_folders_and_keeps_complete_duplicate_inventories() {
+        let folders: Vec<RecommendationFolder> = serde_json::from_value(serde_json::json!([
+            {"provider":"source", "item_id":"user_exploration_weekly", "name":"Explore", "items":[]},
+            {"provider":"source", "item_id":"sitewide_top_tracks_weekly", "name":"Tracks", "items":[]}
+        ])).unwrap();
+        let tracks: Vec<MediaItem> = serde_json::from_value(serde_json::Value::Array((0..201).map(|_| {
+            serde_json::json!({"media_type":"track", "provider":"source", "item_id":"duplicate", "name":"Track"})
+        }).collect())).unwrap();
+        let mut reads = HashMap::new();
+        let (sender, receiver) = mpsc::unbounded_channel();
+        sender.send(observation(Some(CatalogValue::RecommendationFolders(folders.clone())), CatalogLoadPhase::Ready)).unwrap();
+        drop(sender);
+        reads.insert(format!("{:?}", CatalogQuery::RecommendationFolders), std::collections::VecDeque::from([receiver]));
+        for folder in &folders {
+            let query = CatalogQuery::RecommendationItems { provider: "source".into(), item_id: folder.item_id.clone() };
+            let (sender, receiver) = mpsc::unbounded_channel();
+            sender.send(observation(Some(CatalogValue::RecommendationItems(tracks.clone())), CatalogLoadPhase::Ready)).unwrap();
+            reads.insert(format!("{query:?}"), std::collections::VecDeque::from([receiver]));
+        }
+        let service = Recommendations::new(Arc::new(ObservedCatalog {
+            reads: Mutex::new(reads), starts: Mutex::new(Vec::new()),
+        }));
+        let mut updates = Vec::new();
+        let full = service.get_recommendation_data(RecommendationView::Explore, false, |snapshot| updates.push(snapshot), |_, _| {}).await.unwrap();
+        assert_eq!(updates.len(), 3);
+        for (index, update) in updates.iter().enumerate() {
+            let delta = update.delta.as_ref().expect("Explore publishes section deltas");
+            assert_eq!(delta.sequence, index as u64 + 1);
+            assert_eq!(delta.order.len(), 2);
+            assert_eq!(update.folders.len(), if index == 0 { 2 } else { 1 });
+        }
+        assert!(full.delta.is_none());
+        assert!(!full.is_loading);
+        assert_eq!(full.folders.len(), 2);
+        for folder in full.folders { assert_eq!(folder.items, tracks); }
     }
 
     #[tokio::test]
@@ -709,9 +887,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Home,
                     false,
-                    |snapshot| {
-                        updates.send(snapshot).unwrap();
-                    },
+                    collect_snapshots(updates),
                     |_, _| {},
                 )
                 .await
@@ -835,9 +1011,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Explore,
                     false,
-                    |snapshot| {
-                        updates.send(snapshot).unwrap();
-                    },
+                    collect_snapshots(updates),
                     |_, _| {},
                 )
                 .await
@@ -930,9 +1104,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Home,
                     true,
-                    |snapshot| {
-                        updates.send(snapshot).unwrap();
-                    },
+                    collect_snapshots(updates),
                     |_, _| {},
                 )
                 .await
@@ -1062,9 +1234,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Explore,
                     false,
-                    |snapshot| {
-                        updates.send(snapshot).unwrap();
-                    },
+                    collect_snapshots(updates),
                     |_, _| {
                         count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
                     },
@@ -1145,11 +1315,12 @@ mod tests {
             .unwrap();
         drop(new_sender);
         let mut new_updates = Vec::new();
+        let mut new_projection = None;
         let current = service
             .get_recommendation_data(
                 RecommendationView::Home,
                 true,
-                |snapshot| new_updates.push(snapshot),
+                |snapshot| new_updates.push(materialize_update(&mut new_projection, snapshot)),
                 |_, _| {},
             )
             .await

@@ -333,7 +333,7 @@ class PlaybackService : MediaLibraryService() {
             return
         }
         browser?.onCoreEvent(eventType, catalogEvent = event)
-        if (isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed")) return
+        if (isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed", "user_data_favorites_changed", "user_data_metadata_changed")) return
         isSnapshotRefreshQueued = true
         coreExecutor.execute {
             try {

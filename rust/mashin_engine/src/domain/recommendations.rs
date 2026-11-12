@@ -45,9 +45,25 @@ impl RecommendationView {
 
 #[derive(Debug, Clone, PartialEq, Serialize)]
 pub(crate) struct RecommendationSnapshot {
+    pub(crate) revision: u64,
     pub(crate) folders: Vec<RecommendationFolder>,
     pub(crate) is_loading: bool,
     pub(crate) has_load_error: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) delta: Option<RecommendationDelta>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct RecommendationDelta {
+    pub(crate) revision: u64,
+    pub(crate) sequence: u64,
+    pub(crate) order: Vec<RecommendationFolderIdentity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize)]
+pub(crate) struct RecommendationFolderIdentity {
+    pub(crate) provider: ProviderInstanceId,
+    pub(crate) item_id: MediaId,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize)]

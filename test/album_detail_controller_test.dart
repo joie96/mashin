@@ -1368,7 +1368,11 @@ class _AlbumBridge implements MashinCoreBridgeApi {
   Future<Album> getAlbum(String itemId, String provider) => metadata.future;
 
   @override
-  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  }) {
     artistAlbumRequestCount++;
     return artistAlbums.future;
   }

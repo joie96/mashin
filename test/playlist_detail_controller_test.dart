@@ -4,6 +4,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/session/preferred_provider_controller.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_query_scope.dart';
 import 'package:mashin/features/playlist/playlist_detail_controller.dart';
 
 void main() {
@@ -34,6 +35,7 @@ void main() {
         bridge.emitTracks(withAlbum: true);
         await Future<void>.delayed(Duration.zero);
         bridge.emitAlbums(2020);
+        await Future<void>.delayed(Duration.zero);
         final cached = controller.tracks;
         if (retirement == 'hidden') {
           await controller.setPageVisible(false);
@@ -83,10 +85,13 @@ void main() {
       bridge.emitAlbums(1900, artistId: 'unrelated');
       expect(controller.tracks.first.album?.year, isNull);
       bridge.emitAlbums(2020, artistId: 'artist-4');
+      await Future<void>.delayed(Duration.zero);
       expect(controller.tracks.first.album?.year, 2020);
       bridge.emitAlbums(null, artistId: 'artist-4');
+      await Future<void>.delayed(Duration.zero);
       expect(controller.tracks.first.album?.year, isNull);
       bridge.emitAlbums(2024, artistId: 'artist-4');
+      await Future<void>.delayed(Duration.zero);
       final cached = controller.tracks;
       bridge.albums.completeError(StateError('offline albums'));
       bridge.tracks.completeError(StateError('offline tracks'));
@@ -117,6 +122,7 @@ void main() {
       expect(bridge.tracks.isCompleted, isFalse);
       for (final year in [2020, 2024]) {
         bridge.emitAlbums(year);
+        await Future<void>.delayed(Duration.zero);
         expect(controller.tracks.first.album?.year, year);
         expect(controller.tracks.map((track) => track.position), [1, 4]);
       }
@@ -128,6 +134,147 @@ void main() {
       expect(identical(controller.tracks, cached), isTrue);
     },
   );
+
+  test('track updates retain artist reads and observed album years', () async {
+    final bridge = _PlaylistBridge();
+    final controller = PlaylistDetailController(
+      coreBridge: bridge,
+      itemId: '44',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.updates.close();
+    });
+    final loading = controller.loadPlaylist();
+    await bridge.requested.future;
+    bridge.emitTracks(withAlbum: true);
+    await Future<void>.delayed(Duration.zero);
+    bridge.emitAlbums(2024);
+    await Future<void>.delayed(Duration.zero);
+    bridge.emitTracks(name: 'Refreshed', withAlbum: true);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.albumRequestCount, 1);
+    expect(controller.tracks.first.name, 'Refreshed');
+    expect(controller.tracks.first.album?.year, 2024);
+    bridge.albums.completeError(StateError('offline albums'));
+    bridge.tracks.completeError(StateError('offline tracks'));
+    await loading;
+  });
+
+  test(
+    'album bursts publish once and confirmed absence restores source tracks',
+    () async {
+      final bridge = _PlaylistBridge();
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: '44',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadPlaylist();
+      await bridge.requested.future;
+      bridge.emitTracks(withAlbum: true);
+      await Future<void>.delayed(Duration.zero);
+      var publications = 0;
+      controller.addListener(() => publications++);
+      bridge.emitAlbums(2020);
+      bridge.emitAlbums(2022);
+      bridge.emitAlbums(2024);
+      await Future<void>.delayed(Duration.zero);
+      expect(publications, 1);
+      expect(controller.tracks.map((track) => track.album?.year), [2024, 2024]);
+      expect(controller.tracks.map((track) => track.position), [1, 4]);
+      bridge.emitAlbums(2024);
+      await Future<void>.delayed(Duration.zero);
+      expect(publications, 1);
+      bridge.emitAlbums(null);
+      await Future<void>.delayed(Duration.zero);
+      expect(publications, 2);
+      expect(
+        controller.tracks.every((track) => track.album?.year == null),
+        isTrue,
+      );
+      bridge.albums.completeError(StateError('offline albums'));
+      bridge.tracks.completeError(StateError('offline tracks'));
+      await loading;
+    },
+  );
+
+  test(
+    'large playlists yield between cache reads without awaiting refreshes',
+    () async {
+      final bridge = _PlaylistBridge();
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: '44',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadPlaylist();
+      await bridge.requested.future;
+      bridge.emitTracks(withAlbum: true, artistCount: 217);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.albumRequestCount, inInclusiveRange(1, 8));
+      for (var turn = 0; turn < 30; turn++) {
+        await Future<void>.delayed(Duration.zero);
+      }
+      expect(bridge.albumRequestCount, 217);
+      expect(bridge.albums.isCompleted, isFalse);
+      bridge.emitAlbums(2024, artistId: 'artist-216');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.tracks.first.album?.year, 2024);
+      await controller.setPageVisible(false);
+      bridge.albums.completeError(StateError('retired albums'));
+      bridge.tracks.completeError(StateError('retired tracks'));
+      await loading;
+    },
+  );
+
+  test('track membership changes cancel only retired artist reads', () async {
+    final bridge = _PlaylistBridge();
+    final controller = PlaylistDetailController(
+      coreBridge: bridge,
+      itemId: '44',
+      providerInstanceIdOrDomain: 'library',
+    );
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.updates.close();
+    });
+    final loading = controller.loadPlaylist();
+    await bridge.requested.future;
+    bridge.emitTracks(withAlbum: true, artistCount: 5);
+    await Future<void>.delayed(Duration.zero);
+    bridge.emitAlbums(2024, artistId: 'artist-4');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.tracks.first.album?.year, 2024);
+    bridge.emitTracks(name: 'Refreshed', withAlbum: true, artistCount: 4);
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.albumRequestCount, 5);
+    expect(bridge.canceledArtists, ['artist-4']);
+    expect(controller.tracks.first.album?.year, isNull);
+    bridge.emitAlbums(2040, artistId: 'artist-4');
+    await Future<void>.delayed(Duration.zero);
+    expect(controller.tracks.first.album?.year, isNull);
+    await controller.setPageVisible(false);
+    expect(bridge.canceledArtists.toSet(), {
+      'artist-0',
+      'artist-1',
+      'artist-2',
+      'artist-3',
+      'artist-4',
+    });
+    bridge.albums.completeError(StateError('retired albums'));
+    bridge.tracks.completeError(StateError('retired tracks'));
+    await loading;
+  });
 
   for (final shouldFailRefresh in [false, true]) {
     test(
@@ -262,6 +409,7 @@ class _PlaylistBridge implements MashinCoreBridgeApi {
   final tracks = Completer<List<Track>>();
   final albums = Completer<List<Album>>();
   int albumRequestCount = 0;
+  final List<String> canceledArtists = [];
   final requested = Completer<void>();
   final metadataRequested = Completer<void>();
 
@@ -392,9 +540,17 @@ class _PlaylistBridge implements MashinCoreBridgeApi {
   }
 
   @override
-  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  }) {
+    expect(isBackground, isTrue);
     albumRequestCount++;
-    return albums.future;
+    return CoreQueryScope.current!.execute(
+      () => albums.future,
+      onCancel: () => canceledArtists.add(itemId),
+    );
   }
 
   @override

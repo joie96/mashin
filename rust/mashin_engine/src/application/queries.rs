@@ -256,6 +256,7 @@ impl Application {
 )]
 pub(crate) enum ApplicationQuery {
     GetSessionSettings {},
+    GetCacheUsage {},
     GetUpdateChannel {
         default_channel: UpdateChannel,
     },
@@ -282,6 +283,12 @@ pub(crate) enum ApplicationQuery {
         request: crate::domain::artwork::ImageRequest,
         #[serde(default)]
         refresh: bool,
+    },
+    ObserveImage {
+        request: crate::domain::artwork::ImageRequest,
+        observation_id: u64,
+        #[serde(default)]
+        is_background: bool,
     },
     RecentlyPlayedTracks {
         #[serde(default = "default_limit")]
@@ -320,6 +327,8 @@ pub(crate) enum ApplicationQuery {
     ArtistAlbums {
         item_id: String,
         provider: String,
+        #[serde(default)]
+        is_background: bool,
     },
     ArtistTopTracks {
         item_id: String,
@@ -345,10 +354,25 @@ pub(crate) enum ApplicationQuery {
     },
 }
 
+impl ApplicationQuery {
+    // Optional enrichment shares catalog identity while retaining its scheduling priority.
+    pub(crate) fn request_priority(&self) -> super::repositories::RequestPriority {
+        use super::repositories::{current_priority, RequestPriority};
+        if matches!(self, Self::ArtistAlbums { is_background: true, .. } | Self::ObserveImage { is_background: true, .. }) {
+            RequestPriority::Background
+        } else if matches!(self, Self::ReadImage { .. } | Self::ObserveImage { .. } | Self::ProviderIconData { .. }) {
+            RequestPriority::Icon
+        } else {
+            current_priority()
+        }
+    }
+}
+
 #[derive(Serialize)]
 #[serde(untagged)]
 pub(crate) enum QueryResult {
     Unit,
+    CacheUsage(super::repositories::CacheUsage),
     SessionSettings(crate::domain::settings::SessionSettings),
     UpdateChannel(UpdateChannel),
     Queue(crate::playback::models::Queue),
@@ -370,24 +394,64 @@ pub(crate) enum QueryResult {
     Artists(Vec<Artist>),
 }
 
-#[derive(Serialize)]
+#[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ImageReadSnapshot {
     #[serde(skip)]
     pub(crate) did_publish_change: bool,
-    bytes: Option<String>,
-    cache_error: Option<String>,
-    has_refresh: bool,
+    #[serde(serialize_with = "serialize_image_bytes")]
+    pub(crate) bytes: Option<Vec<u8>>,
+    pub(crate) cache_error: Option<String>,
+    pub(crate) has_refresh: bool,
+}
+
+fn serialize_image_bytes<S: serde::Serializer>(bytes: &Option<Vec<u8>>, serializer: S) -> Result<S::Ok, S::Error> {
+    use base64::Engine;
+    bytes.as_ref().map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)).serialize(serializer)
 }
 
 impl ImageReadSnapshot {
+    /// One subscriber owns local delivery and the refresh until completion or cancellation.
+    pub(crate) async fn observe(
+        loader: &dyn super::repositories::ImageLoader,
+        request: &crate::domain::artwork::ImageRequest,
+        on_local: impl FnOnce(Self),
+    ) -> Result<Self, String> {
+        let started = std::time::Instant::now();
+        let logger = crate::logging::Logger::new("Image.Read");
+        let mut load = loader.read_image(request).await?;
+        logger.trace(format_args!("stage=local elapsed_ms={} bytes={} has_refresh={} cache_error={}", started.elapsed().as_millis(), load.current.bytes.as_ref().map_or(0, |bytes| bytes.len()), load.refresh.is_some(), load.current.cache_error.is_some()));
+        if load.refresh.is_some() { on_local(Self {
+            did_publish_change: false,
+            bytes: load.current.bytes.clone(),
+            cache_error: load.current.cache_error.clone(),
+            has_refresh: true,
+        }); }
+        let (update, did_publish_change) = match load.refresh.take() {
+            Some(refresh) => {
+                let update = refresh.await?;
+                let did_publish_change = update.cache_error.is_none()
+                    && update.bytes.is_some()
+                    && update.bytes != load.current.bytes;
+                (update, did_publish_change)
+            }
+            None => (load.current, false),
+        };
+        logger.trace(format_args!("stage=completed elapsed_ms={} bytes={} changed={} cache_error={}", started.elapsed().as_millis(), update.bytes.as_ref().map_or(0, |bytes| bytes.len()), did_publish_change, update.cache_error.is_some()));
+        Ok(Self {
+            did_publish_change,
+            bytes: update.bytes,
+            cache_error: update.cache_error,
+            has_refresh: false,
+        })
+    }
+
     // The local query drops its unpolled refresh; the scoped follow-up owns network cancellation.
     pub(crate) async fn load(
         loader: &dyn super::repositories::ImageLoader,
         request: &crate::domain::artwork::ImageRequest,
         refresh: bool,
     ) -> Result<Self, String> {
-        use base64::Engine;
         let mut load = loader.read_image(request).await?;
         let has_refresh = load.refresh.is_some() && !refresh;
         let mut did_publish_change = false;
@@ -407,9 +471,7 @@ impl ImageReadSnapshot {
         };
         Ok(Self {
             did_publish_change,
-            bytes: update
-                .bytes
-                .map(|bytes| base64::engine::general_purpose::STANDARD.encode(bytes)),
+            bytes: update.bytes,
             cache_error: update.cache_error,
             has_refresh,
         })
@@ -546,14 +608,91 @@ fn default_limit() -> u32 {
 }
 
 #[cfg(test)]
-mod image_read_tests {
+mod tests {
     use super::*;
     use crate::application::repositories::{ImageLoad, ImageLoader, ImageUpdate};
     use futures_util::future::BoxFuture;
 
+    #[test]
+    fn artist_album_request_preserves_explicit_background_priority() {
+        for is_background in [false, true] {
+            let request: ApplicationQuery = serde_json::from_value(serde_json::json!({
+                "kind": "artistAlbums", "itemId": "artist", "provider": "source",
+                "isBackground": is_background
+            })).unwrap();
+            assert_eq!(request.request_priority(), if is_background {
+                crate::application::repositories::RequestPriority::Background
+            } else {
+                crate::application::repositories::RequestPriority::Foreground
+            });
+            assert!(matches!(request, ApplicationQuery::ArtistAlbums { is_background: actual, .. } if actual == is_background));
+        }
+        let request: ApplicationQuery = serde_json::from_value(serde_json::json!({
+            "kind": "artistAlbums", "itemId": "artist", "provider": "source"
+        })).unwrap();
+        assert!(matches!(request, ApplicationQuery::ArtistAlbums { is_background: false, .. }));
+    }
+
+    #[test]
+    fn image_requests_use_the_interactive_artwork_lane() {
+        use crate::application::repositories::RequestPriority;
+        for request in [
+            serde_json::json!({"kind":"readImage","request":{"image":{"type":"thumb","provider":"builtin","path":"","remotely_accessible":false},"size":80,"position":0}}),
+            serde_json::json!({"kind":"observeImage","observationId":7,"request":{"image":{"type":"thumb","provider":"builtin","path":"","remotely_accessible":false},"size":80,"position":0}}),
+            serde_json::json!({"kind":"providerIconData","provider":"source"}),
+        ] {
+            let request: ApplicationQuery = serde_json::from_value(request).unwrap();
+            assert_eq!(request.request_priority(), RequestPriority::Icon);
+        }
+        let background: ApplicationQuery = serde_json::from_value(serde_json::json!({"kind":"observeImage","observationId":7,"isBackground":true,"request":{"image":{"type":"thumb","provider":"builtin","path":"","remotely_accessible":false},"size":80,"position":0}})).unwrap();
+        assert_eq!(background.request_priority(), RequestPriority::Background);
+    }
+
     struct ImageReadFixture {
         bytes: Option<Vec<u8>>,
         cache_error: Option<String>,
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn image_observation_delivers_local_before_refresh_and_loads_once() {
+        struct ObservedLoader {
+            reads: std::sync::atomic::AtomicUsize,
+            is_fresh: std::sync::atomic::AtomicBool,
+            release: std::sync::Arc<tokio::sync::Notify>,
+        }
+        impl ImageLoader for ObservedLoader {
+            fn read_image<'request>(&'request self, _: &'request crate::domain::artwork::ImageRequest) -> BoxFuture<'request, Result<ImageLoad, String>> {
+                self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+                if self.is_fresh.load(std::sync::atomic::Ordering::SeqCst) {
+                    return Box::pin(async { Ok(ImageLoad { current: ImageUpdate { bytes: Some(vec![1]), cache_error: None }, refresh: None }) });
+                }
+                let released = self.release.clone();
+                Box::pin(async move { Ok(ImageLoad {
+                    current: ImageUpdate { bytes: Some(vec![1]), cache_error: None },
+                    refresh: Some(Box::pin(async move {
+                        released.notified().await;
+                        Ok(ImageUpdate { bytes: Some(vec![2]), cache_error: None })
+                    })),
+                }) })
+            }
+        }
+        let loader = ObservedLoader { reads: std::sync::atomic::AtomicUsize::new(0), is_fresh: std::sync::atomic::AtomicBool::new(false), release: std::sync::Arc::new(tokio::sync::Notify::new()) };
+        let request = serde_json::from_value(serde_json::json!({"image":{"type":"thumb","provider":"builtin","proxy_id":"a".repeat(64)},"position":0})).unwrap();
+        let local = std::cell::RefCell::new(None);
+        let mut pending = Box::pin(ImageReadSnapshot::observe(&loader, &request, |value| *local.borrow_mut() = Some(value)));
+        assert!(futures_util::poll!(&mut pending).is_pending());
+        assert!(local.borrow().as_ref().unwrap().has_refresh);
+        assert_eq!(local.borrow().as_ref().unwrap().bytes.as_deref(), Some([1].as_slice()));
+        loader.release.notify_one();
+        let completed = pending.await.unwrap();
+        assert_eq!(completed.bytes.as_deref(), Some([2].as_slice()));
+        assert!(completed.did_publish_change);
+        assert_eq!(loader.reads.load(std::sync::atomic::Ordering::SeqCst), 1);
+        loader.is_fresh.store(true, std::sync::atomic::Ordering::SeqCst);
+        let fresh = ImageReadSnapshot::observe(&loader, &request, |_| panic!("fresh bytes must only be sent with terminal completion")).await.unwrap();
+        assert_eq!(fresh.bytes.as_deref(), Some([1].as_slice()));
+        assert!(!fresh.has_refresh);
+        assert_eq!(loader.reads.load(std::sync::atomic::Ordering::SeqCst), 2);
     }
 
     impl ImageLoader for ImageReadFixture {

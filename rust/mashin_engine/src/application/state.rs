@@ -22,6 +22,8 @@ pub(crate) struct ApplicationState {
     pub(super) session_data_events: Option<super::session_data::SessionDataEvents>,
     pub(super) initial_session_data_result: Option<Result<(), String>>,
     pub(crate) session_generation: u64,
+    pub(crate) provider_availability: Arc<super::snapshots::ProviderAvailabilityProjection>,
+    catalog_publications: std::collections::HashMap<crate::domain::catalog::CatalogQuery, std::sync::Weak<super::events::CatalogPublication>>,
     pub(crate) connection:
         Option<std::sync::Arc<crate::data::music_assistant::connection::MusicAssistantConnection>>,
     pub(crate) pending_commands: Vec<crate::playback::backend::PlaybackCommand>,
@@ -50,6 +52,8 @@ impl ApplicationState {
             session_data_events: None,
             initial_session_data_result: None,
             session_generation: 0,
+            provider_availability: Default::default(),
+            catalog_publications: Default::default(),
             connection: None,
             pending_commands: Vec::new(),
         }
@@ -66,6 +70,8 @@ impl ApplicationState {
     }
 
     pub(crate) fn invalidate_session_data(&mut self) {
+        self.catalog_publications.clear();
+        self.provider_availability = Default::default();
         self.session_tasks.close();
         self.retired_session_tasks.push(std::mem::replace(
             &mut self.session_tasks,
@@ -96,7 +102,22 @@ impl ApplicationState {
 
     // Session-bound delivery and user-data state.
     pub(crate) fn session_events(&self) -> EventPublisher {
-        self.session_tasks.events(self.event_publisher.clone())
+        let events = self.session_tasks.events(self.event_publisher.clone());
+        let availability = self.provider_availability.clone();
+        EventPublisher::new(move |mut event| {
+            availability.project_event(&mut event);
+            events.publish(event);
+        })
+    }
+
+    pub(crate) fn catalog_publication(&mut self, query: &crate::domain::catalog::CatalogQuery) -> Arc<super::events::CatalogPublication> {
+        self.catalog_publications.retain(|_, publication| publication.strong_count() > 0);
+        if let Some(publication) = self.catalog_publications.get(query).and_then(std::sync::Weak::upgrade) {
+            return publication;
+        }
+        let publication = Arc::new(super::events::CatalogPublication::default());
+        self.catalog_publications.insert(query.clone(), Arc::downgrade(&publication));
+        publication
     }
 
     pub(crate) fn update_initial_user_data(

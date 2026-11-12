@@ -47,7 +47,8 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
     _controller = feature_search.SearchController(
       coreBridge: widget.coreBridge,
       userDataController: widget.userDataController,
-    )..addListener(_onControllerChanged);
+    );
+    _controller.requestChanges.addListener(_onControllerChanged);
     widget.userDataController?.favoritesChanges.addListener(_onUserDataChanged);
     WidgetsBinding.instance.addPostFrameCallback((_) {
       if (mounted) {
@@ -66,7 +67,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   void dispose() {
     _queryController.dispose();
     _searchFocusNode.dispose();
-    _controller.removeListener(_onControllerChanged);
+    _controller.requestChanges.removeListener(_onControllerChanged);
     _controller.dispose();
     widget.userDataController?.favoritesChanges.removeListener(
       _onUserDataChanged,
@@ -285,62 +286,74 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
             ),
           )
         else ...<Widget>[
-          SizedBox(
-            height: 234,
-            child: CustomScrollView(
-              primary: false,
-              physics: const NeverScrollableScrollPhysics(),
-              slivers: <Widget>[
-                MediaTableSectionMobile<Track>(
-                  title: 'Tracks',
-                  startsTrackRadio: true,
-                  items: _controller.tracks,
-                  isLoading: _controller.isLoadingTracks,
-                  emptyText: 'Keine Tracks gefunden.',
-                  maxItemsPerPage: 3,
-                  coreBridge: widget.coreBridge,
-                  coreEvents: widget.coreEvents,
-                  onSelectionMenuTap: (List<Track> items) =>
-                      unawaited(_showSelectionMenu(items)),
-                ),
-              ],
+          _resultSection(
+            MediaType.track,
+            () => SizedBox(
+              height: 234,
+              child: CustomScrollView(
+                primary: false,
+                physics: const NeverScrollableScrollPhysics(),
+                slivers: <Widget>[
+                  MediaTableSectionMobile<Track>(
+                    title: 'Tracks',
+                    startsTrackRadio: true,
+                    items: _controller.tracks,
+                    isLoading: _controller.isLoadingTracks,
+                    emptyText: 'Keine Tracks gefunden.',
+                    maxItemsPerPage: 3,
+                    coreBridge: widget.coreBridge,
+                    coreEvents: widget.coreEvents,
+                    onSelectionMenuTap: (List<Track> items) =>
+                        unawaited(_showSelectionMenu(items)),
+                  ),
+                ],
+              ),
             ),
           ),
           const SizedBox(height: 32),
-          MediaRowSectionMobile<Album>(
-            title: 'Alben',
-            isLoading: _controller.isLoadingAlbums,
-            items: _controller.albums,
-            emptyText: 'Keine Alben gefunden.',
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            onItemTap: widget.onOpenAlbum,
-            onSelectionMenuTap: (List<Album> items) =>
-                unawaited(_showSelectionMenu(items)),
+          _resultSection(
+            MediaType.album,
+            () => MediaRowSectionMobile<Album>(
+              title: 'Alben',
+              isLoading: _controller.isLoadingAlbums,
+              items: _controller.albums,
+              emptyText: 'Keine Alben gefunden.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              onItemTap: widget.onOpenAlbum,
+              onSelectionMenuTap: (List<Album> items) =>
+                  unawaited(_showSelectionMenu(items)),
+            ),
           ),
           const SizedBox(height: 32),
-          MediaRowSectionMobile<Playlist>(
-            title: 'Playlists',
-            isLoading: _controller.isLoadingPlaylists,
-            items: _controller.playlists,
-            emptyText: 'Keine Playlists gefunden.',
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            onItemTap: widget.onOpenPlaylist,
-            onSelectionMenuTap: (List<Playlist> items) =>
-                unawaited(_showSelectionMenu(items)),
+          _resultSection(
+            MediaType.playlist,
+            () => MediaRowSectionMobile<Playlist>(
+              title: 'Playlists',
+              isLoading: _controller.isLoadingPlaylists,
+              items: _controller.playlists,
+              emptyText: 'Keine Playlists gefunden.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              onItemTap: widget.onOpenPlaylist,
+              onSelectionMenuTap: (List<Playlist> items) =>
+                  unawaited(_showSelectionMenu(items)),
+            ),
           ),
           const SizedBox(height: 32),
-          MediaRowSectionMobile<Artist>(
-            title: 'Artists',
-            isLoading: _controller.isLoadingArtists,
-            items: _controller.artists,
-            emptyText: 'Keine Artists gefunden.',
-            coreBridge: widget.coreBridge,
-            coreEvents: widget.coreEvents,
-            onItemTap: widget.onOpenArtist,
-            onSelectionMenuTap: (List<Artist> items) =>
-                unawaited(_showSelectionMenu(items)),
+          _resultSection(
+            MediaType.artist,
+            () => MediaRowSectionMobile<Artist>(
+              title: 'Artists',
+              isLoading: _controller.isLoadingArtists,
+              items: _controller.artists,
+              emptyText: 'Keine Artists gefunden.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              onItemTap: widget.onOpenArtist,
+              onSelectionMenuTap: (List<Artist> items) =>
+                  unawaited(_showSelectionMenu(items)),
+            ),
           ),
         ],
       ],
@@ -350,6 +363,12 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
   void _submitSearch() {
     unawaited(_controller.runSearch(_queryController.text.trim()));
   }
+
+  Widget _resultSection(MediaType type, Widget Function() builder) =>
+      ListenableBuilder(
+        listenable: _controller.sectionChanges(type),
+        builder: (context, child) => builder(),
+      );
 
   void _clearSearch() {
     _queryController.clear();

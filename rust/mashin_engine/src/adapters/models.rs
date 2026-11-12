@@ -11,6 +11,8 @@ use serde_json::{Map, Value};
 #[serde(rename_all = "camelCase")]
 pub(crate) struct NativeOperationRequest {
     pub(crate) request_id: u64,
+    #[serde(default)]
+    pub(crate) is_catalog_observed: bool,
     #[serde(flatten)]
     pub(crate) operation: NativeOperation,
 }
@@ -20,6 +22,42 @@ pub(crate) struct NativeOperationRequest {
 pub(crate) enum NativeOperation {
     Command(ApplicationCommand),
     Query(ApplicationQuery),
+}
+
+impl NativeOperationRequest {
+    pub(crate) fn catalog_completion_requested(&self) -> Result<bool, ApplicationError> {
+        if !self.is_catalog_observed {
+            return Ok(false);
+        }
+        let is_observable = matches!(
+            self.operation,
+            NativeOperation::Query(
+                ApplicationQuery::ProviderManifests {}
+                    | ApplicationQuery::RecentlyPlayedTracks { .. }
+                    | ApplicationQuery::SearchMedia { .. }
+                    | ApplicationQuery::Artist { .. }
+                    | ApplicationQuery::Album { .. }
+                    | ApplicationQuery::AlbumTracks { .. }
+                    | ApplicationQuery::Playlist { .. }
+                    | ApplicationQuery::PlaylistTracks {
+                        force_refresh: false,
+                        allow_dynamic_tracks: false,
+                        ..
+                    }
+                    | ApplicationQuery::ArtistAlbums { .. }
+                    | ApplicationQuery::ArtistTopTracks { .. }
+                    | ApplicationQuery::SimilarArtists { .. }
+                    | ApplicationQuery::SimilarTracks { .. }
+                    | ApplicationQuery::TrackVersions { .. }
+            )
+        );
+        if !is_observable {
+            return Err(ApplicationError::command_failed(
+                "catalog completion requires an observed non-dynamic catalog query",
+            ));
+        }
+        Ok(true)
+    }
 }
 
 // Request decoding and result serialization.
@@ -63,6 +101,49 @@ mod tests {
     use super::{NativeOperation, NativeOperationRequest};
     use crate::application::commands::ApplicationCommand;
     use crate::application::queries::ApplicationQuery;
+
+    #[test]
+    fn catalog_completion_requires_explicit_observation_and_rejects_strict_operations() {
+        use serde_json::json;
+        for kind in ["providerManifests", "recentlyPlayedTracks", "artistAlbums", "playlistTracks"] {
+            let mut payload = match kind {
+                "providerManifests" | "recentlyPlayedTracks" => json!({"kind":kind}),
+                _ => json!({"kind":kind,"itemId":"one","provider":"library"}),
+            };
+            payload["requestId"] = json!(1);
+            let plain: NativeOperationRequest = serde_json::from_value(payload.clone()).unwrap();
+            assert!(!plain.catalog_completion_requested().unwrap());
+            payload["isCatalogObserved"] = json!(true);
+            let observed: NativeOperationRequest = serde_json::from_value(payload).unwrap();
+            assert!(observed.catalog_completion_requested().unwrap());
+        }
+        for mut payload in [
+            json!({"kind":"transportPlay"}),
+            json!({"kind":"getUserData"}),
+            json!({"kind":"recommendations","view":"home"}),
+            json!({"kind":"providerIconData","provider":"source"}),
+            json!({"kind":"playlistTracks","itemId":"one","provider":"library","forceRefresh":true}),
+            json!({"kind":"playlistTracks","itemId":"one","provider":"library","allowDynamicTracks":true}),
+        ] {
+            payload["requestId"] = json!(1);
+            payload["isCatalogObserved"] = json!(true);
+            let request: NativeOperationRequest = serde_json::from_value(payload).unwrap();
+            assert!(request.catalog_completion_requested().is_err());
+        }
+    }
+
+    #[test]
+    fn cache_usage_query_and_byte_counts_keep_the_native_contract() {
+        let request: NativeOperationRequest = serde_json::from_value(
+            serde_json::json!({"requestId":42,"kind":"getCacheUsage"}),
+        ).unwrap();
+        assert!(matches!(request.operation, NativeOperation::Query(ApplicationQuery::GetCacheUsage {})));
+        assert!(super::decode_query("getCacheUsage", Some(r#"{"unexpected":true}"#)).is_err());
+        let result = crate::application::queries::QueryResult::CacheUsage(
+            crate::application::repositories::CacheUsage { metadata_bytes: 91, image_bytes: 72 },
+        );
+        assert_eq!(serde_json::to_value(result).unwrap(), serde_json::json!({"metadataBytes":91,"imageBytes":72}));
+    }
 
     #[test]
     fn cache_maintenance_commands_and_completion_events_keep_separate_areas() {

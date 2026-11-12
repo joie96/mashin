@@ -87,7 +87,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
   int _pageStartIndex = 0;
   int _navigationDirection = 1;
-  int? _outgoingStartIndex;
   int? _incomingStartIndex;
   bool _isAnimatingOut = false;
   bool _isAnimatingIn = false;
@@ -495,7 +494,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       _pageStartIndex = _incomingStartIndex!;
     }
 
-    _outgoingStartIndex = null;
     _incomingStartIndex = null;
     _isAnimatingOut = false;
     _isAnimatingIn = false;
@@ -513,7 +511,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     setState(() {
       _navigationDirection = direction;
-      _outgoingStartIndex = _pageStartIndex;
       _incomingStartIndex = targetStartIndex;
       _isAnimatingOut = true;
       _isAnimatingIn = false;
@@ -526,7 +523,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
     setState(() {
       _pageStartIndex = targetStartIndex;
-      _outgoingStartIndex = null;
       _isAnimatingOut = false;
       _isAnimatingIn = true;
     });
@@ -1079,79 +1075,34 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             : SizedBox(
                 height: sectionHeight,
                 child: ClipRect(
-                  child: Stack(
-                    fit: StackFit.expand,
-                    children: <Widget>[
-                      if (_isAnimatingOut && _outgoingStartIndex != null)
-                        TweenAnimationBuilder<double>(
-                          key: ValueKey<int>(_outgoingStartIndex!),
-                          tween: Tween<double>(begin: 0, end: 1),
-                          duration: _pageOutDuration,
-                          curve: _pageTransitionCurve,
-                          builder:
-                              (
-                                BuildContext context,
-                                double value,
-                                Widget? child,
-                              ) {
-                                final double dx =
-                                    (_navigationDirection >= 0 ? -1 : 1) *
-                                    _chunkTranslatePx *
-                                    value;
-                                return Opacity(
-                                  opacity: 1 - value,
-                                  child: Transform.translate(
-                                    offset: Offset(dx, 0),
-                                    child: child,
-                                  ),
-                                );
-                              },
-                          child: _buildSlideList(
-                            startIndex: _outgoingStartIndex!,
-                            visibleCount: visibleCount,
-                            resolvedItemWidth: resolvedItemWidth,
-                            resolvedCoverSize: resolvedCoverSize,
-                          ),
-                        )
-                      else if (_isAnimatingIn && _incomingStartIndex != null)
-                        TweenAnimationBuilder<double>(
-                          key: ValueKey<int>(_incomingStartIndex!),
-                          tween: Tween<double>(begin: 0, end: 1),
-                          duration: _pageInDuration,
-                          curve: _pageTransitionCurve,
-                          builder:
-                              (
-                                BuildContext context,
-                                double value,
-                                Widget? child,
-                              ) {
-                                final double dx =
-                                    (_navigationDirection >= 0 ? 1 : -1) *
-                                    _chunkTranslatePx *
-                                    (1 - value);
-                                return Opacity(
-                                  opacity: value,
-                                  child: Transform.translate(
-                                    offset: Offset(dx, 0),
-                                    child: child,
-                                  ),
-                                );
-                              },
-                          child: _buildSlideList(
-                            startIndex: _incomingStartIndex!,
-                            visibleCount: visibleCount,
-                            resolvedItemWidth: resolvedItemWidth,
-                            resolvedCoverSize: resolvedCoverSize,
-                          ),
-                        )
-                      else
-                        _buildSlideList(
-                          startIndex: _pageStartIndex,
-                          visibleCount: visibleCount,
-                          resolvedItemWidth: resolvedItemWidth,
-                          resolvedCoverSize: resolvedCoverSize,
+                  child: TweenAnimationBuilder<double>(
+                    tween: Tween<double>(
+                      begin: 0,
+                      end: _isAnimatingOut ? 1 : 0,
+                    ),
+                    duration: _isAnimatingOut
+                        ? _pageOutDuration
+                        : _pageInDuration,
+                    curve: _pageTransitionCurve,
+                    builder: (context, value, child) => Opacity(
+                      opacity: 1 - value,
+                      child: Transform.translate(
+                        offset: Offset(
+                          _navigationDirection *
+                              (_isAnimatingIn ? 1 : -1) *
+                              _chunkTranslatePx *
+                              value,
+                          0,
                         ),
-                    ],
+                        child: child,
+                      ),
+                    ),
+                    child: _buildSlideList(
+                      startIndex: _pageStartIndex,
+                      visibleCount: visibleCount,
+                      resolvedItemWidth: resolvedItemWidth,
+                      resolvedCoverSize: resolvedCoverSize,
+                    ),
                   ),
                 ),
               );
@@ -1223,7 +1174,14 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
                 ],
               ),
             if (showHeaderRow) const SizedBox(height: 10),
-            bodyContent,
+            MediaPageImagePreload(
+              items: widget.items,
+              pageStart: _pageStartIndex,
+              pageSize: visibleCount,
+              imageSize: 256,
+              isEnabled: !widget.isLoading && !_isExpanded,
+              child: bodyContent,
+            ),
             // Always reserve the toggle's space so sections without one
             // line up visually with sections that have it.
             Padding(

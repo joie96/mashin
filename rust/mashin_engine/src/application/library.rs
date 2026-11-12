@@ -33,6 +33,17 @@ impl LibraryState {
     pub(crate) fn project_snapshot(&self) -> UserDataSnapshot {
         self.intents.project(&self.snapshot)
     }
+
+    // Project optimistic favorite intents without cloning private playlist inventories.
+    fn project_favorites(&self) -> crate::domain::library::UserDataFavoritesSnapshot {
+        self.intents.project(&UserDataSnapshot {
+            revision: self.snapshot.revision,
+            favorites: self.snapshot.favorites.clone(),
+            is_loading_favorites: self.snapshot.is_loading_favorites,
+            has_loaded_favorites: self.snapshot.has_loaded_favorites,
+            ..Default::default()
+        }).into()
+    }
 }
 pub(crate) struct ApplicationUserDataPublisher {
     application: Application,
@@ -376,10 +387,7 @@ impl Application {
     }
     // Only the initiating session may update its UI projection.
     pub(crate) fn begin_initial_user_data(&self, generation: u64) -> Result<(), String> {
-        self.publish_initial_user_data(generation, |data| {
-            data.snapshot.is_loading_favorites = true;
-            data.snapshot.is_loading_playlists = true;
-        })
+        self.publish_initial_user_data_status(generation, None)
     }
     pub(crate) fn complete_initial_user_data(
         &self,
@@ -387,11 +395,7 @@ impl Application {
         result: Result<(), String>,
     ) -> Result<(), String> {
         let is_success = result.is_ok();
-        self.publish_initial_user_data(generation, |data| {
-            data.snapshot.is_loading_favorites = false;
-            data.snapshot.is_loading_playlists = false;
-            data.initial_load_result = Some(result);
-        })?;
+        self.publish_initial_user_data_status(generation, Some(result))?;
         if is_success {
             self.schedule_playlist_hydration(generation)?;
         }
@@ -414,6 +418,7 @@ impl Application {
             InitialUserDataUpdate::PlaylistPage(_) | InitialUserDataUpdate::Playlists(_)
         );
         let is_playlist_update = matches!(&update, InitialUserDataUpdate::PlaylistTracks { .. });
+        let is_favorites_update = matches!(&update, InitialUserDataUpdate::Favorites(_) | InitialUserDataUpdate::FavoritePage(_));
         let mut changed_playlist = None;
         let mut coordinator = self
             .coordinator
@@ -464,9 +469,17 @@ impl Application {
                 .snapshot
                 .revision = revision;
         }
+        let favorites = is_favorites_update.then(|| coordinator.user_data.as_ref().expect("library state initialized").project_favorites());
+        let metadata = should_hydrate.then(|| crate::domain::library::UserDataMetadataSnapshot::from(
+            &coordinator.user_data.as_ref().expect("library state initialized").snapshot,
+        ));
         let events = coordinator.session_events();
         drop(coordinator);
-        if !is_playlist_update || changed_playlist.is_some() {
+        if let Some(snapshot) = favorites {
+            events.publish(ApplicationEvent::UserDataFavoritesChanged { snapshot });
+        } else if let Some(snapshot) = metadata {
+            events.publish(ApplicationEvent::UserDataMetadataChanged { snapshot });
+        } else if !is_playlist_update || changed_playlist.is_some() {
             events.publish(ApplicationEvent::UserDataChanged {
                 playlist: changed_playlist,
                 revision: Some(revision),
@@ -518,6 +531,32 @@ impl Application {
         events.publish(ApplicationEvent::RecommendationsChanged);
         Ok(())
     }
+
+    // Initial-load status publication and private playlist hydration.
+    fn publish_initial_user_data_status(
+        &self,
+        generation: u64,
+        result: Option<Result<(), String>>,
+    ) -> Result<(), String> {
+        let mut coordinator = self.coordinator.lock().map_err(|_| "coordinator lock poisoned")?;
+        coordinator.update_initial_user_data(generation, |data| {
+            let is_loading = result.is_none();
+            data.snapshot.is_loading_favorites = is_loading;
+            data.snapshot.is_loading_playlists = is_loading;
+            if let Some(result) = result {
+                data.initial_load_result = Some(result);
+            }
+            data.snapshot.revision += 1;
+        })?;
+        let snapshot = crate::domain::library::UserDataMetadataSnapshot::from(
+            &coordinator.user_data.as_ref().expect("library state initialized").snapshot,
+        );
+        let events = coordinator.session_events();
+        drop(coordinator);
+        events.publish(ApplicationEvent::UserDataMetadataChanged { snapshot });
+        Ok(())
+    }
+
     // Reserve each visible playlist once while its local read and background refresh are active.
     fn schedule_playlist_hydration(&self, generation: u64) -> Result<(), String> {
         let (playlists, catalog, tasks, events) = {

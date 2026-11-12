@@ -88,10 +88,19 @@ pub(super) fn write_recommendation_read(
         "INSERT INTO users(user_id) VALUES(?1) ON CONFLICT DO NOTHING",
         [user.as_str()],
     )?;
-    transaction.execute("INSERT INTO recommendation_read_states(user_id,query,observed_at) VALUES(?1,?2,?3) ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at",params![user.as_str(),key,observed_at])?;
+    transaction.execute("INSERT INTO recommendation_read_states(user_id,query,observed_at) VALUES(?1,?2,?3) ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at WHERE observed_at IS NOT excluded.observed_at",params![user.as_str(),key,observed_at])?;
+    let section_count = match value {
+        CatalogValue::RecommendationFolders(folders) => folders.len(),
+        _ => 1,
+    };
     transaction.execute(
-        "DELETE FROM recommendation_sections WHERE user_id=?1 AND query=?2",
-        params![user.as_str(), key],
+        "DELETE FROM recommendation_sections WHERE user_id=?1 AND query=?2 AND section>=?3",
+        params![user.as_str(), key, section_count as i64],
+    )?;
+    let mut statement = transaction.prepare_cached(
+        "INSERT INTO recommendation_sections(user_id,query,section,provider,item_id,title,subtitle,title_known,subtitle_known,items_known,playlist_tracks_known) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+         ON CONFLICT(user_id,query,section) DO UPDATE SET provider=excluded.provider,item_id=excluded.item_id,title=excluded.title,subtitle=excluded.subtitle,title_known=excluded.title_known,subtitle_known=excluded.subtitle_known,items_known=excluded.items_known,playlist_tracks_known=excluded.playlist_tracks_known
+         WHERE (provider,item_id,title,subtitle,title_known,subtitle_known,items_known,playlist_tracks_known) IS NOT (excluded.provider,excluded.item_id,excluded.title,excluded.subtitle,excluded.title_known,excluded.subtitle_known,excluded.items_known,excluded.playlist_tracks_known)",
     )?;
     match value {
         CatalogValue::RecommendationFolders(folders) => {
@@ -101,13 +110,13 @@ pub(super) fn write_recommendation_read(
                         "derived playlist tracks belong to their own selection",
                     ));
                 }
-                transaction.execute("INSERT INTO recommendation_sections(user_id,query,section,provider,item_id,title,subtitle,title_known,subtitle_known,items_known,playlist_tracks_known) VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
+                statement.execute(
                     params![user.as_str(),key,section as i64,folder.provider.as_str(),folder.item_id.as_str(),folder.title,folder.subtitle,folder.knowledge.title,folder.knowledge.subtitle,folder.knowledge.items,folder.knowledge.playlist_tracks])?;
                 write_items(transaction, user, &key, section as i64, &folder.items)?;
             }
         }
         CatalogValue::RecommendationItems(items) => {
-            transaction.execute("INSERT INTO recommendation_sections(user_id,query,section,title_known,subtitle_known,items_known,playlist_tracks_known) VALUES(?1,?2,0,0,0,1,0)",params![user.as_str(),key])?;
+            statement.execute(params![user.as_str(),key,0,Option::<String>::None,Option::<String>::None,Option::<String>::None,Option::<String>::None,false,false,true,false])?;
             write_items(transaction, user, &key, 0, items)?;
         }
         _ => unreachable!(),
@@ -211,6 +220,16 @@ fn write_items(
     section: i64,
     items: &[MediaItem],
 ) -> Result<(), CacheError> {
+    transaction.execute(
+        "DELETE FROM recommendation_items WHERE user_id=?1 AND query=?2 AND section=?3 AND occurrence>=?4",
+        params![user.as_str(), query, section, items.len() as i64],
+    )?;
+    let mut statement = transaction.prepare_cached(
+        "INSERT INTO recommendation_items(user_id,query,section,occurrence,media_type,provider,item_id,artist_id,album_id,track_id,playlist_id,context_album_provider,context_album_id,context)
+         VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)
+         ON CONFLICT(user_id,query,section,occurrence) DO UPDATE SET media_type=excluded.media_type,provider=excluded.provider,item_id=excluded.item_id,artist_id=excluded.artist_id,album_id=excluded.album_id,track_id=excluded.track_id,playlist_id=excluded.playlist_id,context_album_provider=excluded.context_album_provider,context_album_id=excluded.context_album_id,context=excluded.context
+         WHERE (media_type,provider,item_id,artist_id,album_id,track_id,playlist_id,context_album_provider,context_album_id,context) IS NOT (excluded.media_type,excluded.provider,excluded.item_id,excluded.artist_id,excluded.album_id,excluded.track_id,excluded.playlist_id,excluded.context_album_provider,excluded.context_album_id,excluded.context)",
+    )?;
     for (occurrence, item) in items.iter().enumerate() {
         let media = item.fields();
         let identity = media.item_id.as_str();
@@ -259,8 +278,7 @@ fn write_items(
                 ))
             }
         };
-        transaction.execute("INSERT INTO recommendation_items(user_id,query,section,occurrence,media_type,provider,item_id,artist_id,album_id,track_id,playlist_id,context_album_provider,context_album_id,context)
-            VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14)",params![user.as_str(),query,section,occurrence as i64,kind,media.provider.as_str(),identity,artist,album,track,playlist,
+        statement.execute(params![user.as_str(),query,section,occurrence as i64,kind,media.provider.as_str(),identity,artist,album,track,playlist,
                 album_context.map(|(provider,_)|provider.as_str()),album_context.map(|(_,item_id)|item_id.as_str()),serde_json::to_string(&context)?])?;
     }
     Ok(())

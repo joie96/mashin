@@ -348,7 +348,8 @@ fn write_track_list(
     )?;
     transaction.execute(
         "INSERT INTO track_list_states(user_id,query,observed_at) VALUES(?1,?2,?3)
-        ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at",
+        ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at
+        WHERE observed_at IS NOT excluded.observed_at",
         params![user_id.as_str(), serde_json::to_string(query)?, observed_at],
     )?;
     super::catalog_sections::write_catalog_section(transaction, query, user_id, value)

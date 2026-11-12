@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:ffi' as ffi;
 import 'dart:io';
+import 'dart:isolate';
 
 import 'package:ffi/ffi.dart';
+import 'package:flutter/foundation.dart';
 
 import '../../app/logging/app_log_buffer.dart';
 import '../../app/updates/update_channel.dart';
@@ -11,6 +13,163 @@ import '../shared/item_provider_selection.dart';
 import 'android_bridge.dart';
 import 'core_models.dart';
 import 'core_query_scope.dart';
+
+/// Keeps binary image ownership separate from JSON and offloads large metadata.
+Future<Map<String, dynamic>?> decodeNativeCoreEvent(
+  String text,
+  Uint8List? imageBytes, {
+  Future<Object?> Function(String)? decodeLarge,
+}) async {
+  final decoded = text.length >= 64 * 1024
+      ? await (decodeLarge?.call(text) ?? compute(jsonDecode, text))
+      : jsonDecode(text);
+  if (decoded is! Map<String, dynamic>) return null;
+  if (imageBytes != null) {
+    final field = decoded['type'] == 'query_completed' ? 'result' : 'snapshot';
+    (decoded[field] as Map<String, dynamic>)['bytes'] = imageBytes;
+  }
+  return decoded;
+}
+
+class NativeCoreEventDelivery {
+  NativeCoreEventDelivery({
+    required this.onEvent,
+    required this.onError,
+    this.onDecoded,
+  });
+
+  final void Function(Map<String, dynamic>) onEvent;
+  final void Function(Object, StackTrace) onError;
+  final void Function(String type, int characters, int queueMs, int decodeMs)?
+  onDecoded;
+  Future<void> _pending = Future<void>.value();
+  Future<_NativeCoreEventDecoder>? _decoder;
+  bool _isClosed = false;
+
+  // Closing retires queued metadata before its consumer releases native state.
+  void close() {
+    _isClosed = true;
+    unawaited(
+      _decoder?.then<void>(
+        (decoder) => decoder.close(),
+        onError: (Object error, StackTrace stack) {},
+      ),
+    );
+  }
+
+  // Ordered delivery prevents small terminal events from overtaking isolated parsing.
+  Future<void> add(String text, Uint8List? bytes) {
+    final queued = Stopwatch()..start();
+    return _pending = _pending.then((_) async {
+      if (_isClosed) return;
+      final queueMs = queued.elapsedMilliseconds;
+      final decoding = Stopwatch()..start();
+      try {
+        final event = await decodeNativeCoreEvent(
+          text,
+          bytes,
+          decodeLarge: _decodeLarge,
+        );
+        if (!_isClosed && event != null) {
+          onDecoded?.call(
+            event['type'] as String? ?? 'unknown',
+            text.length,
+            queueMs,
+            decoding.elapsedMilliseconds,
+          );
+          onEvent(event);
+        }
+      } catch (error, stack) {
+        if (!_isClosed) onError(error, stack);
+      }
+    });
+  }
+
+  Future<Object?> _decodeLarge(String text) async {
+    _NativeCoreEventDecoder? decoder;
+    try {
+      decoder = await (_decoder ??= _NativeCoreEventDecoder.start());
+      if (_isClosed) return null;
+      return await decoder.decode(text);
+    } on FormatException {
+      rethrow;
+    } catch (_) {
+      decoder?.close();
+      _decoder = null;
+      rethrow;
+    }
+  }
+}
+
+// One worker belongs to one bridge and never retains previously decoded catalogs.
+class _NativeCoreEventDecoder {
+  _NativeCoreEventDecoder(this.isolate, this.port, this.replies, this.requests);
+
+  final Isolate isolate;
+  final ReceivePort port;
+  final StreamIterator<Object?> replies;
+  final SendPort requests;
+
+  // Decoder lifecycle.
+  static Future<_NativeCoreEventDecoder> start() async {
+    final port = ReceivePort();
+    final replies = StreamIterator<Object?>(port);
+    Isolate? isolate;
+    try {
+      isolate = await Isolate.spawn(
+        _run,
+        port.sendPort,
+        onExit: port.sendPort,
+        onError: port.sendPort,
+      );
+      if (!await replies.moveNext() || replies.current is! SendPort) {
+        throw StateError('Native event decoder did not start.');
+      }
+      return _NativeCoreEventDecoder(
+        isolate,
+        port,
+        replies,
+        replies.current as SendPort,
+      );
+    } catch (_) {
+      isolate?.kill(priority: Isolate.immediate);
+      port.close();
+      await replies.cancel();
+      rethrow;
+    }
+  }
+
+  void close() {
+    isolate.kill(priority: Isolate.immediate);
+    port.close();
+    unawaited(replies.cancel());
+  }
+
+  Future<Object?> decode(String text) async {
+    requests.send(text);
+    if (!await replies.moveNext()) {
+      throw StateError('Native event decoder closed.');
+    }
+    final response = replies.current;
+    if (response is! (Object?, String?)) {
+      throw StateError('Native event decoder stopped.');
+    }
+    if (response.$2 != null) throw FormatException(response.$2!);
+    return response.$1;
+  }
+
+  static void _run(SendPort replies) {
+    final requests = ReceivePort();
+    replies.send(requests.sendPort);
+    requests.listen((request) {
+      try {
+        replies.send((jsonDecode(request as String), null));
+      } catch (error) {
+        replies.send((null, error.toString()));
+      }
+    });
+  }
+}
 
 /// Resolves the selected source for actions without changing the original item.
 Future<Map<String, dynamic>> createSelectedProviderMediaItemPayload(
@@ -155,7 +314,11 @@ typedef _DartMediaFavoriteFn = int Function(ffi.Pointer<Utf8>, int);
 typedef _NativeFreeStringFn = ffi.Void Function(ffi.Pointer<Utf8>);
 typedef _DartFreeStringFn = void Function(ffi.Pointer<Utf8>);
 
-typedef _NativeEventCallbackFn = ffi.Void Function(ffi.Pointer<Utf8>);
+typedef _NativeEventCallbackFn =
+    ffi.Void Function(ffi.Pointer<Utf8>, ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+typedef _NativeFreeBytesFn =
+    ffi.Void Function(ffi.Pointer<ffi.Uint8>, ffi.UintPtr);
+typedef _DartFreeBytesFn = void Function(ffi.Pointer<ffi.Uint8>, int);
 typedef _NativeRegisterEventCallbackFn =
     ffi.Int32 Function(ffi.Pointer<ffi.NativeFunction<_NativeEventCallbackFn>>);
 typedef _DartRegisterEventCallbackFn =
@@ -163,7 +326,172 @@ typedef _DartRegisterEventCallbackFn =
 typedef _NativeJsonCommandFn = ffi.Int32 Function(ffi.Pointer<Utf8>);
 typedef _DartJsonCommandFn = int Function(ffi.Pointer<Utf8>);
 
+// Display delivery never releases the terminal operation's native cancellation owner.
+class CatalogQueryDelivery<T> {
+  CatalogQueryDelivery(
+    this.kind,
+    this.arguments,
+    this.decoder, {
+    this.decodeUpdate,
+  });
+
+  final String kind;
+  final Map<String, Object?> arguments;
+  final T Function(Object?) decoder;
+  final T Function(CatalogUpdate)? decodeUpdate;
+  final _display = Completer<T>();
+  Object? _latest;
+  bool _hasUpdate = false;
+  Map<String, dynamic>? _latestEvent;
+  T? _decodedLatest;
+  bool _hasDecodedLatest = false;
+
+  bool get canCompleteFromCatalog =>
+      const {
+        'providerManifests',
+        'recentlyPlayedTracks',
+        'searchMedia',
+        'artist',
+        'album',
+        'albumTracks',
+        'playlist',
+        'playlistTracks',
+        'artistAlbums',
+        'artistTopTracks',
+        'similarArtists',
+        'similarTracks',
+        'trackVersions',
+      }.contains(kind) &&
+      arguments['forceRefresh'] != true &&
+      arguments['allowDynamicTracks'] != true &&
+      (arguments['limit'] == null ||
+          (arguments['limit'] is int &&
+              (arguments['limit'] as int) >= 1 &&
+              (arguments['limit'] as int) <= 100));
+
+  String get _wireKind => switch (kind) {
+    'recentlyPlayedTracks' => 'RecentlyPlayed',
+    'searchMedia' => 'Search',
+    _ => '${kind[0].toUpperCase()}${kind.substring(1)}',
+  };
+
+  T decodeLatest(Object? terminal) {
+    final isCatalogCompletion =
+        terminal is Map && terminal['catalogResultDelivered'] == true;
+    if (isCatalogCompletion && (!canCompleteFromCatalog || !_hasUpdate)) {
+      throw StateError('Catalog completion has no matching observed value.');
+    }
+    if (!canCompleteFromCatalog) return decoder(terminal);
+    if (!_hasUpdate) return decoder(terminal);
+    if (!_hasDecodedLatest) {
+      _decodedLatest = decodeUpdate == null
+          ? decoder(_latest)
+          : decodeUpdate!(_decodeCatalogUpdate(_latestEvent!));
+      _hasDecodedLatest = true;
+    }
+    return _decodedLatest as T;
+  }
+
+  // Query identity includes options that can change the returned inventory.
+  void onEvent(Map<String, dynamic> event) {
+    if (!canCompleteFromCatalog) return;
+    final query = event['query'];
+    final identity = query is Map
+        ? query[_wireKind]
+        : query == _wireKind
+        ? <String, dynamic>{}
+        : null;
+    if (identity is! Map ||
+        identity['item_id'] != arguments['itemId'] ||
+        identity['provider'] != arguments['provider'] ||
+        identity['query'] != arguments['query'] ||
+        identity['limit'] != arguments['limit'] ||
+        identity['allow_dynamic_tracks'] != arguments['allowDynamicTracks'] ||
+        identity['allow_lookup'] != arguments['allowLookup'] ||
+        (kind == 'searchMedia' &&
+            identity['media_type'] != arguments['mediaType'])) {
+      return;
+    }
+    if (event['type'] == 'catalog_updated') {
+      _latest = (event['value'] as Map).values.single;
+      _latestEvent = event;
+      _hasUpdate = true;
+      _hasDecodedLatest = false;
+    } else if (event['type'] == 'catalog_read_changed' &&
+        arguments['allowDynamicTracks'] != true &&
+        event['snapshot'] is Map &&
+        (event['snapshot'] as Map)['is_server_complete'] == true &&
+        _hasUpdate &&
+        !_display.isCompleted) {
+      try {
+        _display.complete(decodeLatest(null));
+      } catch (error, stack) {
+        _display.completeError(error, stack);
+      }
+    }
+  }
+
+  Future<T> resolve(Future<T> terminal) =>
+      Future.any([terminal, _display.future]);
+}
+
+class _PendingImageRead {
+  final local = Completer<ImageReadSnapshot>();
+  late final Future<ImageReadSnapshot> completed;
+  void Function()? unregister;
+}
+
+final _catalogEventStreams = Expando<_CatalogEventStreams>();
+final _decodedCatalogUpdates = Expando<CatalogUpdate>();
+
+CatalogUpdate _decodeCatalogUpdate(Map<String, dynamic> event) =>
+    _decodedCatalogUpdates[event] ??= CatalogUpdate.fromJson(event);
+
+class _CatalogEventStreams {
+  _CatalogEventStreams(Stream<Map<String, dynamic>> events)
+    : updates = _share(events, 'catalog_updated', _decodeCatalogUpdate),
+      readChanges = _share(
+        events,
+        'catalog_read_changed',
+        CatalogReadChange.fromJson,
+      );
+
+  final Stream<CatalogUpdate> updates;
+  final Stream<CatalogReadChange> readChanges;
+
+  // Decode once per active bridge stream; the last consumer releases the raw subscription.
+  static Stream<Value> _share<Value>(
+    Stream<Map<String, dynamic>> events,
+    String type,
+    Value Function(Map<String, dynamic>) decode,
+  ) {
+    StreamSubscription<Value>? subscription;
+    late final StreamController<Value> controller;
+    controller = StreamController<Value>.broadcast(
+      sync: true,
+      onListen: () {
+        subscription = events
+            .where((event) => event['type'] == type)
+            .map(decode)
+            .listen(
+              controller.add,
+              onError: controller.addError,
+              onDone: controller.close,
+            );
+      },
+      onCancel: () {
+        unawaited(subscription?.cancel());
+        subscription = null;
+      },
+    );
+    return controller.stream;
+  }
+}
+
 extension CatalogUpdates on MashinCoreBridgeApi {
+  _CatalogEventStreams get _catalogStreams =>
+      _catalogEventStreams[this] ??= _CatalogEventStreams(events);
+
   Stream<void> get mediaReadInvalidations => events
       .where(
         (event) =>
@@ -173,13 +501,10 @@ extension CatalogUpdates on MashinCoreBridgeApi {
       )
       .map<void>((_) {});
 
-  Stream<CatalogReadChange> get catalogReadChanges => events
-      .where((event) => event['type'] == 'catalog_read_changed')
-      .map(CatalogReadChange.fromJson);
+  Stream<CatalogReadChange> get catalogReadChanges =>
+      _catalogStreams.readChanges;
 
-  Stream<CatalogUpdate> get catalogUpdates => events
-      .where((event) => event['type'] == 'catalog_updated')
-      .map(CatalogUpdate.fromJson);
+  Stream<CatalogUpdate> get catalogUpdates => _catalogStreams.updates;
 }
 
 abstract class MashinCoreBridgeApi {
@@ -206,6 +531,7 @@ abstract class MashinCoreBridgeApi {
   Future<List<ProviderManifest>> getProviderManifests();
   Future<String?> getProviderIconData(String provider);
   Future<MediaItemImage?> getMediaArtwork(MediaItem item);
+  Future<CacheUsage> getCacheUsage();
   Future<void> clearDatabaseCache();
   Future<void> clearImageCache();
   Future<ImageReadSnapshot> readImage(
@@ -228,7 +554,11 @@ abstract class MashinCoreBridgeApi {
     bool forceRefresh = false,
     bool allowDynamicTracks = false,
   });
-  Future<List<Album>> getArtistAlbums(String itemId, String provider);
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  });
   Future<List<Track>> getArtistTopTracks(String itemId, String provider);
   Future<List<Artist>> getSimilarArtists(
     String itemId,
@@ -305,7 +635,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       const String.fromEnvironment('MASHIN_LOG_LEVEL', defaultValue: 'info'),
     );
     _nativeEventCallback = ffi.NativeCallable<_NativeEventCallbackFn>.listener(
-      _dispatchNativeEvent,
+      _handleNativeEvent,
     );
 
     final code = _bindings.setEventCallback(
@@ -360,7 +690,25 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   final Map<int, Completer<Object?>> _pendingMusicAssistantQueries =
       <int, Completer<Object?>>{};
   static int _nextMusicAssistantQueryId = 0;
+  static int _nextImageObservationId = 0;
+  final _imageObservations = <(CoreQueryScope, String), _PendingImageRead>{};
   bool _disposed = false;
+  late final _nativeEventDelivery = NativeCoreEventDelivery(
+    onEvent: _processNativeEvent,
+    onDecoded: (type, characters, queueMs, decodeMs) {
+      if (type != 'log' &&
+          (characters >= 64 * 1024 || queueMs >= 100 || decodeMs >= 100)) {
+        log(
+          LogLevelPreference.trace,
+          'core.event',
+          'type=$type characters=$characters queue_ms=$queueMs decode_ms=$decodeMs',
+        );
+      }
+    },
+    onError: (error, stack) => FlutterError.reportError(
+      FlutterErrorDetails(exception: error, stack: stack),
+    ),
+  );
 
   @override
   Stream<Queue> get queueChanges => _queueController.stream;
@@ -489,6 +837,13 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       );
 
   @override
+  Future<CacheUsage> getCacheUsage() => _startMusicAssistantQuery<CacheUsage>(
+    'getCacheUsage',
+    const <String, Object?>{},
+    (decoded) => CacheUsage.fromJson(decoded as Map<String, dynamic>),
+  );
+
+  @override
   Future<void> clearDatabaseCache() =>
       _submitVoidOperation('clearDatabaseCache');
 
@@ -499,12 +854,79 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   Future<ImageReadSnapshot> readImage(
     ImageRequest request, {
     bool refresh = false,
-  }) => _startMusicAssistantQuery<ImageReadSnapshot>(
-    'readImage',
-    <String, Object?>{'request': request.toJson(), 'refresh': refresh},
-    (Object? decoded) =>
-        ImageReadSnapshot.fromJson(decoded as Map<String, dynamic>),
-  );
+  }) async {
+    final scope = CoreQueryScope.current;
+    if (scope == null) {
+      return _startMusicAssistantQuery<ImageReadSnapshot>(
+        'readImage',
+        {'request': request.toJson(), 'refresh': refresh},
+        (decoded) =>
+            ImageReadSnapshot.fromJson(decoded as Map<String, dynamic>),
+      );
+    }
+    final key = (scope, jsonEncode(request.toJson()));
+    var observation = _imageObservations[key];
+    if (observation == null) {
+      final pending = _PendingImageRead();
+      observation = pending;
+      _imageObservations[key] = pending;
+      final observationId = ++_nextImageObservationId;
+      final subscription = events.listen((event) {
+        if (event['type'] == 'image_read_updated' &&
+            event['observation_id'] == observationId &&
+            !pending.local.isCompleted) {
+          pending.local.complete(
+            ImageReadSnapshot.fromJson(
+              event['snapshot'] as Map<String, dynamic>,
+            ),
+          );
+        }
+      });
+      pending.unregister = scope.registerCancellation(() {
+        _imageObservations.remove(key);
+        if (!pending.local.isCompleted) {
+          pending.local.completeError(const CoreQueryCanceled());
+        }
+      });
+      pending.completed = _submitOperation<ImageReadSnapshot>(
+        'observeImage',
+        {
+          'request': request.toJson(),
+          'observationId': observationId,
+          'isBackground': request.isBackground,
+        },
+        (decoded) =>
+            ImageReadSnapshot.fromJson(decoded as Map<String, dynamic>),
+        queryScope: scope,
+      ).whenComplete(subscription.cancel);
+      unawaited(
+        pending.completed.then<void>(
+          (value) {
+            if (!pending.local.isCompleted) pending.local.complete(value);
+          },
+          onError: (Object error, StackTrace stack) {
+            if (!pending.local.isCompleted) {
+              pending.local.completeError(error, stack);
+            }
+          },
+        ),
+      );
+    }
+    try {
+      final snapshot = await (refresh
+          ? observation.completed
+          : observation.local.future);
+      if (refresh || !snapshot.hasRefresh) {
+        _imageObservations.remove(key);
+        observation.unregister?.call();
+      }
+      return snapshot;
+    } catch (_) {
+      _imageObservations.remove(key);
+      observation.unregister?.call();
+      rethrow;
+    }
+  }
 
   @override
   Future<MediaItemImage?> getMediaArtwork(MediaItem item) =>
@@ -613,10 +1035,18 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   );
 
   @override
-  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  }) {
     return _startMusicAssistantQuery<List<Album>>(
       'artistAlbums',
-      <String, Object?>{'itemId': itemId, 'provider': provider},
+      <String, Object?>{
+        'itemId': itemId,
+        'provider': provider,
+        'isBackground': isBackground,
+      },
       _decodeAlbums,
     );
   }
@@ -680,45 +1110,32 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     Map<String, Object?> arguments,
     T Function(Object? decoded) decoder,
   ) async {
-    final queryKind = switch (kind) {
-      'recentlyPlayedTracks' => CatalogQueryKind.recentlyPlayed,
-      'searchMedia' => CatalogQueryKind.search,
-      _ =>
-        CatalogQueryKind.values
-            .where((value) => value.name == kind)
-            .firstOrNull,
-    };
-    Object? latest;
-    var hasUpdate = false;
-    final subscription = queryKind == null
-        ? null
-        : events.listen((event) {
-            if (event['type'] != 'catalog_updated') return;
-            if (arguments['forceRefresh'] == true) return;
-            final update = CatalogUpdate.fromJson(event);
-            if (update.kind != queryKind ||
-                update.itemId != arguments['itemId'] ||
-                update.provider != arguments['provider'] ||
-                update.searchQuery != arguments['query'] ||
-                update.limit != arguments['limit'] ||
-                update.allowDynamicTracks != arguments['allowDynamicTracks'] ||
-                update.allowLookup != arguments['allowLookup'] ||
-                (queryKind == CatalogQueryKind.search &&
-                    update.mediaType?.name != arguments['mediaType'])) {
-              return;
-            }
-            latest = (event['value'] as Map).values.single;
-            hasUpdate = true;
-          });
+    final delivery = CatalogQueryDelivery<T>(
+      kind,
+      arguments,
+      decoder,
+      decodeUpdate: (update) => switch (kind) {
+        'artist' || 'album' || 'playlist' => update.item as T,
+        'artistAlbums' => update.albums as T,
+        'similarArtists' => update.artists as T,
+        'searchMedia' => update.searchResults as T,
+        'providerManifests' => update.providerManifests as T,
+        _ => update.tracks as T,
+      },
+    );
+    final subscription = events.listen(delivery.onEvent);
     try {
-      return await _submitOperation<T>(
-        kind,
-        arguments,
-        (result) => decoder(hasUpdate ? latest : result),
-        queryScope: CoreQueryScope.current ?? CoreQueryScope(),
+      return await delivery.resolve(
+        _submitOperation<T>(
+          kind,
+          arguments,
+          delivery.decodeLatest,
+          queryScope: CoreQueryScope.current ?? CoreQueryScope(),
+          isCatalogObserved: delivery.canCompleteFromCatalog,
+        ),
       );
     } finally {
-      await subscription?.cancel();
+      await subscription.cancel();
     }
   }
 
@@ -727,6 +1144,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     Map<String, Object?> arguments,
     T Function(Object? result) decoder, {
     CoreQueryScope? queryScope,
+    bool isCatalogObserved = false,
   }) async {
     if (_disposed) throw StateError('Mashin core bridge was disposed.');
     if (queryScope?.isCanceled ?? false) throw const CoreQueryCanceled();
@@ -751,6 +1169,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     final String request = jsonEncode(<String, Object?>{
       'requestId': requestId,
       'kind': kind,
+      if (isCatalogObserved) 'isCatalogObserved': true,
       ...arguments,
     });
     final pointer = request.toNativeUtf8();
@@ -791,7 +1210,9 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
       return result;
     } catch (error) {
       log(
-        LogLevelPreference.debug,
+        error is CoreQueryCanceled
+            ? LogLevelPreference.trace
+            : LogLevelPreference.debug,
         'core.operation',
         'failed request_id=$requestId kind=$kind elapsed_ms=${timer.elapsedMilliseconds} error=$error',
       );
@@ -808,7 +1229,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     try {
       _throwIfError(_bindings.startMusicAssistantQuery(pointer), 'cancelQuery');
       log(
-        LogLevelPreference.debug,
+        LogLevelPreference.trace,
         'core.operation',
         'canceled request_id=$requestId',
       );
@@ -1134,6 +1555,7 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
   // Bridge lifecycle.
   @override
   Future<void> dispose() async {
+    _nativeEventDelivery.close();
     if (_disposed) {
       return;
     }
@@ -1150,6 +1572,10 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
         );
       }
       _pendingMusicAssistantQueries.clear();
+      for (final observation in _imageObservations.values) {
+        observation.unregister?.call();
+      }
+      _imageObservations.clear();
       _bindings.setEventCallback(ffi.nullptr);
       _nativeEventCallback.close();
       await _eventController.close();
@@ -1158,37 +1584,29 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     }
   }
 
-  // The native callback transfers ownership of its string pointer to this bridge.
-  static void _dispatchNativeEvent(ffi.Pointer<Utf8> pointer) {
-    final bridge = _instance;
-    if (bridge == null) {
-      return;
+  // Event processing releases every native pointer exactly once before parsing.
+  void _handleNativeEvent(
+    ffi.Pointer<Utf8> pointer,
+    ffi.Pointer<ffi.Uint8> bytes,
+    int length,
+  ) {
+    String jsonText;
+    Uint8List? imageBytes;
+    try {
+      jsonText = pointer == ffi.nullptr ? '' : pointer.toDartString();
+      if (bytes != ffi.nullptr) {
+        imageBytes = Uint8List.fromList(bytes.asTypedList(length));
+      }
+    } finally {
+      _bindings.freeOwnedString(pointer);
+      _bindings.freeOwnedBytes(bytes, length);
     }
-
-    bridge._handleNativeEvent(pointer);
+    if (_disposed || jsonText.trim().isEmpty) return;
+    unawaited(_nativeEventDelivery.add(jsonText, imageBytes));
   }
 
-  // Event processing releases every native pointer exactly once before parsing.
-  void _handleNativeEvent(ffi.Pointer<Utf8> pointer) {
-    if (pointer == ffi.nullptr) {
-      return;
-    }
-
-    final jsonText = pointer.toDartString();
-    _bindings.freeOwnedString(pointer);
-
-    if (jsonText.trim().isEmpty) {
-      return;
-    }
-
+  void _processNativeEvent(Map<String, dynamic> statePayload) {
     try {
-      final dynamic decoded = jsonDecode(jsonText);
-      if (decoded is! Map<String, dynamic>) {
-        return;
-      }
-
-      final statePayload = decoded;
-
       if (_recordRustLogEvent(statePayload)) {
         return;
       }
@@ -1451,6 +1869,10 @@ class _RustBindings {
             _NativeRegisterEventCallbackFn,
             _DartRegisterEventCallbackFn
           >('mashin_core_set_event_callback'),
+      freeOwnedBytes = library
+          .lookupFunction<_NativeFreeBytesFn, _DartFreeBytesFn>(
+            'mashin_core_free_owned_bytes',
+          ),
       getQueue = library.lookupFunction<_NativeGetStringFn, _DartGetStringFn>(
         'mashin_core_get_queue',
       ),
@@ -1545,6 +1967,7 @@ class _RustBindings {
   final _DartVolumeFn queuePlay;
   final _DartCodecFn setAudioProfile;
   final _DartRegisterEventCallbackFn setEventCallback;
+  final _DartFreeBytesFn freeOwnedBytes;
   final _DartGetStringFn getQueue;
   final _DartGetStringFn getPlayerState;
   final _DartGetStringFn getSessionSettings;

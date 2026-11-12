@@ -15,6 +15,57 @@ import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart'
 import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 
 void main() {
+  test('search updates notify only the affected result section', () async {
+    final bridge = _ObservedSearchCoreBridge();
+    final controller = SearchController(coreBridge: bridge);
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.updates.close();
+    });
+    final counts = <MediaType, int>{};
+    for (final type in [
+      MediaType.track,
+      MediaType.album,
+      MediaType.playlist,
+      MediaType.artist,
+    ]) {
+      controller
+          .sectionChanges(type)
+          .addListener(
+            () => counts.update(type, (count) => count + 1, ifAbsent: () => 1),
+          );
+    }
+    var requestChanges = 0;
+    controller.requestChanges.addListener(() => requestChanges++);
+    final searching = controller.runSearch('jazz');
+    counts.clear();
+    bridge.emitSearch('jazz', MediaType.track);
+    expect(counts, {MediaType.track: 1});
+    bridge.emitAlbums('artist-0', year: 2024);
+    expect(counts, {MediaType.track: 2});
+    expect(requestChanges, 1);
+    bridge.failAll('jazz');
+    await searching;
+    controller.resetResults();
+    expect(requestChanges, 2);
+  });
+
+  test('incomplete search albums are enriched in the background', () async {
+    final bridge = _ObservedSearchCoreBridge();
+    final controller = SearchController(coreBridge: bridge);
+    addTearDown(() async {
+      controller.dispose();
+      await bridge.updates.close();
+    });
+    final searching = controller.runSearch('jazz');
+    bridge.emitSearch('jazz', MediaType.track);
+    expect(bridge.albumPriorities, [true]);
+    bridge.emitAlbums('artist-0', year: 2024);
+    expect(controller.tracks.single.album?.year, 2024);
+    bridge.failAll('jazz');
+    await searching;
+  });
+
   test(
     'search restarts pending reads on provider change without erasing enrichment',
     () async {
@@ -284,7 +335,7 @@ void main() {
   );
 
   test(
-    'changed search tracks replace enrichment without waiting for old albums',
+    'changed search tracks retain shared artists and retire removed artists',
     () async {
       final bridge = _ObservedSearchCoreBridge();
       final controller = SearchController(coreBridge: bridge);
@@ -295,20 +346,20 @@ void main() {
       final searching = controller.runSearch('jazz');
       bridge.emitSearch('jazz', MediaType.track, artistCount: 2);
       expect(bridge.albumRequests, hasLength(2));
+      bridge.emitAlbums('artist-0', year: 2024);
       bridge.emitSearch('jazz', MediaType.track, trackId: 'new');
-      expect(bridge.albumRequests, hasLength(3));
-      expect(
-        bridge.canceled,
-        containsAll(['albums:artist-0', 'albums:artist-1']),
-      );
+      expect(bridge.albumRequests, hasLength(2));
+      expect(bridge.canceled, contains('albums:artist-1'));
+      expect(bridge.canceled, isNot(contains('albums:artist-0')));
+      expect(controller.tracks.single.album?.year, 2024);
       bridge.emitAlbums('artist-1', year: 1900);
-      expect(controller.tracks.single.album?.year, isNull);
+      expect(controller.tracks.single.album?.year, 2024);
       bridge.emitAlbums('artist-0', year: 2024);
       final cached = controller.tracks;
       bridge.emitSearch('jazz', MediaType.track, trackId: 'new');
       expect(identical(controller.tracks, cached), isTrue);
-      expect(bridge.albumRequests, hasLength(3));
-      bridge.albumRequests.first.complete([
+      expect(bridge.albumRequests, hasLength(2));
+      bridge.albumRequests.last.complete([
         Album(
           itemId: 'Album-1',
           provider: 'library',
@@ -807,7 +858,11 @@ class _AlbumSearchCoreBridge extends _FakeSearchCoreBridge {
   }
 
   @override
-  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  }) {
     requestedArtists.add('$itemId:$provider');
     final completer = Completer<List<Album>>();
     pendingAlbums.add(completer);
@@ -892,6 +947,7 @@ class _ObservedSearchCoreBridge extends _DeferredSearchCoreBridge {
   final updates = StreamController<Map<String, dynamic>>.broadcast(sync: true);
   final albumRequests = <Completer<List<Album>>>[];
   final albumArtists = <String>[];
+  final albumPriorities = <bool>[];
   final canceled = <String>[];
 
   @override
@@ -912,10 +968,15 @@ class _ObservedSearchCoreBridge extends _DeferredSearchCoreBridge {
   }
 
   @override
-  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  }) {
     final pending = Completer<List<Album>>();
     albumRequests.add(pending);
     albumArtists.add(itemId);
+    albumPriorities.add(isBackground);
     return CoreQueryScope.current?.execute(
           () => pending.future,
           onCancel: () => canceled.add('albums:$itemId'),

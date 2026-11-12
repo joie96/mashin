@@ -5,6 +5,21 @@ import 'package:mashin/features/core/core_query_scope.dart';
 
 void main() {
   test(
+    'cancellation registrations outlive delivery and can be released',
+    () async {
+      final scope = CoreQueryScope();
+      var canceled = 0;
+      final unregister = scope.registerCancellation(() => canceled++);
+      unregister();
+      scope.registerCancellation(() => canceled++);
+      scope.cancel();
+      scope.cancel();
+      expect(canceled, 1);
+      scope.registerCancellation(() => canceled++);
+      expect(canceled, 2);
+    },
+  );
+  test(
     'child cancellation is isolated and parent cancellation reaches descendants',
     () async {
       final parent = CoreQueryScope();

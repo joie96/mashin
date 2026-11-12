@@ -88,14 +88,19 @@ pub(super) fn write_playlist_read(
         "INSERT INTO users(user_id) VALUES(?1) ON CONFLICT DO NOTHING",
         [user.as_str()],
     )?;
-    transaction.execute("INSERT INTO playlist_read_states(user_id,query,observed_at) VALUES(?1,?2,?3) ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at",params![user.as_str(),key,observed_at])?;
+    transaction.execute("INSERT INTO playlist_read_states(user_id,query,observed_at) VALUES(?1,?2,?3) ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at WHERE observed_at IS NOT excluded.observed_at",params![user.as_str(),key,observed_at])?;
     transaction.execute(
-        "DELETE FROM playlist_read_items WHERE user_id=?1 AND query=?2",
-        params![user.as_str(), key],
+        "DELETE FROM playlist_read_items WHERE user_id=?1 AND query=?2 AND occurrence>=?3",
+        params![user.as_str(), key, items.len() as i64],
+    )?;
+    let mut statement = transaction.prepare_cached(
+        "INSERT INTO playlist_read_items(user_id,query,occurrence,provider,item_id,position,position_known) VALUES(?1,?2,?3,?4,?5,?6,?7)
+         ON CONFLICT(user_id,query,occurrence) DO UPDATE SET provider=excluded.provider,item_id=excluded.item_id,position=excluded.position,position_known=excluded.position_known
+         WHERE (provider,item_id,position,position_known) IS NOT (excluded.provider,excluded.item_id,excluded.position,excluded.position_known)",
     )?;
     for (occurrence, item) in items.into_iter().enumerate() {
         write_playlist_observation(transaction, item, user)?;
-        transaction.execute("INSERT INTO playlist_read_items(user_id,query,occurrence,provider,item_id,position,position_known) VALUES(?1,?2,?3,?4,?5,?6,?7)",
+        statement.execute(
             params![user.as_str(),key,occurrence as i64,item.media.provider.as_str(),item.media.item_id.as_str(),item.media.position,item.media.knowledge.position])?;
     }
     Ok(())

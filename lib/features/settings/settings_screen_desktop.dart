@@ -36,6 +36,7 @@ InputDecoration _desktopSettingsFieldDecoration({
 class SettingsScreenDesktop extends StatelessWidget {
   const SettingsScreenDesktop({
     super.key,
+    required this.cacheContent,
     required this.musicAssistantUrl,
     required this.isDarkTheme,
     required this.logLevel,
@@ -45,6 +46,7 @@ class SettingsScreenDesktop extends StatelessWidget {
     required this.onMultiDeviceButtonVisibilityChanged,
   });
 
+  final Widget cacheContent;
   final String musicAssistantUrl;
   final bool isDarkTheme;
   final LogLevelPreference logLevel;
@@ -96,6 +98,7 @@ class SettingsScreenDesktop extends StatelessWidget {
                 child: TabBarView(
                   children: <Widget>[
                     _DesktopSettingsForm(
+                      cacheContent: cacheContent,
                       musicAssistantUrl: musicAssistantUrl,
                       isDarkTheme: isDarkTheme,
                       onThemeChanged: onThemeChanged,
@@ -163,6 +166,7 @@ class _DesktopLogTab extends StatelessWidget {
 
 class _DesktopSettingsForm extends StatelessWidget {
   const _DesktopSettingsForm({
+    required this.cacheContent,
     required this.musicAssistantUrl,
     required this.isDarkTheme,
     required this.onThemeChanged,
@@ -170,6 +174,7 @@ class _DesktopSettingsForm extends StatelessWidget {
     required this.onMultiDeviceButtonVisibilityChanged,
   });
 
+  final Widget cacheContent;
   final String musicAssistantUrl;
   final bool isDarkTheme;
   final ValueChanged<bool> onThemeChanged;
@@ -263,6 +268,8 @@ class _DesktopSettingsForm extends StatelessWidget {
             ),
           ),
         ),
+        const _DesktopSettingsDivider(),
+        _DesktopSettingsSection(title: 'Cache', child: cacheContent),
       ],
     );
   }

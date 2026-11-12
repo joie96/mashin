@@ -67,12 +67,13 @@ pub(super) fn write_album_observation(
     incoming: &Album,
     user_id: &UserId,
 ) -> Result<(), CacheError> {
-    let album = if let Some(previous) = read_album(
+    let previous = read_album(
         transaction,
         &incoming.media.provider,
         &incoming.media.item_id,
         user_id,
-    )? {
+    )?;
+    let album = if let Some(previous) = previous.clone() {
         let mut merged = MediaItem::Album(previous);
         merged.merge_known(MediaItem::Album(incoming.clone()));
         let MediaItem::Album(album) = merged else {
@@ -91,6 +92,9 @@ pub(super) fn write_album_observation(
         return Err(CacheError::InvalidMediaObservation(
             "external IDs require type and value",
         ));
+    }
+    if previous.as_ref() == Some(&album) {
+        return Ok(());
     }
     let media = &album.media;
     let knowledge = &media.knowledge;
@@ -154,7 +158,32 @@ pub(super) fn read_album(
     item_id: &MediaId,
     user_id: &UserId,
 ) -> Result<Option<Album>, CacheError> {
-    read_album_projection(transaction, provider, item_id, user_id, false)
+    read_album_projection(transaction, provider, item_id, user_id, false, &mut std::collections::HashMap::new())
+}
+
+pub(super) fn read_album_with_artists(
+    transaction: &Transaction<'_>,
+    provider: &ProviderInstanceId,
+    item_id: &MediaId,
+    user_id: &UserId,
+    artists: &mut std::collections::HashMap<(ProviderInstanceId, MediaId), crate::domain::media::Artist>,
+) -> Result<Option<Album>, CacheError> {
+    read_album_projection(transaction, provider, item_id, user_id, false, artists)
+}
+
+pub(super) fn read_cached_artist(
+    transaction: &Transaction<'_>,
+    provider: &ProviderInstanceId,
+    item_id: &MediaId,
+    user_id: &UserId,
+    artists: &mut std::collections::HashMap<(ProviderInstanceId, MediaId), crate::domain::media::Artist>,
+) -> Result<crate::domain::media::Artist, CacheError> {
+    let key = (provider.clone(), item_id.clone());
+    if let Some(artist) = artists.get(&key) { return Ok(artist.clone()); }
+    let artist = super::artists::read_artist(transaction, provider, item_id, user_id)?
+        .ok_or(CacheError::InvalidMediaObservation("related artist is missing"))?;
+    artists.insert(key, artist.clone());
+    Ok(artist)
 }
 
 /// Omits unrequested details while retaining observed images and ordered artist references.
@@ -164,7 +193,7 @@ pub(super) fn read_album_summary(
     item_id: &MediaId,
     user_id: &UserId,
 ) -> Result<Option<Album>, CacheError> {
-    read_album_projection(transaction, provider, item_id, user_id, true)
+    read_album_projection(transaction, provider, item_id, user_id, true, &mut std::collections::HashMap::new())
 }
 
 fn read_album_projection(
@@ -173,6 +202,7 @@ fn read_album_projection(
     item_id: &MediaId,
     user_id: &UserId,
     is_summary: bool,
+    artists: &mut std::collections::HashMap<(ProviderInstanceId, MediaId), crate::domain::media::Artist>,
 ) -> Result<Option<Album>, CacheError> {
     let object = transaction.query_row(
         "SELECT provider,item_id,name,version,sort_name,sort_name_known,uri,uri_known,is_playable,
@@ -223,12 +253,12 @@ fn read_album_projection(
         );
     }
     if are_external_ids_known {
-        let identities = transaction.prepare("SELECT id_type,external_id FROM album_external_ids WHERE album_provider=?1 AND album_item_id=?2 ORDER BY position")?
+        let identities = transaction.prepare_cached("SELECT id_type,external_id FROM album_external_ids WHERE album_provider=?1 AND album_item_id=?2 ORDER BY position")?
             .query_map(params![provider.as_str(),item_id.as_str()],|row| Ok(vec![row.get::<_,String>(0)?,row.get::<_,String>(1)?]))?.collect::<rusqlite::Result<Vec<_>>>()?;
         object.insert("external_ids".into(), serde_json::to_value(identities)?);
     }
     if are_artists_known && is_summary {
-        let artists = transaction.prepare(
+        let artists = transaction.prepare_cached(
             "SELECT artist.provider,artist.item_id,artist.name,artist.sort_name,artist.sort_name_known
              FROM album_artists relation JOIN artists artist
              ON artist.provider=relation.artist_provider AND artist.item_id=relation.artist_item_id
@@ -245,17 +275,15 @@ fn read_album_projection(
         })?.collect::<rusqlite::Result<Vec<_>>>()?;
         object.insert("artists".into(), Value::Array(artists));
     } else if are_artists_known {
-        let identities = transaction.prepare("SELECT artist_provider,artist_item_id FROM album_artists WHERE album_provider=?1 AND album_item_id=?2 ORDER BY position")?
+        let identities = transaction.prepare_cached("SELECT artist_provider,artist_item_id FROM album_artists WHERE album_provider=?1 AND album_item_id=?2 ORDER BY position")?
             .query_map(params![provider.as_str(),item_id.as_str()],|row| Ok((ProviderInstanceId(row.get(0)?),MediaId(row.get(1)?))))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let artists = identities
+        let related_artists = identities
             .into_iter()
             .map(|(provider, item_id)| {
-                super::artists::read_artist(transaction, &provider, &item_id, user_id)?.ok_or(
-                    CacheError::InvalidMediaObservation("album artist is missing"),
-                )
+                read_cached_artist(transaction, &provider, &item_id, user_id, artists)
             })
             .collect::<Result<Vec<_>, CacheError>>()?;
-        object.insert("artists".into(), serde_json::to_value(artists)?);
+        object.insert("artists".into(), serde_json::to_value(related_artists)?);
     }
     if are_mappings_known {
         object.insert(
@@ -285,7 +313,7 @@ fn read_album_mappings(
     provider: &ProviderInstanceId,
     item_id: &MediaId,
 ) -> Result<Vec<Value>, CacheError> {
-    let mut statement = transaction.prepare("SELECT item_id,provider_domain,provider_instance,available,in_library,in_library_known,is_unique,is_unique_known,audio_format,audio_format_known,url,url_known,details,details_known FROM album_provider_mappings WHERE album_provider=?1 AND album_item_id=?2 ORDER BY position")?;
+    let mut statement = transaction.prepare_cached("SELECT item_id,provider_domain,provider_instance,available,in_library,in_library_known,is_unique,is_unique_known,audio_format,audio_format_known,url,url_known,details,details_known FROM album_provider_mappings WHERE album_provider=?1 AND album_item_id=?2 ORDER BY position")?;
     let rows = statement
         .query_map(params![provider.as_str(), item_id.as_str()], |row| {
             let mut object = Map::new();

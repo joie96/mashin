@@ -609,7 +609,11 @@ class _ArtistBridge implements MashinCoreBridgeApi {
   Future<Artist> getArtist(String itemId, String provider) => metadata.future;
 
   @override
-  Future<List<Album>> getArtistAlbums(String itemId, String provider) {
+  Future<List<Album>> getArtistAlbums(
+    String itemId,
+    String provider, {
+    bool isBackground = false,
+  }) {
     albumRequestCount++;
     if (deferSections) {
       return (albumRequests[provider] = Completer<List<Album>>()).future;

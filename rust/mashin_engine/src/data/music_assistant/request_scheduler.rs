@@ -304,7 +304,7 @@ fn dispatch(inner: &Arc<Inner>, state: &mut State) {
             let started = Instant::now();
             let wait_ms = queued_at.elapsed().as_millis();
             let response = operation.await;
-            LOGGER.debug(format_args!(
+            LOGGER.trace(format_args!(
                 "Read finished: command={} priority={:?} wait_ms={} elapsed_ms={} success={}",
                 command,
                 priority,

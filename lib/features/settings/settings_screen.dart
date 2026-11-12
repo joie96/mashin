@@ -1,7 +1,10 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 
 import '../../app/layout/layout_utils.dart';
 import '../../app/session/app_session_controller.dart';
+import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import 'settings_screen_desktop.dart';
 import 'settings_screen_mobile.dart';
@@ -13,6 +16,7 @@ class SettingsScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => SettingsEditor(
+    coreBridge: session.coreBridge,
     musicAssistantUrl: session.baseUrl,
     settings: SessionSettingsUpdate(
       isDarkTheme: session.isDarkTheme,
@@ -27,12 +31,14 @@ class SettingsScreen extends StatelessWidget {
 class SettingsEditor extends StatefulWidget {
   const SettingsEditor({
     super.key,
+    required this.coreBridge,
     required this.musicAssistantUrl,
     required this.settings,
     required this.onSave,
     required this.onLogout,
   });
 
+  final MashinCoreBridgeApi coreBridge;
   final String musicAssistantUrl;
   final SessionSettingsUpdate settings;
   final Future<void> Function(SessionSettingsUpdate) onSave;
@@ -42,11 +48,19 @@ class SettingsEditor extends StatefulWidget {
   State<SettingsEditor> createState() => _SettingsEditorState();
 }
 
+enum _CacheArea { metadata, images }
+
 class _SettingsEditorState extends State<SettingsEditor> {
   late SessionSettingsUpdate _savedSettings;
   late SessionSettingsUpdate _settings;
   Future<void> _pendingSave = Future<void>.value();
   bool _isLoggingOut = false;
+  final _cacheContentKey = GlobalKey();
+  CacheUsage? _cacheUsage;
+  Timer? _cacheRefreshTimer;
+  bool _isReadingCacheUsage = false;
+  bool _hasCacheReadError = false;
+  _CacheArea? _clearingCacheArea;
 
   // Editor construction and lifecycle.
   @override
@@ -54,6 +68,19 @@ class _SettingsEditorState extends State<SettingsEditor> {
     super.initState();
     _savedSettings = widget.settings;
     _settings = widget.settings;
+    unawaited(_refreshCacheUsage());
+    _cacheRefreshTimer = Timer.periodic(const Duration(seconds: 5), (_) {
+      final cacheContext = _cacheContentKey.currentContext;
+      if (cacheContext != null && TickerMode.valuesOf(cacheContext).enabled) {
+        unawaited(_refreshCacheUsage());
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _cacheRefreshTimer?.cancel();
+    super.dispose();
   }
 
   // Ordered settings persistence.
@@ -133,6 +160,45 @@ class _SettingsEditorState extends State<SettingsEditor> {
     }
   }
 
+  // Cache maintenance uses the native drain and invalidation commands.
+  Future<void> _clearCache(_CacheArea area) async {
+    if (_isReadingCacheUsage || _clearingCacheArea != null) return;
+    setState(() => _clearingCacheArea = area);
+    try {
+      if (area == _CacheArea.metadata) {
+        await widget.coreBridge.clearDatabaseCache();
+      } else {
+        await widget.coreBridge.clearImageCache();
+      }
+    } catch (_) {
+      if (mounted) _showMessage('Cache konnte nicht geleert werden.');
+    } finally {
+      if (mounted) {
+        setState(() => _clearingCacheArea = null);
+        await _refreshCacheUsage();
+      }
+    }
+  }
+
+  // Physical usage can change again immediately while the cache refills.
+  Future<void> _refreshCacheUsage() async {
+    if (_isReadingCacheUsage || _clearingCacheArea != null) return;
+    setState(() => _isReadingCacheUsage = true);
+    try {
+      final usage = await widget.coreBridge.getCacheUsage();
+      if (mounted) {
+        setState(() {
+          _cacheUsage = usage;
+          _hasCacheReadError = false;
+        });
+      }
+    } catch (_) {
+      if (mounted) setState(() => _hasCacheReadError = true);
+    } finally {
+      if (mounted) setState(() => _isReadingCacheUsage = false);
+    }
+  }
+
   void _showMessage(String message) => ScaffoldMessenger.of(
     context,
   ).showSnackBar(SnackBar(content: Text(message)));
@@ -142,6 +208,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
   Widget build(BuildContext context) {
     final screen = isCompactLayout(context)
         ? SettingsScreenMobile(
+            cacheContent: _buildCacheContent(),
             musicAssistantUrl: widget.musicAssistantUrl,
             onLogout: _isLoggingOut ? null : _logout,
             isDarkTheme: _settings.isDarkTheme,
@@ -153,6 +220,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
                 _saveMultiDeviceButtonVisibility,
           )
         : SettingsScreenDesktop(
+            cacheContent: _buildCacheContent(),
             musicAssistantUrl: widget.musicAssistantUrl,
             isDarkTheme: _settings.isDarkTheme,
             logLevel: _settings.logLevel,
@@ -163,5 +231,69 @@ class _SettingsEditorState extends State<SettingsEditor> {
                 _saveMultiDeviceButtonVisibility,
           );
     return screen;
+  }
+
+  // Cache rows inherit the section spacing and indentation of each layout.
+  Widget _buildCacheContent() => Column(
+    key: _cacheContentKey,
+    crossAxisAlignment: CrossAxisAlignment.start,
+    children: [
+      _buildCacheRow(
+        'Metadaten-Cache',
+        _CacheArea.metadata,
+        _cacheUsage?.metadataBytes,
+      ),
+      _buildCacheRow('Bild-Cache', _CacheArea.images, _cacheUsage?.imageBytes),
+      if (_hasCacheReadError)
+        Row(
+          children: [
+            const Expanded(child: Text('Cache-Größe nicht verfügbar.')),
+            IconButton(
+              tooltip: 'Cache-Größe erneut laden',
+              onPressed: _isReadingCacheUsage ? null : _refreshCacheUsage,
+              icon: const Icon(Icons.refresh),
+            ),
+          ],
+        ),
+    ],
+  );
+
+  Widget _buildCacheRow(String title, _CacheArea area, int? bytes) => ListTile(
+    contentPadding: EdgeInsets.zero,
+    title: Text(title),
+    subtitle: Text(
+      bytes == null
+          ? (_hasCacheReadError ? 'Nicht verfügbar' : 'Wird ermittelt...')
+          : _formatCacheBytes(bytes),
+    ),
+    trailing: SizedBox(
+      width: 48,
+      height: 48,
+      child: _clearingCacheArea == area
+          ? const Padding(
+              padding: EdgeInsets.all(14),
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : IconButton(
+              tooltip: '$title leeren',
+              onPressed: _isReadingCacheUsage || _clearingCacheArea != null
+                  ? null
+                  : () => _clearCache(area),
+              icon: const Icon(Icons.delete_outline),
+            ),
+    ),
+  );
+
+  // Byte-count presentation.
+  String _formatCacheBytes(int bytes) {
+    if (bytes < 1024) return '$bytes B';
+    var value = bytes.toDouble();
+    const units = ['B', 'KiB', 'MiB', 'GiB', 'TiB'];
+    var unit = 0;
+    while (value >= 1024 && unit < units.length - 1) {
+      value /= 1024;
+      unit++;
+    }
+    return '${value.toStringAsFixed(1).replaceAll('.', ',')} ${units[unit]}';
   }
 }

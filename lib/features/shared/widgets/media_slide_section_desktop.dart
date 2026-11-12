@@ -230,149 +230,157 @@ class _MediaSlideSectionDesktopState<T>
     final bool hasPlayableContent =
         !widget.isLoading && _playableItems().isNotEmpty;
 
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: <Widget>[
-        if (hasTitle)
-          Row(
-            children: <Widget>[
-              Text(
-                widget.title,
-                style: Theme.of(
-                  context,
-                ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
-              ),
-              if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
-                const SizedBox(width: 10),
-                SectionCountBadge(count: widget.items.length),
-              ],
-              const SizedBox(width: 16),
-              const Expanded(child: SectionHeaderDivider()),
-              const SizedBox(width: 16),
-              if (widget.coreBridge != null) ...<Widget>[
-                SectionHeaderIconButton(
-                  icon: Icons.play_arrow,
-                  tooltip: 'Abspielen',
-                  onTap: hasPlayableContent ? _playAll : null,
+    return MediaPageImagePreload(
+      items: widget.items,
+      pageStart: _currentIndex,
+      pageSize: 1,
+      imageSize: 512,
+      isEnabled: !widget.isLoading,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: <Widget>[
+          if (hasTitle)
+            Row(
+              children: <Widget>[
+                Text(
+                  widget.title,
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                    fontWeight: FontWeight.w700,
+                  ),
                 ),
-                const SizedBox(width: 8),
-                SectionHeaderIconButton(
-                  icon: Icons.shuffle,
-                  tooltip: 'Zufällig abspielen',
-                  onTap: hasPlayableContent ? _shufflePlayAll : null,
+                if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
+                  const SizedBox(width: 10),
+                  SectionCountBadge(count: widget.items.length),
+                ],
+                const SizedBox(width: 16),
+                const Expanded(child: SectionHeaderDivider()),
+                const SizedBox(width: 16),
+                if (widget.coreBridge != null) ...<Widget>[
+                  SectionHeaderIconButton(
+                    icon: Icons.play_arrow,
+                    tooltip: 'Abspielen',
+                    onTap: hasPlayableContent ? _playAll : null,
+                  ),
+                  const SizedBox(width: 8),
+                  SectionHeaderIconButton(
+                    icon: Icons.shuffle,
+                    tooltip: 'Zufällig abspielen',
+                    onTap: hasPlayableContent ? _shufflePlayAll : null,
+                  ),
+                ],
+                const SizedBox(width: 4),
+                const SectionHeaderVerticalDivider(),
+                IconButton(
+                  tooltip: 'Vorherige Seite',
+                  onPressed: _canGoPrevious
+                      ? () => _goToIndex(_currentIndex - 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_left_outlined),
+                  visualDensity: VisualDensity.compact,
+                ),
+                IconButton(
+                  tooltip: 'Nächste Seite',
+                  onPressed: _canGoNext
+                      ? () => _goToIndex(_currentIndex + 1)
+                      : null,
+                  icon: const Icon(Icons.chevron_right_outlined),
+                  visualDensity: VisualDensity.compact,
                 ),
               ],
-              const SizedBox(width: 4),
-              const SectionHeaderVerticalDivider(),
-              IconButton(
-                tooltip: 'Vorherige Seite',
-                onPressed: _canGoPrevious
-                    ? () => _goToIndex(_currentIndex - 1)
-                    : null,
-                icon: const Icon(Icons.chevron_left_outlined),
-                visualDensity: VisualDensity.compact,
-              ),
-              IconButton(
-                tooltip: 'Nächste Seite',
-                onPressed: _canGoNext
-                    ? () => _goToIndex(_currentIndex + 1)
-                    : null,
-                icon: const Icon(Icons.chevron_right_outlined),
-                visualDensity: VisualDensity.compact,
-              ),
-            ],
-          ),
-        if (hasTitle) const SizedBox(height: 10),
-        if (widget.isLoading)
-          _DesktopSlideSkeleton(
-            height: widget.height,
-            coverSize: widget.coverSize,
-          )
-        else if (widget.items.isEmpty)
-          Text(
-            widget.emptyText,
-            style: context.mashinTableTextStyles.emptyState,
-          )
-        else
-          SizedBox(
-            height: widget.height,
-            child: ClipRRect(
-              borderRadius: BorderRadius.circular(10),
-              child: DecoratedBox(
-                decoration: BoxDecoration(color: colors.bgSecondary),
-                child: AnimatedSwitcher(
-                  duration: _slideDuration,
-                  switchInCurve: _slideCurve,
-                  switchOutCurve: _slideCurve,
-                  transitionBuilder:
-                      (Widget child, Animation<double> animation) {
-                        final bool incoming =
-                            child.key == ValueKey<int>(_currentIndex);
-                        final double beginOffset = incoming
-                            ? _direction.toDouble()
-                            : -_direction.toDouble();
-                        final Animation<Offset> offsetAnimation = Tween<Offset>(
-                          begin: Offset(beginOffset * 0.08, 0),
-                          end: Offset.zero,
-                        ).animate(animation);
+            ),
+          if (hasTitle) const SizedBox(height: 10),
+          if (widget.isLoading)
+            _DesktopSlideSkeleton(
+              height: widget.height,
+              coverSize: widget.coverSize,
+            )
+          else if (widget.items.isEmpty)
+            Text(
+              widget.emptyText,
+              style: context.mashinTableTextStyles.emptyState,
+            )
+          else
+            SizedBox(
+              height: widget.height,
+              child: ClipRRect(
+                borderRadius: BorderRadius.circular(10),
+                child: DecoratedBox(
+                  decoration: BoxDecoration(color: colors.bgSecondary),
+                  child: AnimatedSwitcher(
+                    duration: _slideDuration,
+                    switchInCurve: _slideCurve,
+                    switchOutCurve: _slideCurve,
+                    transitionBuilder:
+                        (Widget child, Animation<double> animation) {
+                          final bool incoming =
+                              child.key == ValueKey<int>(_currentIndex);
+                          final double beginOffset = incoming
+                              ? _direction.toDouble()
+                              : -_direction.toDouble();
+                          final Animation<Offset> offsetAnimation =
+                              Tween<Offset>(
+                                begin: Offset(beginOffset * 0.08, 0),
+                                end: Offset.zero,
+                              ).animate(animation);
 
-                        return FadeTransition(
-                          opacity: animation,
-                          child: SlideTransition(
-                            position: offsetAnimation,
-                            child: child,
-                          ),
-                        );
-                      },
-                  child: Listener(
-                    key: ValueKey<int>(_currentIndex),
-                    onPointerDown: _openContextMenu,
-                    child: Opacity(
-                      opacity:
-                          resolvePlayableMediaItem(
-                                widget.items[_currentIndex],
-                              )?.canPlay ==
-                              false
-                          ? 0.35
-                          : 1,
-                      child: _DesktopSlideCard<T>(
-                        item: widget.items[_currentIndex],
-                        index: _currentIndex,
-                        coverSize: widget.coverSize,
-                        coreEvents: widget.coreEvents,
-                        isFavorite: _isItemFavorite(
-                          widget.items[_currentIndex],
-                          _currentIndex,
-                        ),
-                        onPlayTap:
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: offsetAnimation,
+                              child: child,
+                            ),
+                          );
+                        },
+                    child: Listener(
+                      key: ValueKey<int>(_currentIndex),
+                      onPointerDown: _openContextMenu,
+                      child: Opacity(
+                        opacity:
                             resolvePlayableMediaItem(
                                   widget.items[_currentIndex],
                                 )?.canPlay ==
-                                true
-                            ? _playCurrent
-                            : null,
-                        onFavoriteTap: widget.onRowFavoriteTap == null
-                            ? null
-                            : () => widget.onRowFavoriteTap!(
-                                widget.items[_currentIndex],
-                                _currentIndex,
-                              ),
-                        onMoreTap: _openMore,
-                        onArtistTap: widget.onArtistTap,
-                        onAlbumTap: widget.onAlbumTap,
-                        onPlaylistTap: widget.onPlaylistTap,
+                                false
+                            ? 0.35
+                            : 1,
+                        child: _DesktopSlideCard<T>(
+                          item: widget.items[_currentIndex],
+                          index: _currentIndex,
+                          coverSize: widget.coverSize,
+                          coreEvents: widget.coreEvents,
+                          isFavorite: _isItemFavorite(
+                            widget.items[_currentIndex],
+                            _currentIndex,
+                          ),
+                          onPlayTap:
+                              resolvePlayableMediaItem(
+                                    widget.items[_currentIndex],
+                                  )?.canPlay ==
+                                  true
+                              ? _playCurrent
+                              : null,
+                          onFavoriteTap: widget.onRowFavoriteTap == null
+                              ? null
+                              : () => widget.onRowFavoriteTap!(
+                                  widget.items[_currentIndex],
+                                  _currentIndex,
+                                ),
+                          onMoreTap: _openMore,
+                          onArtistTap: widget.onArtistTap,
+                          onAlbumTap: widget.onAlbumTap,
+                          onPlaylistTap: widget.onPlaylistTap,
+                        ),
                       ),
                     ),
                   ),
                 ),
               ),
             ),
+          const Padding(
+            padding: EdgeInsets.only(top: 8),
+            child: SizedBox(height: 24),
           ),
-        const Padding(
-          padding: EdgeInsets.only(top: 8),
-          child: SizedBox(height: 24),
-        ),
-      ],
+        ],
+      ),
     );
   }
 }
@@ -460,13 +468,13 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                                     fit: BoxFit.cover,
                                     fallback: Icon(
                                       data.fallbackIcon,
-                                      color: colors.accent,
+                                      color: colors.textSecondary,
                                       size: 46,
                                     ),
                                   )
                                 : Icon(
                                     data.fallbackIcon,
-                                    color: colors.accent,
+                                    color: colors.textSecondary,
                                     size: 46,
                                   ),
                           ),

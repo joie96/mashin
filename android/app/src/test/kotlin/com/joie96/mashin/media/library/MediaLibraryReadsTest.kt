@@ -13,6 +13,31 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class MediaLibraryReadsTest {
     @Test
+    fun payloadFreeStatusRetainsCachedValueUntilInvalidation() {
+        val request = SettableFuture.create<String>()
+        val read = LibraryRead(LibraryReadKind.PlaylistTracks, "id", "provider")
+        val reads = MediaLibraryReads { _, _ -> request }
+        val first = reads.results(read)
+        reads.onCoreEvent(event(read, JSONArray().put(JSONObject().put("name", "cached"))))
+        val status = JSONObject().put("type", "catalog_read_changed")
+            .put("query", event(read, JSONArray()).getJSONObject("query"))
+            .put("snapshot", JSONObject().put("phase", "failed").put("source", "cache")
+                .put("knowledge", "observed_response").put("error", "offline"))
+        assertFalse(status.getJSONObject("snapshot").has("value"))
+        reads.onCoreEvent(status)
+        assertEquals("cached", JSONArray(reads.results(read).get()).getJSONObject(0).getString("name"))
+        assertTrue(first.isDone)
+        assertFalse(request.isDone)
+        var invalidated: LibraryRead? = null
+        reads.onInvalidated = { invalidated = it }
+        status.getJSONObject("snapshot").put("phase", "invalidated")
+        reads.onCoreEvent(status)
+        assertEquals(read, invalidated)
+        assertTrue(request.isCancelled)
+        reads.close()
+    }
+
+    @Test
     fun everyReadAcceptsKnownEmptyBeforeRefreshAndRetainsItOnFailure() {
         LibraryReadKind.entries.filter { it.command != "recommendations" }.forEach { kind ->
             val remote = SettableFuture.create<String>()
@@ -104,6 +129,52 @@ class MediaLibraryReadsTest {
             .put("snapshot", JSONObject().put("phase", "invalidated")))
         assertTrue(first.isCancelled)
         assertTrue(request.isCancelled)
+        assertEquals(read, invalidated)
+        reads.close()
+    }
+
+    @Test
+    fun recommendationDeltasRetainNeighborsRemoveFoldersAndRejectRetiredValues() {
+        assertRecommendationDeltas(LibraryReadKind.HomeRecommendations)
+    }
+
+    @Test
+    fun exploreDeltasRetainNeighborsRemoveFoldersAndRejectRetiredValues() {
+        assertRecommendationDeltas(LibraryReadKind.ExploreRecommendations)
+    }
+
+    private fun assertRecommendationDeltas(kind: LibraryReadKind) {
+        val request = SettableFuture.create<String>()
+        val reads = MediaLibraryReads { _, _ -> request }
+        val read = LibraryRead(kind)
+        val first = reads.results(read)
+        fun folder(id: String, title: String) = JSONObject().put("provider", "source")
+            .put("item_id", id).put("title", title).put("items", JSONArray())
+        fun publish(revision: Long, sequence: Long, folders: List<JSONObject>, order: List<String>) {
+            reads.onCoreEvent(JSONObject().put("type", "recommendations_updated")
+                .put("view", if (kind == LibraryReadKind.HomeRecommendations) "home" else "explore")
+                .put("snapshot", JSONObject().put("revision", revision).put("folders", JSONArray(folders))
+                    .put("is_loading", false).put("has_load_error", false)
+                    .put("delta", JSONObject().put("revision", revision).put("sequence", sequence)
+                        .put("order", JSONArray(order.map { JSONObject().put("provider", "source").put("item_id", it) })))))
+        }
+        publish(1, 1, listOf(folder("a", "First"), folder("b", "Second")), listOf("a", "b"))
+        assertEquals(2, JSONObject(first.get()).getJSONArray("folders").length())
+        publish(1, 2, listOf(folder("b", "Updated")), listOf("a", "b"))
+        val updated = JSONObject(reads.results(read).get()).getJSONArray("folders")
+        assertEquals("First", updated.getJSONObject(0).getString("title"))
+        assertEquals("Updated", updated.getJSONObject(1).getString("title"))
+        publish(1, 2, listOf(folder("b", "Duplicate")), listOf("a", "b"))
+        assertEquals("Updated", JSONObject(reads.results(read).get()).getJSONArray("folders").getJSONObject(1).getString("title"))
+        publish(1, 3, emptyList(), listOf("a"))
+        assertEquals(1, JSONObject(reads.results(read).get()).getJSONArray("folders").length())
+        publish(2, 1, listOf(folder("a", "New read")), listOf("a"))
+        request.set(JSONObject().put("revision", 1).put("folders", JSONArray())
+            .put("is_loading", false).put("has_load_error", false).toString())
+        assertEquals("New read", JSONObject(reads.results(read).get()).getJSONArray("folders").getJSONObject(0).getString("title"))
+        var invalidated: LibraryRead? = null
+        reads.onInvalidated = { invalidated = it }
+        publish(2, 3, listOf(folder("a", "Gap")), listOf("a"))
         assertEquals(read, invalidated)
         reads.close()
     }

@@ -45,6 +45,58 @@ pub(crate) struct UserDataSnapshot {
     pub(crate) favorite_overrides: Vec<FavoriteOverride>,
 }
 
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct PrivatePlaylistMetadata {
+    #[serde(flatten)]
+    playlist: Playlist,
+    is_loading_tracks: bool,
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct UserDataMetadataSnapshot {
+    revision: u64,
+    playlists: Vec<PrivatePlaylistMetadata>,
+    is_loading_favorites: bool,
+    is_loading_playlists: bool,
+    has_loaded_favorites: bool,
+}
+
+impl From<&UserDataSnapshot> for UserDataMetadataSnapshot {
+    fn from(snapshot: &UserDataSnapshot) -> Self {
+        Self {
+            revision: snapshot.revision,
+            playlists: snapshot.playlists.iter().map(|entry| PrivatePlaylistMetadata {
+                playlist: entry.playlist.clone(),
+                is_loading_tracks: entry.is_loading_tracks,
+            }).collect(),
+            is_loading_favorites: snapshot.is_loading_favorites,
+            is_loading_playlists: snapshot.is_loading_playlists,
+            has_loaded_favorites: snapshot.has_loaded_favorites,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub(crate) struct UserDataFavoritesSnapshot {
+    revision: u64,
+    favorites: Favorites,
+    is_loading_favorites: bool,
+    has_loaded_favorites: bool,
+    favorite_overrides: Vec<FavoriteOverride>,
+}
+
+impl From<UserDataSnapshot> for UserDataFavoritesSnapshot {
+    fn from(snapshot: UserDataSnapshot) -> Self {
+        Self {
+            revision: snapshot.revision,
+            favorites: snapshot.favorites,
+            is_loading_favorites: snapshot.is_loading_favorites,
+            has_loaded_favorites: snapshot.has_loaded_favorites,
+            favorite_overrides: snapshot.favorite_overrides,
+        }
+    }
+}
+
 impl Favorites {
     // Favorite projection updates never modify the caller's media values.
     pub(crate) fn set_item(&mut self, item: MediaItem, is_favorite: bool) {

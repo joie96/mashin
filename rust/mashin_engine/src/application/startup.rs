@@ -110,7 +110,7 @@ pub(crate) async fn load_initial_playlist_tracks(
                     .observe_catalog(query, false)
                     .filter_map(move |mut snapshot| {
                         if snapshot.knowledge == CatalogReadKnowledge::ObservedResponse {
-                            if let Some(CatalogValue::Tracks(items)) = &snapshot.value {
+                            if let Some(CatalogValue::Tracks(items)) = snapshot.value.as_deref() {
                                 if has_published && previous_items == *items {
                                     snapshot.value = None;
                                 } else {
@@ -135,7 +135,7 @@ pub(crate) async fn load_initial_playlist_tracks(
                 continue;
             }
             if snapshot.knowledge == CatalogReadKnowledge::ObservedResponse {
-                if let Some(CatalogValue::Tracks(items)) = snapshot.value {
+                if let Some(CatalogValue::Tracks(items)) = snapshot.value.map(std::sync::Arc::unwrap_or_clone) {
                     publisher
                         .publish(InitialUserDataUpdate::PlaylistTracks { item_id, items })
                         .await?;
@@ -207,9 +207,10 @@ pub(super) mod tests {
             );
             self.reads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
             let cached = CatalogLoadSnapshot {
-                value: Some(CatalogValue::Tracks(serde_json::from_value(serde_json::json!([
+                publication_revision: 0,
+                value: Some(std::sync::Arc::new(CatalogValue::Tracks(serde_json::from_value(serde_json::json!([
                     {"provider":"library","item_id":"track","name":"Cached track","duration":120}
-                ])).unwrap())),
+                ])).unwrap()))),
                 source: Some(CatalogDataSource::Cache),
                 phase: CatalogLoadPhase::Refreshing,
                 knowledge: CatalogReadKnowledge::ObservedResponse,
@@ -221,7 +222,7 @@ pub(super) mod tests {
             let mut completed = cached.clone();
             completed.phase = self.terminal.unwrap_or(CatalogLoadPhase::Ready);
             if completed.phase == CatalogLoadPhase::Ready {
-                completed.value = Some(CatalogValue::Tracks(Vec::new()));
+                completed.value = Some(std::sync::Arc::new(CatalogValue::Tracks(Vec::new())));
                 completed.source = Some(CatalogDataSource::Server);
             } else {
                 completed.error = Some("controlled refresh failure".into());

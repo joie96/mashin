@@ -62,8 +62,7 @@ class MediaArtworkBackground extends StatelessWidget {
 
 /// Visible subscribers own local image reads and their optional native refresh.
 class MediaImage extends StatefulWidget {
-  static const _maximumRetainedBytes = 16 * 1024 * 1024;
-  static const _maximumRetainedImages = 256;
+  static const _maximumRetainedBytes = 128 * 1024 * 1024;
   static final _retainedImages = <String, _RetainedImage>{};
   static int _retainedByteCount = 0;
   static Future<MediaItemImage?> Function(MediaItem)? _loadArtwork;
@@ -145,8 +144,7 @@ class MediaImage extends StatefulWidget {
         : bytes;
     if (retained.length > _maximumRetainedBytes) return retained;
     while (_retainedImages.isNotEmpty &&
-        (_retainedImages.length >= _maximumRetainedImages ||
-            _retainedByteCount + retained.length > _maximumRetainedBytes)) {
+        _retainedByteCount + retained.length > _maximumRetainedBytes) {
       _retainedByteCount -= _retainedImages
           .remove(_retainedImages.keys.first)!
           .bytes
@@ -170,6 +168,14 @@ class MediaImage extends StatefulWidget {
       'request': jsonEncode(request.toJson()),
     },
   ).toString();
+
+  static String _retainedImageKey(String source, ImageRequest request) {
+    final proxyId = request.image.proxyId?.trim();
+    if (proxyId == null || !RegExp(r'^[a-f0-9]{64}$').hasMatch(proxyId)) {
+      return source;
+    }
+    return jsonEncode([_imageGeneration, proxyId, request.size]);
+  }
 
   static bool _hasSameImageIdentity(String previous, String current) {
     try {
@@ -255,11 +261,17 @@ class MediaImage extends StatefulWidget {
     required this.source,
     required this.fit,
     required this.fallback,
+    this.cacheWidth,
+    this.cacheHeight,
+    this.isBackground = false,
   });
 
   final String source;
   final BoxFit fit;
   final Widget fallback;
+  final int? cacheWidth;
+  final int? cacheHeight;
+  final bool isBackground;
 
   @override
   State<MediaImage> createState() => _MediaImageState();
@@ -270,6 +282,102 @@ class _RetainedImage {
 
   final Uint8List bytes;
   final String? proxyId;
+}
+
+/// Owns background image reads for the two pages beside the displayed page.
+class MediaPageImagePreload extends StatelessWidget {
+  const MediaPageImagePreload({
+    super.key,
+    required this.items,
+    required this.pageStart,
+    required this.pageSize,
+    required this.imageSize,
+    required this.child,
+    this.isEnabled = true,
+  });
+
+  final List<Object?> items;
+  final int pageStart;
+  final int pageSize;
+  final int imageSize;
+  final bool isEnabled;
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) => Stack(
+    children: [
+      child,
+      if (isEnabled && pageSize > 0)
+        Positioned(
+          top: 0,
+          left: 0,
+          child: ExcludeSemantics(
+            child: IgnorePointer(
+              child: Opacity(
+                opacity: 0,
+                child: ValueListenableBuilder<int>(
+                  valueListenable: ProviderManifestRegistry.changes,
+                  builder: (context, _, _) {
+                    final sources = <String>{};
+                    for (final start in [
+                      pageStart - pageSize,
+                      pageStart + pageSize,
+                    ]) {
+                      if (start < 0 || start >= items.length) continue;
+                      for (final item in items.skip(start).take(pageSize)) {
+                        final mediaItem = switch (item) {
+                          QueueItem() => item.mediaItem,
+                          MediaItem() => item,
+                          _ => null,
+                        };
+                        if (mediaItem == null) continue;
+                        final image = item is QueueItem
+                            ? item.imageUriForSize(imageSize)
+                            : mediaItem.imageUriForSize(imageSize);
+                        if (image != null && image.isNotEmpty) {
+                          sources.add(image);
+                        }
+                        final providers = {
+                          mediaItem.provider,
+                          for (final mapping in mediaItem.providerMappings)
+                            if (mapping.available) mapping.providerDomain,
+                        };
+                        for (final provider in providers) {
+                          final icon =
+                              ProviderManifestRegistry.iconSourceForProvider(
+                                provider,
+                              );
+                          if (icon != null && icon.isNotEmpty) {
+                            sources.add(icon);
+                          }
+                        }
+                      }
+                    }
+                    return SizedBox.square(
+                      dimension: 1,
+                      child: Stack(
+                        children: [
+                          for (final source in sources)
+                            Positioned.fill(
+                              child: MediaImage(
+                                key: ValueKey(source),
+                                source: source,
+                                fit: BoxFit.contain,
+                                fallback: const SizedBox.shrink(),
+                                isBackground: true,
+                              ),
+                            ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        ),
+    ],
+  );
 }
 
 class _MediaImageState extends State<MediaImage>
@@ -287,6 +395,12 @@ class _MediaImageState extends State<MediaImage>
   bool _hasPendingSourceChange = false;
   int _loadGeneration = 0;
   int _imageLoadGeneration = 0;
+  List<ScrollPosition> _scrollPositions = [];
+  bool _isInViewport = true;
+  bool _isNearViewport = true;
+  bool _isBackgroundImageRead = false;
+  bool _isViewportCheckQueued = false;
+  Completer<void>? _initialLayout;
 
   @override
   void initState() {
@@ -323,13 +437,83 @@ class _MediaImageState extends State<MediaImage>
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
+    Scrollable.maybeOf(context, axis: Axis.vertical);
+    Scrollable.maybeOf(context, axis: Axis.horizontal);
+    final positions = <ScrollPosition>[];
+    context.visitAncestorElements((element) {
+      if (element is StatefulElement) {
+        final state = element.state;
+        if (state is ScrollableState) positions.add(state.position);
+      }
+      return true;
+    });
+    if (!listEquals(positions, _scrollPositions)) {
+      for (final position in _scrollPositions) {
+        position.removeListener(_scheduleViewportCheck);
+      }
+      _scrollPositions = positions;
+      for (final position in positions) {
+        position.addListener(_scheduleViewportCheck);
+      }
+    }
+    if (positions.isNotEmpty && _initialLayout == null) {
+      _initialLayout = Completer<void>();
+    }
     final isVisible =
         TickerMode.valuesOf(context).enabled &&
         (ModalRoute.of(context)?.isCurrent ?? true);
     onDetailPageVisibilityChanged(isVisible);
     if (isVisible) {
+      _scheduleViewportCheck();
       unawaited(_loadMissingArtwork());
     }
+  }
+
+  // Layout, not cache-extent construction, determines the interactive artwork lane.
+  void _scheduleViewportCheck() {
+    if (_isViewportCheckQueued) return;
+    _isViewportCheckQueued = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _isViewportCheckQueued = false;
+      if (!mounted || !_isVisible) return;
+      final render = context.findRenderObject();
+      _isInViewport = true;
+      _isNearViewport = true;
+      if (render is RenderBox && render.hasSize) {
+        var visibleBounds = render.localToGlobal(Offset.zero) & render.size;
+        var prefetchBounds = visibleBounds;
+        for (final position in _scrollPositions) {
+          final viewport = position.context.notificationContext
+              ?.findRenderObject();
+          if (viewport is! RenderBox || !viewport.hasSize) continue;
+          final bounds = viewport.localToGlobal(Offset.zero) & viewport.size;
+          visibleBounds = visibleBounds.intersect(bounds);
+          prefetchBounds = prefetchBounds.intersect(
+            Rect.fromLTRB(
+              bounds.left - bounds.width,
+              bounds.top - bounds.height,
+              bounds.right + bounds.width,
+              bounds.bottom + bounds.height,
+            ),
+          );
+        }
+        _isInViewport = !visibleBounds.isEmpty;
+        _isNearViewport = !prefetchBounds.isEmpty;
+      }
+      if (_initialLayout != null && !_initialLayout!.isCompleted) {
+        _initialLayout!.complete();
+      }
+      if (!widget.isBackground &&
+          _isInViewport &&
+          _isLoadingImage &&
+          _isBackgroundImageRead) {
+        _imageLoadGeneration++;
+        _imageScope.cancel();
+        _imageScope = _queryScope.createChild();
+        _isLoadingImage = false;
+      }
+      unawaited(_loadMissingArtwork());
+    });
   }
 
   @override
@@ -367,6 +551,12 @@ class _MediaImageState extends State<MediaImage>
 
   @override
   void dispose() {
+    for (final position in _scrollPositions) {
+      position.removeListener(_scheduleViewportCheck);
+    }
+    if (_initialLayout != null && !_initialLayout!.isCompleted) {
+      _initialLayout!.complete();
+    }
     MediaImage._imageChanges.removeListener(_onImageSessionChanged);
     MediaImage._cacheChanges.removeListener(_onImageSessionChanged);
     MediaImage._sourceChanges.removeListener(_onImageSourceChanged);
@@ -391,6 +581,12 @@ class _MediaImageState extends State<MediaImage>
       await _loadImageSource(source);
       return;
     }
+    final retained = MediaImage._readRetainedImage(source);
+    if (retained != null && !listEquals(_bytes, retained)) {
+      setState(() => _bytes = retained);
+    }
+    if (_initialLayout != null) await _initialLayout!.future;
+    if (!mounted || !_isVisible || !_isNearViewport) return;
     if (_resolvedSource != null) {
       unawaited(_loadImageSource(_resolvedSource!));
       if (_hasLoadedArtwork) return;
@@ -578,26 +774,42 @@ class _MediaImageState extends State<MediaImage>
         return;
       }
       _proxyId = request.image.proxyId;
-      final retained = MediaImage._readRetainedImage(source);
+      final retainedKey = widget.source.startsWith('mashin-artwork:')
+          ? widget.source
+          : MediaImage._retainedImageKey(source, request);
+      final retained = MediaImage._readRetainedImage(retainedKey);
       if (retained != null && !listEquals(_bytes, retained)) {
         setState(() => _bytes = retained);
       }
-      var snapshot = await _imageScope.run(() => loader(request, false));
+      if (_initialLayout != null) await _initialLayout!.future;
+      if (!isCurrent() || !_isNearViewport) return;
+      _isBackgroundImageRead = widget.isBackground || !_isInViewport;
+      final scheduledRequest = ImageRequest(
+        image: request.image,
+        ownerUri: request.ownerUri,
+        position: request.position,
+        size: request.size,
+        providerIconRole: request.providerIconRole,
+        isBackground: _isBackgroundImageRead,
+      );
+      var snapshot = await _imageScope.run(
+        () => loader(scheduledRequest, false),
+      );
       if (!isCurrent()) return;
       if (snapshot.bytes != null) {
         final bytes = MediaImage._retainImage(
-          source,
+          retainedKey,
           _proxyId,
           snapshot.bytes!,
         );
         if (!listEquals(_bytes, bytes)) setState(() => _bytes = bytes);
       }
       if (snapshot.hasRefresh) {
-        snapshot = await _imageScope.run(() => loader(request, true));
+        snapshot = await _imageScope.run(() => loader(scheduledRequest, true));
         if (!isCurrent()) return;
         if (snapshot.bytes != null) {
           final bytes = MediaImage._retainImage(
-            source,
+            retainedKey,
             _proxyId,
             snapshot.bytes!,
           );
@@ -638,6 +850,8 @@ class _MediaImageState extends State<MediaImage>
       return Image.memory(
         cachedBytes,
         fit: widget.fit,
+        cacheWidth: widget.cacheWidth,
+        cacheHeight: widget.cacheHeight,
         gaplessPlayback: true,
         errorBuilder: (_, _, _) => widget.fallback,
       );
@@ -670,6 +884,8 @@ class _MediaImageState extends State<MediaImage>
       return Image.memory(
         bytes,
         fit: widget.fit,
+        cacheWidth: widget.cacheWidth,
+        cacheHeight: widget.cacheHeight,
         gaplessPlayback: true,
         errorBuilder: (_, _, _) => widget.fallback,
       );

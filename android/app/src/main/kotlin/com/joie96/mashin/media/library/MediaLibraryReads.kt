@@ -29,6 +29,8 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
         var request: ListenableFuture<String>? = null
         var error: Throwable? = null
         var hasObservedFolders = false
+        var recommendation: JSONObject? = null
+        var recommendationSequence = 0L
     }
     private val observations = mutableMapOf<LibraryRead, Observation>()
     private var isClosed = false
@@ -74,9 +76,11 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
                 Futures.addCallback(request, object : FutureCallback<String> {
                     override fun onSuccess(value: String?) {
                         try {
-                            val parsed = if (read.kind.command == "recommendations") JSONObject(checkNotNull(value)).toString()
-                                else JSONArray(checkNotNull(value)).toString()
-                            accept(read, created, parsed)
+                            if (read.kind.command == "recommendations") {
+                                acceptRecommendation(read, created, JSONObject(checkNotNull(value)))
+                            } else {
+                                accept(read, created, JSONArray(checkNotNull(value)).toString())
+                            }
                         }
                         catch (error: Exception) { fail(read, created, error) }
                     }
@@ -99,7 +103,7 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
         if (event.optString("type") == "recommendations_updated") {
             observations.toMap().forEach { (read, observation) ->
                 if (read.kind.command == "recommendations" && read.kind.mediaType == event.optString("view")) {
-                    event.optJSONObject("snapshot")?.let { accept(read, observation, it.toString()) }
+                    event.optJSONObject("snapshot")?.let { acceptRecommendation(read, observation, it) }
                 }
             }
             return
@@ -163,6 +167,61 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
 
     private fun sameReference(item: JSONObject, query: JSONObject): Boolean =
         item.optString("item_id") == query.optString("item_id") && item.optString("provider") == query.optString("provider")
+
+    @Synchronized
+    private fun acceptRecommendation(read: LibraryRead, observation: Observation, snapshot: JSONObject) {
+        if (isClosed || observations[read] !== observation) return
+        val previous = observation.recommendation
+        val revision = snapshot.optLong("revision")
+        val previousRevision = previous?.optLong("revision") ?: 0L
+        if (revision != 0L && revision < previousRevision) return
+        val delta = snapshot.optJSONObject("delta")
+        val projected = if (delta != null) {
+            val sequence = delta.getLong("sequence")
+            if (revision == previousRevision && sequence <= observation.recommendationSequence) return
+            val isNewRead = revision > previousRevision
+            val expected = if (isNewRead) 1L else observation.recommendationSequence + 1L
+            if (delta.getLong("revision") != revision || sequence != expected) {
+                release(read)
+                onInvalidated?.invoke(read)
+                return
+            }
+            val folders = mutableMapOf<Pair<String, String>, JSONObject>()
+            fun addFolders(values: JSONArray?) {
+                if (values == null) return
+                for (index in 0 until values.length()) {
+                    val folder = values.getJSONObject(index)
+                    folders[folder.getString("provider") to folder.getString("item_id")] = folder
+                }
+            }
+            if (!isNewRead) addFolders(previous?.optJSONArray("folders"))
+            addFolders(snapshot.getJSONArray("folders"))
+            val order = delta.getJSONArray("order")
+            val ordered = JSONArray()
+            val seen = mutableSetOf<Pair<String, String>>()
+            for (index in 0 until order.length()) {
+                val identity = order.getJSONObject(index)
+                val key = identity.getString("provider") to identity.getString("item_id")
+                val folder = folders[key]
+                if (folder == null || !seen.add(key)) {
+                    release(read)
+                    onInvalidated?.invoke(read)
+                    return
+                }
+                ordered.put(folder)
+            }
+            observation.recommendationSequence = sequence
+            JSONObject().put("revision", revision).put("folders", ordered)
+                .put("is_loading", snapshot.getBoolean("is_loading"))
+                .put("has_load_error", snapshot.getBoolean("has_load_error"))
+        } else {
+            if (revision != 0L && revision == previousRevision && observation.recommendationSequence > 0) return
+            observation.recommendationSequence = 0
+            snapshot
+        }
+        observation.recommendation = projected
+        accept(read, observation, projected.toString())
+    }
 
     @Synchronized
     private fun accept(read: LibraryRead, observation: Observation, value: String) {

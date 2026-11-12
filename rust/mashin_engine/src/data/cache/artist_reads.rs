@@ -219,7 +219,8 @@ pub(crate) fn write_artist_read(
     )?;
     transaction.execute(
         "INSERT INTO artist_read_states(user_id,query,observed_at) VALUES (?1,?2,?3)
-        ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at",
+        ON CONFLICT(user_id,query) DO UPDATE SET observed_at=excluded.observed_at
+        WHERE observed_at IS NOT excluded.observed_at",
         params![user_id.as_str(), query_key, observed_at],
     )?;
     if matches!(
@@ -231,8 +232,13 @@ pub(crate) fn write_artist_read(
         return super::catalog_sections::write_catalog_section(transaction, query, user_id, value);
     }
     transaction.execute(
-        "DELETE FROM artist_read_items WHERE user_id=?1 AND query=?2",
-        params![user_id.as_str(), query_key],
+        "DELETE FROM artist_read_items WHERE user_id=?1 AND query=?2 AND position>=?3",
+        params![user_id.as_str(), query_key, artists.len() as i64],
+    )?;
+    let mut statement = transaction.prepare_cached(
+        "INSERT INTO artist_read_items(user_id,query,position,provider,item_id) VALUES (?1,?2,?3,?4,?5)
+         ON CONFLICT(user_id,query,position) DO UPDATE SET provider=excluded.provider,item_id=excluded.item_id
+         WHERE (provider,item_id) IS NOT (excluded.provider,excluded.item_id)",
     )?;
     for (position, artist) in artists.iter().enumerate() {
         let membership = if matches!(query, CatalogQuery::LibraryArtists { .. }) {
@@ -241,7 +247,7 @@ pub(crate) fn write_artist_read(
             FieldKnowledge::Unknown
         };
         write_artist_observation(transaction, artist, user_id, membership)?;
-        transaction.execute("INSERT INTO artist_read_items(user_id,query,position,provider,item_id) VALUES (?1,?2,?3,?4,?5)",
+        statement.execute(
             params![user_id.as_str(),query_key,position as i64,artist.media.provider.as_str(),artist.media.item_id.as_str()])?;
     }
     Ok(())

@@ -17,6 +17,16 @@ class CoreQueryScope {
       Zone.current[_zoneKey] as CoreQueryScope?;
   bool get isCanceled => _isCanceled;
 
+  // Owners with a separate delivery lifetime unregister explicitly after consumption.
+  void Function() registerCancellation(void Function() onCancel) {
+    if (_isCanceled) {
+      onCancel();
+      return () {};
+    }
+    _cancelRequests.add(onCancel);
+    return () => _cancelRequests.remove(onCancel);
+  }
+
   // Async continuations retain their original scope when the page starts a new load.
   Future<T> run<T>(Future<T> Function() operation) =>
       runZoned(operation, zoneValues: {_zoneKey: this});

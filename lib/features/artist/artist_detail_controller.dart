@@ -619,7 +619,7 @@ class ArtistDetailController extends ChangeNotifier {
 
   Track _withAlbumYear(Track track) {
     final Album? trackAlbum = track.album;
-    if (trackAlbum == null || trackAlbum.year != null || _albums.isEmpty) {
+    if (trackAlbum == null || trackAlbum.isYearKnown || _albums.isEmpty) {
       return track;
     }
 
@@ -629,7 +629,7 @@ class ArtistDetailController extends ChangeNotifier {
           album?.itemId == trackAlbum.itemId,
       orElse: () => null,
     );
-    if (matchingAlbum?.year == null) {
+    if (matchingAlbum == null || !matchingAlbum.isYearKnown) {
       return track;
     }
 
@@ -644,7 +644,8 @@ class ArtistDetailController extends ChangeNotifier {
       externalIds: trackAlbum.externalIds,
       isPlayable: trackAlbum.isPlayable,
       available: trackAlbum.available,
-      year: matchingAlbum!.year,
+      year: matchingAlbum.year,
+      isYearKnown: matchingAlbum.isYearKnown,
       albumType: trackAlbum.albumType,
       providerMappings: trackAlbum.providerMappings,
       metadata: trackAlbum.metadata,

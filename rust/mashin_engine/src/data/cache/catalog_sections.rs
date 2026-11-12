@@ -11,7 +11,7 @@ use crate::domain::media::{
 
 use super::albums::write_album_observation;
 use super::database::CacheError;
-use super::tracks::{read_track, write_track_observation};
+use super::tracks::{read_track, TrackReadSnapshot, write_track_observation};
 
 // Schema and transactional observations.
 pub(super) fn initialize_artist_section_schema(
@@ -42,7 +42,7 @@ pub(super) fn initialize_artist_section_schema(
     Ok(())
 }
 
-#[derive(Clone, Default)]
+#[derive(Clone, Default, PartialEq)]
 struct TrackOccurrenceContext {
     album: FieldKnowledge<Option<(ProviderInstanceId, MediaId)>>,
     disc_number: Option<u16>,
@@ -50,6 +50,7 @@ struct TrackOccurrenceContext {
     image: FieldKnowledge<Option<MediaItemImage>>,
 }
 
+#[derive(PartialEq)]
 struct SectionOccurrence {
     provider: ProviderInstanceId,
     item_id: MediaId,
@@ -106,11 +107,12 @@ pub(super) fn write_catalog_section(
     let query_key = serde_json::to_string(query)?;
     let previous = read_section_occurrences(transaction, query, user_id)?;
     transaction.execute(
-        &format!("DELETE FROM {table} WHERE user_id=?1 AND query=?2"),
-        params![user_id.as_str(), query_key],
+        &format!("DELETE FROM {table} WHERE user_id=?1 AND query=?2 AND occurrence>=?3"),
+        params![user_id.as_str(), query_key, items.len() as i64],
     )?;
     for (occurrence, incoming) in items.into_iter().enumerate() {
-        let previous = previous.get(occurrence).filter(|previous| {
+        let stored = previous.get(occurrence);
+        let previous = stored.filter(|previous| {
             previous.provider == incoming.fields().provider
                 && previous.item_id == incoming.fields().item_id
         });
@@ -129,6 +131,7 @@ pub(super) fn write_catalog_section(
                     query,
                     user_id,
                     occurrence as i64,
+                    stored,
                     &SectionOccurrence {
                         provider: album.media.provider,
                         item_id: album.media.item_id,
@@ -198,6 +201,7 @@ pub(super) fn write_catalog_section(
                     query,
                     user_id,
                     occurrence as i64,
+                    stored,
                     &SectionOccurrence {
                         provider: track.media.provider,
                         item_id: track.media.item_id,
@@ -219,15 +223,14 @@ pub(super) fn read_catalog_section(
     user_id: &UserId,
 ) -> Result<CatalogValue, CacheError> {
     let occurrences = read_section_occurrences(transaction, query, user_id)?;
+    let mut snapshot = TrackReadSnapshot::new(transaction, user_id);
     if matches!(query, CatalogQuery::ArtistAlbums { .. }) {
         let albums = occurrences
             .into_iter()
             .map(|occurrence| {
-                let mut album = super::albums::read_album(
-                    transaction,
+                let mut album = snapshot.read_album(
                     &occurrence.provider,
                     &occurrence.item_id,
-                    user_id,
                 )?
                 .ok_or(CacheError::InvalidMediaObservation(
                     "section album is missing",
@@ -245,11 +248,9 @@ pub(super) fn read_catalog_section(
     let tracks = occurrences
         .into_iter()
         .map(|occurrence| {
-            let mut track = read_track(
-                transaction,
+            let mut track = snapshot.read_track(
                 &occurrence.provider,
                 &occurrence.item_id,
-                user_id,
             )?
             .ok_or(CacheError::InvalidMediaObservation(
                 "section track is missing",
@@ -266,14 +267,16 @@ pub(super) fn read_catalog_section(
             };
             let has_same_album_selection = canonical_album == occurrence.context.album;
             track.knowledge.album = !occurrence.context.album.is_unknown();
-            track.album = match occurrence.context.album {
+            track.album = if has_same_album_selection {
+                track.album
+            } else { match occurrence.context.album {
                 FieldKnowledge::Known(Some((provider, item_id))) => Some(
-                    super::albums::read_album(transaction, &provider, &item_id, user_id)?.ok_or(
+                    snapshot.read_album(&provider, &item_id)?.ok_or(
                         CacheError::InvalidMediaObservation("occurrence album is missing"),
                     )?,
                 ),
                 _ => None,
-            };
+            }};
             let album_thumb = track
                 .album
                 .as_ref()
@@ -401,7 +404,7 @@ fn read_section_occurrences(
     user_id: &UserId,
 ) -> Result<Vec<SectionOccurrence>, CacheError> {
     let query_key = serde_json::to_string(query)?;
-    let mut statement = transaction.prepare(&section_occurrences_sql(query)?)?;
+    let mut statement = transaction.prepare_cached(&section_occurrences_sql(query)?)?;
     let occurrences = statement
         .query_map(params![user_id.as_str(), query_key], |row| {
             let album_provider: Option<String> = row.get(4)?;
@@ -454,9 +457,29 @@ fn write_section_occurrence(
     query: &CatalogQuery,
     user_id: &UserId,
     occurrence: i64,
+    previous: Option<&SectionOccurrence>,
     reference: &SectionOccurrence,
 ) -> Result<(), CacheError> {
+    let has_same_context = previous.is_some_and(|previous| {
+        previous.provider == reference.provider
+            && previous.item_id == reference.item_id
+            && previous.position == reference.position
+            && previous.context.album == reference.context.album
+            && previous.context.disc_number == reference.context.disc_number
+            && previous.context.track_number == reference.context.track_number
+            && (!super::track_reads::is_track_list_read(query)
+                || previous.context.image == reference.context.image)
+    });
+    if has_same_context {
+        return Ok(());
+    }
     let query_key = serde_json::to_string(query)?;
+    if previous.is_some() {
+        transaction.execute(
+            &format!("DELETE FROM {} WHERE user_id=?1 AND query=?2 AND occurrence=?3", section_table(query)?),
+            params![user_id.as_str(), query_key, occurrence],
+        )?;
+    }
     let position = match reference.position {
         FieldKnowledge::Known(value) => value,
         FieldKnowledge::Unknown => None,
@@ -495,6 +518,57 @@ mod tests {
     use crate::domain::identifiers::MediaId;
 
     // Ordered observations, summary knowledge and transaction failure.
+    #[test]
+    fn identical_section_refresh_preserves_rows_and_updates_metadata_and_freshness() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection
+            .pragma_update(None, "foreign_keys", true)
+            .unwrap();
+        let transaction = connection.transaction().unwrap();
+        super::super::database::initialize_media_schema(&transaction).unwrap();
+        let user = UserId("user".into());
+        let query = CatalogQuery::ArtistTopTracks {
+            provider: "source".into(),
+            item_id: MediaId("artist".into()),
+        };
+        let track = |name: &str| {
+            serde_json::from_value(serde_json::json!({
+                "provider":"source","item_id":"track","name":name
+            }))
+            .unwrap()
+        };
+        write_artist_read(
+            &transaction,
+            &query,
+            &user,
+            &CatalogValue::Tracks(vec![track("Old")]),
+            100,
+        )
+        .unwrap();
+        transaction.execute_batch(
+            "CREATE TEMP TRIGGER reject_section_insert BEFORE INSERT ON artist_track_read_items BEGIN SELECT RAISE(ABORT,'unchanged section inserted'); END;
+             CREATE TEMP TRIGGER reject_section_delete BEFORE DELETE ON artist_track_read_items BEGIN SELECT RAISE(ABORT,'unchanged section deleted'); END;
+             CREATE TEMP TRIGGER reject_section_update BEFORE UPDATE ON artist_track_read_items BEGIN SELECT RAISE(ABORT,'unchanged section updated'); END;"
+        ).unwrap();
+        write_artist_read(
+            &transaction,
+            &query,
+            &user,
+            &CatalogValue::Tracks(vec![track("New")]),
+            101,
+        )
+        .unwrap();
+        let observed = read_artist_read(&transaction, &query, &user)
+            .unwrap()
+            .unwrap();
+        assert_eq!(observed.observed_at, 101);
+        let CatalogValue::Tracks(tracks) = observed.value else {
+            panic!("tracks missing")
+        };
+        assert_eq!(tracks[0].media.name, "New");
+        transaction.commit().unwrap();
+    }
+
     #[test]
     fn artist_section_references_derive_cover_from_current_occurrence_album_metadata() {
         let mut connection = rusqlite::Connection::open_in_memory().unwrap();

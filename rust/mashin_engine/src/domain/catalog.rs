@@ -244,6 +244,37 @@ pub(crate) enum CatalogQuery {
     },
 }
 
+// Payload-free query classification for diagnostics.
+impl CatalogQuery {
+    pub(crate) fn kind_name(&self) -> &'static str {
+        match self {
+            Self::ProviderManifests { .. } => "ProviderManifests",
+            Self::ProviderInstances => "ProviderInstances",
+            Self::ProviderItem { .. } => "ProviderItem",
+            Self::RecommendationFolders => "RecommendationFolders",
+            Self::RecommendationItems { .. } => "RecommendationItems",
+            Self::RecentlyPlayed { .. } => "RecentlyPlayed",
+            Self::Search { .. } => "Search",
+            Self::Artist { .. } => "Artist",
+            Self::LibraryArtists { .. } => "LibraryArtists",
+            Self::LibraryAlbums { .. } => "LibraryAlbums",
+            Self::LibraryTracks { .. } => "LibraryTracks",
+            Self::LibraryPlaylists { .. } => "LibraryPlaylists",
+            Self::Album { .. } => "Album",
+            Self::Track { .. } => "Track",
+            Self::Playlist { .. } => "Playlist",
+            Self::AlbumTracks { .. } => "AlbumTracks",
+            Self::PlaylistTracks { .. } => "PlaylistTracks",
+            Self::ArtistAlbums { .. } => "ArtistAlbums",
+            Self::ArtistTopTracks { .. } => "ArtistTopTracks",
+            Self::ArtistTracks { .. } => "ArtistTracks",
+            Self::SimilarArtists { .. } => "SimilarArtists",
+            Self::SimilarTracks { .. } => "SimilarTracks",
+            Self::TrackVersions { .. } => "TrackVersions",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub(crate) enum CatalogValue {
     ProviderManifests(Vec<super::providers::ProviderManifest>),
@@ -291,7 +322,9 @@ pub(crate) enum CatalogFreshness {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub(crate) struct CatalogLoadSnapshot {
-    pub(crate) value: Option<CatalogValue>,
+    #[serde(skip)]
+    pub(crate) publication_revision: u64,
+    pub(crate) value: Option<std::sync::Arc<CatalogValue>>,
     #[serde(default)]
     pub(crate) source: Option<CatalogDataSource>,
     pub(crate) phase: CatalogLoadPhase,
@@ -308,4 +341,32 @@ pub(crate) struct CatalogLoadSnapshot {
 pub(crate) enum CatalogDataSource {
     Cache,
     Server,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn catalog_snapshot_clones_share_media_and_preserve_wire_shape() {
+        let encoded = serde_json::json!({
+            "value": {"Tracks": []},
+            "source": "server",
+            "phase": "ready",
+            "knowledge": "observed_response",
+            "freshness": "fresh",
+            "observed_at": null,
+            "error": null,
+            "cache_error": null
+        });
+        let snapshot: CatalogLoadSnapshot = serde_json::from_value(encoded.clone()).unwrap();
+        let mut status = snapshot.clone();
+        status.phase = CatalogLoadPhase::Refreshing;
+        assert!(std::sync::Arc::ptr_eq(
+            snapshot.value.as_ref().unwrap(),
+            status.value.as_ref().unwrap(),
+        ));
+        assert_eq!(snapshot.phase, CatalogLoadPhase::Ready);
+        assert_eq!(serde_json::to_value(snapshot).unwrap(), encoded);
+    }
 }

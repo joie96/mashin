@@ -8,6 +8,7 @@ import 'settings_log_view.dart';
 class SettingsScreenMobile extends StatelessWidget {
   const SettingsScreenMobile({
     super.key,
+    required this.cacheContent,
     required this.musicAssistantUrl,
     required this.onLogout,
     required this.isDarkTheme,
@@ -18,6 +19,7 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.onMultiDeviceButtonVisibilityChanged,
   });
 
+  final Widget cacheContent;
   final String musicAssistantUrl;
   final VoidCallback? onLogout;
   final bool isDarkTheme;
@@ -126,6 +128,10 @@ class SettingsScreenMobile extends StatelessWidget {
                     ),
                   ),
                 ),
+                const SizedBox(height: 32),
+                Text('Cache', style: Theme.of(context).textTheme.titleMedium),
+                const SizedBox(height: 12),
+                cacheContent,
               ],
             ),
             Padding(

@@ -2,14 +2,49 @@
 //! The caller owns the transaction; album associations never prove a complete album listing.
 
 use rusqlite::{params, OptionalExtension, Transaction};
-use serde_json::{Map, Value};
+use std::collections::HashMap;
 
-use crate::domain::identifiers::{MediaId, ProviderInstanceId, UserId};
-use crate::domain::media::{FieldKnowledge, MediaItem, Track};
+use crate::domain::identifiers::{MediaId, MediaUri, ProviderId, ProviderInstanceId, UserId};
+use crate::domain::media::{Album, Artist, FieldKnowledge, MediaItem, MediaItemFields, MediaFieldsKnowledge, ProviderMapping, ProviderMappingKnowledge, Track, TrackKnowledge};
 
-use super::albums::{read_album, write_album_observation};
-use super::artists::{read_artist, write_artist_observation};
+use super::albums::write_album_observation;
+use super::artists::write_artist_observation;
 use super::database::CacheError;
+
+/// A read-only list projection reuses canonical SQL objects, never incoming server observations.
+pub(super) struct TrackReadSnapshot<'transaction, 'connection> {
+    transaction: &'transaction Transaction<'connection>,
+    user_id: &'transaction UserId,
+    tracks: HashMap<(ProviderInstanceId, MediaId), Track>,
+    albums: HashMap<(ProviderInstanceId, MediaId), Album>,
+    artists: HashMap<(ProviderInstanceId, MediaId), Artist>,
+}
+
+impl<'transaction, 'connection> TrackReadSnapshot<'transaction, 'connection> {
+    // Snapshot ownership and canonical projections.
+    pub(super) fn new(
+        transaction: &'transaction Transaction<'connection>,
+        user_id: &'transaction UserId,
+    ) -> Self {
+        Self { transaction, user_id, tracks: HashMap::new(), albums: HashMap::new(), artists: HashMap::new() }
+    }
+
+    pub(super) fn read_track(&mut self, provider: &ProviderInstanceId, item_id: &MediaId) -> Result<Option<Track>, CacheError> {
+        let key = (provider.clone(), item_id.clone());
+        if let Some(track) = self.tracks.get(&key) { return Ok(Some(track.clone())); }
+        let track = read_track_projection(self, provider, item_id)?;
+        if let Some(track) = &track { self.tracks.insert(key, track.clone()); }
+        Ok(track)
+    }
+
+    pub(super) fn read_album(&mut self, provider: &ProviderInstanceId, item_id: &MediaId) -> Result<Option<Album>, CacheError> {
+        let key = (provider.clone(), item_id.clone());
+        if let Some(album) = self.albums.get(&key) { return Ok(Some(album.clone())); }
+        let album = super::albums::read_album_with_artists(self.transaction, provider, item_id, self.user_id, &mut self.artists)?;
+        if let Some(album) = &album { self.albums.insert(key, album.clone()); }
+        Ok(album)
+    }
+}
 
 // Canonical media and relationship schema within the cache writer transaction.
 pub(super) fn initialize_track_schema(transaction: &Transaction<'_>) -> Result<(), CacheError> {
@@ -107,12 +142,13 @@ pub(super) fn write_track_observation(
             write_album_observation(transaction, album, user_id)?;
         }
     }
-    let track = if let Some(mut previous) = read_track(
+    let previous = read_track(
         transaction,
         &incoming.media.provider,
         &incoming.media.item_id,
         user_id,
-    )? {
+    )?;
+    let track = if let Some(mut previous) = previous.clone() {
         let identity = |track: &Track| {
             track
                 .album
@@ -152,6 +188,9 @@ pub(super) fn write_track_observation(
     } else {
         incoming.clone()
     };
+    if previous.as_ref() == Some(&track) {
+        return Ok(());
+    }
     let media = &track.media;
     let known = &media.knowledge;
     let album_identity = track
@@ -212,100 +251,89 @@ pub(super) fn read_track(
     item_id: &MediaId,
     user_id: &UserId,
 ) -> Result<Option<Track>, CacheError> {
-    let row=transaction.query_row("SELECT provider,item_id,name,version,sort_name,sort_name_known,uri,uri_known,is_playable,available,available_known,
+    TrackReadSnapshot::new(transaction, user_id).read_track(provider, item_id)
+}
+
+fn read_track_projection(
+    snapshot: &mut TrackReadSnapshot<'_, '_>,
+    provider: &ProviderInstanceId,
+    item_id: &MediaId,
+) -> Result<Option<Track>, CacheError> {
+    let transaction = snapshot.transaction;
+    let user_id = snapshot.user_id;
+    let row=transaction.prepare_cached("SELECT provider,item_id,name,version,sort_name,sort_name_known,uri,uri_known,is_playable,available,available_known,
         metadata,metadata_known,position,position_known,date_added,date_added_known,duration,duration_known,artists_known,
         album_provider,album_item_id,album_known,image,image_known,disc_number,disc_number_known,track_number,track_number_known,
-        external_ids_known,provider_mappings_known FROM tracks WHERE provider=?1 AND item_id=?2",params![provider.as_str(),item_id.as_str()],|row|{
-        let mut object=Map::new();
-        for (index,field) in ["provider","item_id","name"].iter().enumerate() {object.insert((*field).into(),Value::String(row.get(index)?));}
-        if let Some(value)=row.get::<_,Option<String>>(3)? {object.insert("version".into(),Value::String(value));}
-        for (field,index,known) in [("sort_name",4,5),("uri",6,7),("date_added",15,16)] {
-            if row.get::<_,bool>(known)? {object.insert(field.into(),row.get::<_,Option<String>>(index)?.map(Value::String).unwrap_or(Value::Null));}
-        }
-        if let Some(value)=row.get::<_,Option<bool>>(8)? {object.insert("is_playable".into(),Value::Bool(value));}
-        if row.get::<_,bool>(10)? {object.insert("available".into(),row.get::<_,Option<bool>>(9)?.map(Value::Bool).unwrap_or(Value::Null));}
-        for (field,index,known) in [("position",13,14),("duration",17,18),("disc_number",25,26),("track_number",27,28)] {
-            if row.get::<_,bool>(known)? {object.insert(field.into(),row.get::<_,Option<i64>>(index)?.map(|value|Value::Number(value.into())).unwrap_or(Value::Null));}
-        }
-        Ok((object,row.get::<_,Option<String>>(11)?,row.get::<_,bool>(12)?,row.get::<_,bool>(19)?,
-            row.get::<_,Option<String>>(20)?,row.get::<_,Option<String>>(21)?,row.get::<_,bool>(22)?,
-            row.get::<_,Option<String>>(23)?,row.get::<_,bool>(24)?,row.get::<_,bool>(29)?,row.get::<_,bool>(30)?))
+        external_ids_known,provider_mappings_known FROM tracks WHERE provider=?1 AND item_id=?2")?.query_row(params![provider.as_str(),item_id.as_str()],|row|{
+        let version: Option<String> = row.get(3)?;
+        let is_playable: Option<bool> = row.get(8)?;
+        let track = Track {
+            media: MediaItemFields {
+                provider: ProviderInstanceId(row.get(0)?), item_id: MediaId(row.get(1)?), name: row.get(2)?,
+                favorite: FieldKnowledge::Unknown,
+                version: version.clone().unwrap_or_default(), sort_name: row.get(4)?,
+                uri: row.get::<_, Option<String>>(6)?.map(MediaUri),
+                is_playable: is_playable.unwrap_or(true), available: row.get(9)?,
+                metadata: None, position: row.get(13)?, date_added: row.get(15)?,
+                external_ids: Vec::new(), provider_mappings: Vec::new(),
+                knowledge: MediaFieldsKnowledge {
+                    version: version.is_some(), sort_name: row.get(5)?, uri: row.get(7)?,
+                    is_playable: is_playable.is_some(), available: row.get(10)?, metadata: row.get(12)?,
+                    position: row.get(14)?, date_added: row.get(16)?, external_ids: row.get(29)?, provider_mappings: row.get(30)?,
+                },
+            },
+            duration: row.get::<_, Option<u32>>(17)?.unwrap_or_default(), artists: Vec::new(), album: None, image: None,
+            disc_number: row.get::<_, Option<u16>>(25)?.unwrap_or_default(),
+            track_number: row.get::<_, Option<u16>>(27)?.unwrap_or_default(),
+            knowledge: TrackKnowledge { duration: row.get(18)?, artists: row.get(19)?, album: row.get(22)?, image: row.get(24)?, disc_number: row.get(26)?, track_number: row.get(28)? },
+        };
+        Ok((track, row.get::<_,Option<String>>(11)?, row.get::<_,Option<String>>(20)?, row.get::<_,Option<String>>(21)?, row.get::<_,Option<String>>(23)?))
     }).optional()?;
-    let Some((
-        mut object,
-        metadata,
-        is_metadata_known,
-        are_artists_known,
-        album_provider,
-        album_item_id,
-        is_album_known,
-        image,
-        is_image_known,
-        are_external_ids_known,
-        are_mappings_known,
-    )) = row
+    let Some((mut track, metadata, album_provider, album_item_id, image)) = row
     else {
         return Ok(None);
     };
-    for (field, is_known, encoded) in [
-        ("metadata", is_metadata_known, metadata),
-        ("image", is_image_known, image),
-    ] {
-        if is_known {
-            object.insert(
-                field.into(),
-                encoded
-                    .map(|value| serde_json::from_str(&value))
-                    .transpose()?
-                    .unwrap_or(Value::Null),
-            );
-        }
+    if track.media.knowledge.metadata {
+        track.media.metadata = metadata.map(|value| serde_json::from_str(&value)).transpose()?;
     }
-    if are_artists_known {
-        let identities=transaction.prepare("SELECT artist_provider,artist_item_id FROM track_artists WHERE track_provider=?1 AND track_item_id=?2 ORDER BY position")?
+    if track.knowledge.image {
+        track.image = image.map(|value| serde_json::from_str(&value)).transpose()?;
+    }
+    if track.knowledge.artists {
+        let identities=transaction.prepare_cached("SELECT artist_provider,artist_item_id FROM track_artists WHERE track_provider=?1 AND track_item_id=?2 ORDER BY position")?
             .query_map(params![provider.as_str(),item_id.as_str()],|row|Ok((ProviderInstanceId(row.get(0)?),MediaId(row.get(1)?))))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        let artists = identities
+        track.artists = identities
             .into_iter()
             .map(|(provider, item_id)| {
-                read_artist(transaction, &provider, &item_id, user_id)?.ok_or(
-                    CacheError::InvalidMediaObservation("track artist is missing"),
-                )
+                super::albums::read_cached_artist(transaction, &provider, &item_id, user_id, &mut snapshot.artists)
             })
             .collect::<Result<Vec<_>, CacheError>>()?;
-        object.insert("artists".into(), serde_json::to_value(artists)?);
     }
-    if is_album_known {
-        let album = match (album_provider, album_item_id) {
-            (Some(provider), Some(item_id)) => serde_json::to_value(
-                read_album(
-                    transaction,
+    if track.knowledge.album {
+        track.album = match (album_provider, album_item_id) {
+            (Some(provider), Some(item_id)) => Some(
+                snapshot.read_album(
                     &ProviderInstanceId(provider),
                     &MediaId(item_id),
-                    user_id,
                 )?
                 .ok_or(CacheError::InvalidMediaObservation(
                     "track album is missing",
                 ))?,
-            )?,
-            (None, None) => Value::Null,
+            ),
+            (None, None) => None,
             _ => {
                 return Err(CacheError::InvalidMediaObservation(
                     "track album identity is incomplete",
                 ))
             }
         };
-        object.insert("album".into(), album);
     }
-    if are_external_ids_known {
-        let identities=transaction.prepare("SELECT id_type,external_id FROM track_external_ids WHERE track_provider=?1 AND track_item_id=?2 ORDER BY position")?
+    if track.media.knowledge.external_ids {
+        track.media.external_ids=transaction.prepare_cached("SELECT id_type,external_id FROM track_external_ids WHERE track_provider=?1 AND track_item_id=?2 ORDER BY position")?
             .query_map(params![provider.as_str(),item_id.as_str()],|row|Ok(vec![row.get::<_,String>(0)?,row.get::<_,String>(1)?]))?.collect::<rusqlite::Result<Vec<_>>>()?;
-        object.insert("external_ids".into(), serde_json::to_value(identities)?);
     }
-    if are_mappings_known {
-        object.insert(
-            "provider_mappings".into(),
-            Value::Array(read_track_mappings(transaction, provider, item_id)?),
-        );
+    if track.media.knowledge.provider_mappings {
+        track.media.provider_mappings = read_track_mappings(transaction, provider, item_id)?;
     }
     let rating: Option<Option<bool>> = transaction
         .query_row(
@@ -315,12 +343,62 @@ pub(super) fn read_track(
         )
         .optional()?;
     if let Some(rating) = rating {
-        object.insert(
-            "favorite".into(),
-            rating.map(Value::Bool).unwrap_or(Value::Null),
-        );
+        track.media.favorite = FieldKnowledge::Known(rating);
     }
-    Ok(Some(serde_json::from_value(Value::Object(object))?))
+    Ok(Some(track))
+}
+
+#[cfg(test)]
+mod snapshot_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn list_snapshot_reuses_relations_without_retaining_server_observations_or_user_state() {
+        let mut connection = rusqlite::Connection::open_in_memory().unwrap();
+        connection.pragma_update(None, "foreign_keys", true).unwrap();
+        let transaction = connection.transaction().unwrap();
+        super::super::database::initialize_media_schema(&transaction).unwrap();
+        let user = UserId("user".into());
+        let provider = ProviderInstanceId("source".into());
+        for item_id in ["one", "two"] {
+            let track = serde_json::from_value(json!({
+                "provider":"source","item_id":item_id,"name":item_id,"favorite":true,
+                "artists":[{"provider":"source","item_id":"artist","name":"Artist"}],
+                "album":{"provider":"source","item_id":"album","name":"Album","year":2024,
+                    "artists":[{"provider":"source","item_id":"artist","name":"Artist"}]}
+            })).unwrap();
+            write_track_observation(&transaction, &track, &user).unwrap();
+        }
+        let mut snapshot = TrackReadSnapshot::new(&transaction, &user);
+        let first = snapshot.read_track(&provider, &MediaId("one".into())).unwrap().unwrap();
+        let second = snapshot.read_track(&provider, &MediaId("two".into())).unwrap().unwrap();
+        assert_eq!(first.album, second.album);
+        assert_eq!(snapshot.albums.len(), 1);
+        assert_eq!(snapshot.artists.len(), 1);
+        assert_eq!(snapshot.tracks.len(), 2);
+        assert_eq!(snapshot.read_track(&provider, &MediaId("one".into())).unwrap(), Some(first));
+        assert_eq!(snapshot.tracks.len(), 2);
+        drop(snapshot);
+
+        let sparse: Track = serde_json::from_value(json!({
+            "provider":"source","item_id":"one","name":"Server",
+            "album":{"provider":"source","item_id":"album","name":"Album"}
+        })).unwrap();
+        assert!(!sparse.album.as_ref().unwrap().knowledge.year);
+        write_track_observation(&transaction, &sparse, &user).unwrap();
+        let updated: Album = serde_json::from_value(json!({
+            "provider":"source","item_id":"album","name":"Updated","year":2025
+        })).unwrap();
+        write_album_observation(&transaction, &updated, &user).unwrap();
+        let other_user = UserId("other".into());
+        let mut snapshot = TrackReadSnapshot::new(&transaction, &other_user);
+        let current = snapshot.read_track(&provider, &MediaId("one".into())).unwrap().unwrap();
+        assert_eq!(current.album.as_ref().unwrap().year, Some(2025));
+        assert_eq!(current.album.as_ref().unwrap().media.name, "Updated");
+        assert_eq!(current.media.favorite, FieldKnowledge::Unknown);
+        assert!(!sparse.album.as_ref().unwrap().knowledge.year);
+    }
 }
 
 // Private codecs keep serialization at the SQLite boundary.
@@ -367,59 +445,32 @@ fn read_track_mappings(
     transaction: &Transaction<'_>,
     provider: &ProviderInstanceId,
     item_id: &MediaId,
-) -> Result<Vec<Value>, CacheError> {
-    let mut statement=transaction.prepare("SELECT item_id,provider_domain,provider_instance,available,in_library,in_library_known,is_unique,is_unique_known,audio_format,audio_format_known,url,url_known,details,details_known FROM track_provider_mappings WHERE track_provider=?1 AND track_item_id=?2 ORDER BY position")?;
+) -> Result<Vec<ProviderMapping>, CacheError> {
+    let mut statement=transaction.prepare_cached("SELECT item_id,provider_domain,provider_instance,available,in_library,in_library_known,is_unique,is_unique_known,audio_format,audio_format_known,url,url_known,details,details_known FROM track_provider_mappings WHERE track_provider=?1 AND track_item_id=?2 ORDER BY position")?;
     let rows = statement
         .query_map(params![provider.as_str(), item_id.as_str()], |row| {
-            let mut object = Map::new();
-            for (index, field) in ["item_id", "provider_domain", "provider_instance"]
-                .iter()
-                .enumerate()
-            {
-                object.insert((*field).into(), Value::String(row.get(index)?));
-            }
-            if let Some(value) = row.get::<_, Option<bool>>(3)? {
-                object.insert("available".into(), Value::Bool(value));
-            }
-            for (field, index, known) in [("in_library", 4, 5), ("is_unique", 6, 7)] {
-                if row.get::<_, bool>(known)? {
-                    object.insert(
-                        field.into(),
-                        row.get::<_, Option<bool>>(index)?
-                            .map(Value::Bool)
-                            .unwrap_or(Value::Null),
-                    );
-                }
-            }
-            for (field, index, known) in [("url", 10, 11), ("details", 12, 13)] {
-                if row.get::<_, bool>(known)? {
-                    object.insert(
-                        field.into(),
-                        row.get::<_, Option<String>>(index)?
-                            .map(Value::String)
-                            .unwrap_or(Value::Null),
-                    );
-                }
-            }
+            let available: Option<bool> = row.get(3)?;
+            let mapping = ProviderMapping {
+                item_id: MediaId(row.get(0)?), provider_domain: ProviderId(row.get(1)?), provider_instance: ProviderInstanceId(row.get(2)?),
+                available: available.unwrap_or(true), in_library: row.get(4)?, is_unique: row.get(6)?,
+                audio_format: None, url: row.get(10)?, details: row.get(12)?,
+                knowledge: ProviderMappingKnowledge {
+                    available: available.is_some(), in_library: row.get(5)?, is_unique: row.get(7)?,
+                    audio_format: row.get(9)?, url: row.get(11)?, details: row.get(13)?,
+                },
+            };
             Ok((
-                object,
-                row.get::<_, bool>(9)?,
+                mapping,
                 row.get::<_, Option<String>>(8)?,
             ))
         })?
         .collect::<rusqlite::Result<Vec<_>>>()?;
     rows.into_iter()
-        .map(|(mut object, is_known, format)| {
-            if is_known {
-                object.insert(
-                    "audio_format".into(),
-                    format
-                        .map(|value| serde_json::from_str(&value))
-                        .transpose()?
-                        .unwrap_or(Value::Null),
-                );
+        .map(|(mut mapping, format)| {
+            if mapping.knowledge.audio_format {
+                mapping.audio_format = format.map(|value| serde_json::from_str(&value)).transpose()?;
             }
-            Ok(Value::Object(object))
+            Ok(mapping)
         })
         .collect()
 }
@@ -439,6 +490,74 @@ mod tests {
     use super::*;
 
     // Isolated schema and observations precede integration with active callers.
+    #[test]
+    fn canonical_repeated_observations_are_sql_noops_without_losing_user_or_membership_changes() {
+        let mut connection = database();
+        let transaction = connection.transaction().unwrap();
+        super::super::playlists::initialize_playlist_schema(&transaction).unwrap();
+        let user = UserId("user".into());
+        let other_user = UserId("other".into());
+        let items: Vec<MediaItem> = ["artist", "album", "track", "playlist"].into_iter().map(|kind| {
+            serde_json::from_value(serde_json::json!({
+                "media_type":kind,"provider":"source","item_id":"same","name":"Original",
+                "favorite":true,"metadata":{"description":"Retained"},
+                "external_ids":[["test","value"]],
+                "provider_mappings":[{"provider_domain":"source","provider_instance":"source","item_id":"same","available":true}]
+            })).unwrap()
+        }).collect();
+        let write = |item: &MediaItem, user: &UserId| match item {
+            MediaItem::Artist(artist) => {
+                write_artist_observation(&transaction, artist, user, FieldKnowledge::Unknown)
+            }
+            MediaItem::Album(album) => write_album_observation(&transaction, album, user),
+            MediaItem::Track(track) => write_track_observation(&transaction, track, user),
+            MediaItem::Playlist(playlist) => {
+                super::super::playlists::write_playlist_observation(&transaction, playlist, user)
+            }
+            _ => panic!("unsupported canonical fixture"),
+        };
+        for item in &items {
+            write(item, &user).unwrap();
+            let before = transaction.total_changes();
+            write(item, &user).unwrap();
+            assert_eq!(transaction.total_changes(), before, "repeated {item:?}");
+            write(item, &other_user).unwrap();
+            let rating: Option<bool> = transaction.query_row(
+                &format!("SELECT rating FROM {}_favorites WHERE user_id=?1 AND provider='source' AND item_id='same'", match item {
+                    MediaItem::Artist(_) => "artist", MediaItem::Album(_) => "album", MediaItem::Track(_) => "track", MediaItem::Playlist(_) => "playlist",
+                    _ => panic!("unsupported canonical fixture"),
+                }), [&other_user.0], |row| row.get(0),
+            ).unwrap();
+            assert_eq!(rating, Some(true));
+        }
+        let MediaItem::Artist(artist) = &items[0] else {
+            panic!("artist missing")
+        };
+        for membership in [true, false] {
+            let before = transaction.total_changes();
+            write_artist_observation(
+                &transaction,
+                artist,
+                &user,
+                FieldKnowledge::Known(membership),
+            )
+            .unwrap();
+            assert_eq!(transaction.total_changes(), before + 1);
+            let before = transaction.total_changes();
+            write_artist_observation(
+                &transaction,
+                artist,
+                &user,
+                FieldKnowledge::Known(membership),
+            )
+            .unwrap();
+            assert_eq!(transaction.total_changes(), before);
+            let actual: bool = transaction.query_row("SELECT is_in_library FROM artist_library_entries WHERE provider='source' AND item_id='same'", [], |row| row.get(0)).unwrap();
+            assert_eq!(actual, membership);
+        }
+        transaction.commit().unwrap();
+    }
+
     fn database() -> rusqlite::Connection {
         let mut connection = rusqlite::Connection::open_in_memory().unwrap();
         connection
@@ -453,7 +572,7 @@ mod tests {
         connection
     }
 
-    fn observe(connection: &mut rusqlite::Connection, value: Value) -> Track {
+    fn observe(connection: &mut rusqlite::Connection, value: serde_json::Value) -> Track {
         let incoming: Track = serde_json::from_value(value).unwrap();
         let transaction = connection.transaction().unwrap();
         write_track_observation(&transaction, &incoming, &UserId("user".into())).unwrap();

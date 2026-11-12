@@ -1,5 +1,7 @@
 // ignore_for_file: prefer_const_constructors
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
@@ -25,10 +27,14 @@ class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
   Stream<Map<String, dynamic>> get events => const Stream.empty();
 }
 
+class _UnreadMediaItem extends Fake implements MediaItem {}
+
 class _RecommendationEventBridge extends _CatalogEventBridge {
   String? trackName = 'Cached';
   final refreshes = <bool>[];
   var recentReads = 0;
+  Future<void>? recommendationGate;
+  RecommendationSnapshot? recommendationResult;
 
   @override
   Future<List<MediaItem>> getRecentlyPlayedTracks({int limit = 40}) async {
@@ -42,6 +48,9 @@ class _RecommendationEventBridge extends _CatalogEventBridge {
     bool refresh = true,
   }) async {
     refreshes.add(refresh);
+    final result = recommendationResult;
+    await recommendationGate;
+    if (result != null) return result;
     final tracks = <Map<String, dynamic>>[
       if (trackName != null)
         _mediaJson('track')
@@ -69,6 +78,20 @@ class _PendingUserDataBridge extends _CatalogEventBridge {
   final initial = Completer<Map<String, dynamic>>();
   final snapshots = <Completer<Map<String, dynamic>>>[];
   var initialReads = 0;
+  Future<void> Function()? mutation;
+
+  @override
+  Future<void> setUserDataFavorites(
+    List<MediaItem> items,
+    bool favorite,
+  ) async {
+    await mutation?.call();
+  }
+
+  @override
+  Future<void> renamePrivatePlaylist(String playlistId, String name) async {
+    await mutation?.call();
+  }
 
   @override
   Future<Map<String, dynamic>> loadUserData() {
@@ -163,6 +186,683 @@ Map<String, dynamic> _mediaJson(String mediaType) => <String, dynamic>{
 
 void main() {
   test(
+    'native event delivery preserves ordering across isolate decoding and errors',
+    () async {
+      final events = <Map<String, dynamic>>[];
+      final errors = <Object>[];
+      final delivery = NativeCoreEventDelivery(
+        onEvent: events.add,
+        onError: (error, stack) => errors.add(error),
+      );
+      unawaited(
+        delivery.add(
+          jsonEncode({'revision': 1, 'payload': 'x' * (64 * 1024)}),
+          null,
+        ),
+      );
+      unawaited(delivery.add('{invalid', null));
+      await delivery.add('{"revision":2}', null);
+      expect(events.map((event) => event['revision']), [1, 2]);
+      expect(errors.single, isA<FormatException>());
+      unawaited(
+        delivery.add(
+          jsonEncode({'revision': 3, 'payload': 'x' * (64 * 1024)}),
+          null,
+        ),
+      );
+      delivery.close();
+      await delivery.add('{"revision":4}', null);
+      expect(events.map((event) => event['revision']), [1, 2]);
+    },
+  );
+
+  test(
+    'native event decoder preserves large payloads and binary image snapshots',
+    () async {
+      final text = jsonEncode({
+        'type': 'catalog_updated',
+        'value': List.generate(
+          2000,
+          (index) => {'item_id': '$index', 'name': 'Large catalog entry'},
+        ),
+      });
+      expect(text.length, greaterThan(64 * 1024));
+      expect(await decodeNativeCoreEvent(text, null), jsonDecode(text));
+      for (final type in ['query_completed', 'image_read_updated']) {
+        final field = type == 'query_completed' ? 'result' : 'snapshot';
+        final bytes = Uint8List.fromList([0, 1, 255]);
+        final event = await decodeNativeCoreEvent(
+          jsonEncode({
+            'type': type,
+            field: {'bytes': null, 'cacheError': null, 'hasRefresh': false},
+          }),
+          bytes,
+        );
+        expect(
+          ImageReadSnapshot.fromJson(
+            event![field] as Map<String, dynamic>,
+          ).bytes,
+          same(bytes),
+        );
+      }
+      expect(
+        ImageReadSnapshot.fromJson({
+          'bytes': 'AAH/',
+          'cacheError': null,
+          'hasRefresh': false,
+        }).bytes,
+        [0, 1, 255],
+      );
+    },
+  );
+
+  test(
+    'native event worker drains repeated large payloads after a parsing failure',
+    () async {
+      final events = <Map<String, dynamic>>[];
+      final errors = <Object>[];
+      final timings = <String>[];
+      final delivery = NativeCoreEventDelivery(
+        onEvent: events.add,
+        onError: (error, stack) => errors.add(error),
+        onDecoded: (type, characters, queueMs, decodeMs) => timings.add(type),
+      );
+      addTearDown(delivery.close);
+      for (var revision = 0; revision < 12; revision++) {
+        unawaited(
+          delivery.add(
+            jsonEncode({
+              'type': 'catalog_updated',
+              'revision': revision,
+              'payload': 'x' * (64 * 1024),
+            }),
+            null,
+          ),
+        );
+        if (revision == 5) {
+          unawaited(delivery.add('{invalid${' ' * (64 * 1024)}', null));
+        }
+      }
+      await delivery.add('{"type":"query_completed","revision":12}', null);
+      expect(
+        events.map((event) => event['revision']),
+        List.generate(13, (index) => index),
+      );
+      expect(errors.single, isA<FormatException>());
+      expect(timings.last, 'query_completed');
+      delivery.close();
+      await delivery.add('{"revision":13}', null);
+      expect(events, hasLength(13));
+    },
+  );
+
+  test(
+    'closing a warmed native decoder retires pending large events',
+    () async {
+      final events = <Map<String, dynamic>>[];
+      final errors = <Object>[];
+      final delivery = NativeCoreEventDelivery(
+        onEvent: events.add,
+        onError: (error, stack) => errors.add(error),
+      );
+      await delivery.add(jsonEncode({'payload': 'x' * (64 * 1024)}), null);
+      final pending = delivery.add(
+        jsonEncode({'payload': 'x' * (4 * 1024 * 1024)}),
+        null,
+      );
+      await Future<void>.delayed(Duration.zero);
+      delivery.close();
+      final deliveredBeforeClosing = events.length;
+      await pending;
+      expect(events, hasLength(deliveredBeforeClosing));
+      expect(errors, isEmpty);
+    },
+  );
+
+  test(
+    'explore retains unchanged sections and recovers missing deltas without stale completion',
+    () async {
+      final bridge = _RecommendationEventBridge();
+      final gate = Completer<void>();
+      bridge.recommendationGate = gate.future;
+      bridge.recommendationResult = const RecommendationSnapshot(revision: 1);
+      final explore = ExploreController(coreBridge: bridge);
+      addTearDown(() async {
+        explore.dispose();
+        await bridge.updates.close();
+      });
+      final loading = explore.load();
+      await Future<void>.delayed(Duration.zero);
+      Map<String, dynamic> folder(String id, String track) => {
+        'provider': 'source',
+        'item_id': id,
+        'name': id,
+        'items': [_mediaJson('track')..['name'] = track],
+      };
+      void publish(
+        int revision,
+        int sequence,
+        List<Map<String, dynamic>> folders,
+        List<String> order,
+      ) {
+        bridge.updates.add({
+          'type': 'recommendations_updated',
+          'view': 'explore',
+          'snapshot': {
+            'revision': revision,
+            'is_loading': false,
+            'has_load_error': false,
+            'folders': folders,
+            'delta': {
+              'revision': revision,
+              'sequence': sequence,
+              'order': [
+                for (final id in order) {'provider': 'source', 'item_id': id},
+              ],
+            },
+          },
+        });
+      }
+
+      const order = ['user_exploration_weekly', 'sitewide_top_tracks_weekly'];
+      publish(1, 1, [
+        folder(order[0], 'Exploration'),
+        folder(order[1], 'Top'),
+      ], order);
+      final exploration = explore.weeklyExploration;
+      expect(exploration.single.name, 'Exploration');
+      publish(1, 2, [folder(order[1], 'Changed')], order);
+      expect(explore.weeklyTracks.single.name, 'Changed');
+      expect(explore.weeklyExploration, same(exploration));
+      publish(1, 2, [folder(order[1], 'Duplicate')], order);
+      expect(explore.weeklyTracks.single.name, 'Changed');
+      publish(1, 3, [], [order[0]]);
+      expect(explore.weeklyTracks, isEmpty);
+      publish(2, 1, [folder(order[0], 'New read')], [order[0]]);
+      publish(1, 4, [folder(order[0], 'Stale')], [order[0]]);
+      expect(explore.weeklyExploration.single.name, 'New read');
+      publish(2, 3, [folder(order[0], 'Gap')], [order[0]]);
+      expect(explore.weeklyExploration.single.name, 'New read');
+      bridge.recommendationResult = RecommendationSnapshot.fromJson({
+        'revision': 3,
+        'is_loading': false,
+        'has_load_error': false,
+        'folders': [folder(order[0], 'Recovered')],
+      });
+      gate.complete();
+      await loading;
+      expect(bridge.refreshes, [true, false]);
+      expect(explore.weeklyExploration.single.name, 'Recovered');
+    },
+  );
+
+  for (final playlistId in [null, 'playlist-id']) {
+    test(
+      'applied mutation delta avoids full snapshot for $playlistId',
+      () async {
+        final bridge = _PendingUserDataBridge();
+        final userData = UserData(coreBridge: bridge);
+        addTearDown(() async {
+          userData.dispose();
+          await bridge.updates.close();
+        });
+        bridge.initial.complete(bridge.createSnapshot(revision: 1));
+        await userData.loadLibraryData();
+        bridge.mutation = () async {
+          bridge.updates.add(
+            playlistId == null
+                ? {
+                    'type': 'user_data_favorites_changed',
+                    'snapshot': bridge.createSnapshot(revision: 2),
+                  }
+                : {
+                    'type': 'user_data_changed',
+                    'revision': 2,
+                    'playlist': _mediaJson('playlist')..['name'] = 'Renamed',
+                  },
+          );
+        };
+        if (playlistId == null) {
+          await userData.setFavorite([
+            Track.fromJson(_mediaJson('track')),
+          ], true);
+        } else {
+          await userData.renamePlaylist(userData.playlists.single, 'Renamed');
+          expect(userData.playlists.single.name, 'Renamed');
+        }
+        expect(bridge.snapshots, isEmpty);
+      },
+    );
+  }
+  for (final gap in [false, true]) {
+    test(
+      'mutation without contiguous delta retains snapshot fallback, gap=$gap',
+      () async {
+        final bridge = _PendingUserDataBridge();
+        final userData = UserData(coreBridge: bridge);
+        addTearDown(() async {
+          userData.dispose();
+          await bridge.updates.close();
+        });
+        bridge.initial.complete(bridge.createSnapshot(revision: 1));
+        await userData.loadLibraryData();
+        bridge.mutation = () async {
+          if (gap)
+            bridge.updates.add({
+              'type': 'user_data_favorites_changed',
+              'snapshot': bridge.createSnapshot(revision: 3),
+            });
+        };
+        final mutation = userData.setFavorite([
+          Track.fromJson(_mediaJson('track')),
+        ], true);
+        await Future<void>.delayed(Duration.zero);
+        expect(bridge.snapshots, hasLength(1));
+        bridge.snapshots.single.complete(bridge.createSnapshot(revision: 3));
+        await mutation;
+      },
+    );
+  }
+
+  test('unrelated playlist delta does not acknowledge a mutation', () async {
+    final bridge = _PendingUserDataBridge();
+    final userData = UserData(coreBridge: bridge);
+    addTearDown(() async {
+      userData.dispose();
+      await bridge.updates.close();
+    });
+    bridge.initial.complete(
+      bridge.createSnapshot(revision: 1)
+        ..['playlists'] = [
+          _mediaJson('playlist'),
+          _mediaJson('playlist')..['item_id'] = 'other',
+        ],
+    );
+    await userData.loadLibraryData();
+    bridge.mutation = () async {
+      bridge.updates.add({
+        'type': 'user_data_changed',
+        'revision': 2,
+        'playlist': _mediaJson('playlist')..['item_id'] = 'other',
+      });
+    };
+    final mutation = userData.renamePlaylist(
+      userData.playlists.firstWhere((item) => item.itemId == 'playlist-id'),
+      'Renamed',
+    );
+    await Future<void>.delayed(Duration.zero);
+    expect(bridge.snapshots, hasLength(1));
+    bridge.snapshots.single.complete(bridge.createSnapshot(revision: 3));
+    await mutation;
+  });
+
+  test(
+    'display delivery completes on server data before persistence and consumes late failure',
+    () async {
+      final delivery = CatalogQueryDelivery<String>('artist', {
+        'itemId': 'one',
+        'provider': 'library',
+      }, (value) => (value as Map)['name'] as String);
+      final terminal = Completer<String>();
+      final result = delivery.resolve(terminal.future);
+      final query = {
+        'Artist': {'item_id': 'one', 'provider': 'library'},
+      };
+      delivery.onEvent({
+        'type': 'catalog_updated',
+        'query': query,
+        'value': {
+          'Item': {'name': 'Cached'},
+        },
+      });
+      delivery.onEvent({
+        'type': 'catalog_read_changed',
+        'query': query,
+        'snapshot': {'is_server_complete': false},
+      });
+      var isDelivered = false;
+      unawaited(result.then((_) => isDelivered = true));
+      await Future<void>.delayed(Duration.zero);
+      expect(isDelivered, isFalse);
+      delivery.onEvent({
+        'type': 'catalog_updated',
+        'query': query,
+        'value': {
+          'Item': {'name': 'Server'},
+        },
+      });
+      delivery.onEvent({
+        'type': 'catalog_read_changed',
+        'query': query,
+        'snapshot': {
+          'is_server_complete': true,
+          'is_persistence_complete': false,
+        },
+      });
+      expect(await result, 'Server');
+      expect(terminal.isCompleted, isFalse);
+      terminal.completeError(StateError('late persistence failure'));
+      await Future<void>.delayed(Duration.zero);
+    },
+  );
+
+  test(
+    'catalog delivery shares typed event values and reuses terminal decoding',
+    () async {
+      final bridge = _CatalogEventBridge();
+      addTearDown(bridge.updates.close);
+      CatalogUpdate? observed;
+      final subscription = bridge.catalogUpdates.listen(
+        (value) => observed = value,
+      );
+      addTearDown(subscription.cancel);
+      var rawDecodes = 0;
+      final delivery = CatalogQueryDelivery<List<Track>>(
+        'playlistTracks',
+        {'itemId': 'one', 'provider': 'library', 'allowDynamicTracks': false},
+        (_) {
+          rawDecodes++;
+          return [];
+        },
+        decodeUpdate: (value) => value.tracks,
+      );
+      final event = <String, dynamic>{
+        'type': 'catalog_updated',
+        'query': {
+          'PlaylistTracks': {
+            'item_id': 'one',
+            'provider': 'library',
+            'allow_dynamic_tracks': false,
+          },
+        },
+        'value': {
+          'Tracks': [_mediaJson('track')],
+        },
+      };
+      bridge.updates.add(event);
+      delivery.onEvent(event);
+      final first = delivery.decodeLatest(null);
+      expect(first, same(observed!.tracks));
+      expect(delivery.decodeLatest(null), same(first));
+      expect(rawDecodes, 0);
+    },
+  );
+
+  test(
+    'dynamic playlist delivery still requires terminal confirmation',
+    () async {
+      final delivery = CatalogQueryDelivery<String>('playlistTracks', {
+        'itemId': 'one',
+        'provider': 'library',
+        'allowDynamicTracks': true,
+        'forceRefresh': false,
+      }, (_) => 'display');
+      final terminal = Completer<String>();
+      final result = delivery.resolve(terminal.future);
+      final query = {
+        'PlaylistTracks': {
+          'item_id': 'one',
+          'provider': 'library',
+          'allow_dynamic_tracks': true,
+          'force_refresh': false,
+        },
+      };
+      delivery.onEvent({
+        'type': 'catalog_updated',
+        'query': query,
+        'value': {'Tracks': <Object>[]},
+      });
+      delivery.onEvent({
+        'type': 'catalog_read_changed',
+        'query': query,
+        'snapshot': {'is_server_complete': true},
+      });
+      var isDelivered = false;
+      unawaited(result.then((_) => isDelivered = true));
+      await Future<void>.delayed(Duration.zero);
+      expect(isDelivered, isFalse);
+      terminal.complete('confirmed');
+      expect(await result, 'confirmed');
+    },
+  );
+
+  test('catalog completion requires a matching observed value', () {
+    var decodes = 0;
+    final delivery = CatalogQueryDelivery<String>(
+      'artist',
+      {'itemId': 'one', 'provider': 'library'},
+      (value) {
+        decodes++;
+        return (value as Map)['name'] as String;
+      },
+    );
+    expect(delivery.canCompleteFromCatalog, isTrue);
+    expect(
+      () => delivery.decodeLatest({'catalogResultDelivered': true}),
+      throwsStateError,
+    );
+    delivery.onEvent({
+      'type': 'catalog_updated',
+      'query': {
+        'Artist': {'item_id': 'other', 'provider': 'library'},
+      },
+      'value': {
+        'Artist': {'name': 'Wrong'},
+      },
+    });
+    expect(
+      () => delivery.decodeLatest({'catalogResultDelivered': true}),
+      throwsStateError,
+    );
+    delivery.onEvent({
+      'type': 'catalog_updated',
+      'query': {
+        'Artist': {'item_id': 'one', 'provider': 'library'},
+      },
+      'value': {
+        'Artist': {'name': 'Observed'},
+      },
+    });
+    expect(delivery.decodeLatest({'catalogResultDelivered': true}), 'Observed');
+    expect(delivery.decodeLatest({'catalogResultDelivered': true}), 'Observed');
+    expect(decodes, 1);
+  });
+
+  test('strict and noncatalog reads never replace terminal data', () {
+    for (final (kind, arguments) in [
+      ('playlistTracks', <String, Object?>{'allowDynamicTracks': true}),
+      ('playlistTracks', <String, Object?>{'forceRefresh': true}),
+      ('mediaArtwork', <String, Object?>{}),
+      ('recommendations', <String, Object?>{}),
+      ('searchMedia', <String, Object?>{'limit': 101}),
+    ]) {
+      final delivery = CatalogQueryDelivery<String>(
+        kind,
+        arguments,
+        (value) => value as String,
+      );
+      expect(delivery.canCompleteFromCatalog, isFalse);
+      expect(delivery.decodeLatest('confirmed'), 'confirmed');
+      expect(
+        () => delivery.decodeLatest({'catalogResultDelivered': true}),
+        throwsStateError,
+      );
+    }
+  });
+
+  test('album year knowledge survives model payload round trips', () {
+    for (final fields in [
+      <String, dynamic>{},
+      {'year': null},
+      {'year': 2024},
+    ]) {
+      final album = Album.fromJson(
+        {..._mediaJson('album'), ...fields}..removeWhere(
+          (key, _) => key == 'year' && !fields.containsKey('year'),
+        ),
+      );
+      final payload = createMusicAssistantMediaItemPayload(album);
+      expect(album.isYearKnown, fields.containsKey('year'));
+      expect(payload.containsKey('year'), fields.containsKey('year'));
+      expect(Album.fromJson(payload).isYearKnown, album.isYearKnown);
+    }
+  });
+
+  test('payload-free catalog status retains provenance and failures', () {
+    final change = CatalogReadChange.fromJson({
+      'type': 'catalog_read_changed',
+      'query': {
+        'PlaylistTracks': {
+          'provider': 'library',
+          'item_id': '42',
+          'allow_dynamic_tracks': false,
+        },
+      },
+      'snapshot': {
+        'phase': 'failed',
+        'source': 'cache',
+        'knowledge': 'observed_response',
+        'freshness': 'stale',
+        'observed_at': 123,
+        'error': 'server unavailable',
+        'cache_error': 'cache warning',
+      },
+    });
+    expect(change.kind, CatalogQueryKind.playlistTracks);
+    expect(change.source, CatalogDataSource.cache);
+    expect(change.phase, CatalogLoadPhase.failed);
+    expect(change.knowledge, CatalogReadKnowledge.observedResponse);
+    expect(change.freshness, CatalogFreshness.stale);
+    expect(change.observedAt, 123);
+    expect(change.error, 'server unavailable');
+    expect(change.cacheError, 'cache warning');
+  });
+
+  test(
+    'catalog subscribers share decoded values and release the source',
+    () async {
+      final bridge = _CatalogEventBridge();
+      final first = <CatalogUpdate>[];
+      final second = <CatalogUpdate>[];
+      final left = bridge.catalogUpdates.listen(first.add);
+      final right = bridge.catalogUpdates.listen(second.add);
+      final event = <String, dynamic>{
+        'type': 'catalog_updated',
+        'query': {
+          'RecentlyPlayed': {'limit': 40},
+        },
+        'value': {
+          'Tracks': [_mediaJson('track')],
+        },
+      };
+      bridge.updates.add(event);
+      expect(first, hasLength(1));
+      expect(identical(first.single, second.single), isTrue);
+      await left.cancel();
+      bridge.updates.add(event);
+      expect(first, hasLength(1));
+      expect(second, hasLength(2));
+      await right.cancel();
+      expect(bridge.updates.hasListener, isFalse);
+      final resumed = bridge.catalogUpdates.listen(first.add);
+      bridge.updates.add(event);
+      expect(first, hasLength(2));
+      await resumed.cancel();
+      await bridge.updates.close();
+    },
+  );
+
+  test(
+    'typed media equality retains nested fields and cached image revisions',
+    () {
+      final original = _mediaJson('track')
+        ..['artists'] = [_mediaJson('artist')]
+        ..['album'] = (_mediaJson('album')..['year'] = null)
+        ..['image'] = {
+          'type': 'thumb',
+          'provider': 'builtin',
+          'path': '',
+          'cached_inline': {
+            'owner_uri': 'library://track/track-id',
+            'position': 0,
+            'content_hash': 'old',
+          },
+        };
+      Map<String, dynamic> copy() =>
+          jsonDecode(jsonEncode(original)) as Map<String, dynamic>;
+      final previous = Track.fromJson(original);
+      expect(hasSameMediaContent(previous, Track.fromJson(copy())), isTrue);
+      final mutations = <void Function(Map<String, dynamic>)>[
+        (json) => json['position'] = 99,
+        (json) => json['duration'] = 99,
+        (json) => json['external_ids'][0][1] = 'changed',
+        (json) => json['artists'][0]['name'] = 'changed',
+        (json) => json['album'].remove('year'),
+        (json) => json['album']['year'] = 2026,
+        (json) => json['provider_mappings'][0]['available'] = false,
+        (json) => json['provider_mappings'][0]['audio_format'] = {
+          'sample_rate': 96000,
+        },
+        (json) => json['image']['cached_inline']['content_hash'] = 'new',
+        (json) => json['image']['cached_inline']['position'] = 1,
+        (json) => json['metadata'] = {
+          'genres': ['changed'],
+        },
+      ];
+      for (var index = 0; index < mutations.length; index++) {
+        final changed = copy();
+        mutations[index](changed);
+        expect(
+          hasSameMediaContent(previous, Track.fromJson(changed)),
+          isFalse,
+          reason: 'mutation $index',
+        );
+      }
+      final playlist = _mediaJson('playlist')
+        ..['access'] = {
+          'owner': 'me',
+          'sharing': 'private',
+          'shared_users': ['one'],
+          'collaborative': false,
+        };
+      expect(
+        hasSameMediaContent(
+          Playlist.fromJson(playlist),
+          Playlist.fromJson(
+            jsonDecode(jsonEncode(playlist)) as Map<String, dynamic>,
+          ),
+        ),
+        isTrue,
+      );
+      final changedPlaylist =
+          jsonDecode(jsonEncode(playlist)) as Map<String, dynamic>;
+      changedPlaylist['access']['shared_users'] = ['two'];
+      expect(
+        hasSameMediaContent(
+          Playlist.fromJson(playlist),
+          Playlist.fromJson(changedPlaylist),
+        ),
+        isFalse,
+      );
+    },
+  );
+
+  test('media list comparison stops after the first changed item', () {
+    final previous = Track.fromJson(_mediaJson('track')..['name'] = 'Old');
+    final incoming = Track.fromJson(_mediaJson('track')..['name'] = 'New');
+    expect(
+      hasSameMediaListContent(
+        [previous, _UnreadMediaItem()],
+        [incoming, _UnreadMediaItem()],
+      ),
+      isFalse,
+    );
+    expect(hasSameMediaListContent([previous], [previous]), isTrue);
+    expect(hasSameMediaListContent([previous], []), isFalse);
+    expect(hasSameMediaListContent([], []), isTrue);
+  });
+
+  test(
     'recent tracks decode typed catalog values and tagged completion values',
     () {
       final track = <String, dynamic>{
@@ -210,6 +910,33 @@ void main() {
   );
 
   test(
+    'home joins navigation loads but restarts invalidated reads and explicit refreshes',
+    () async {
+      final bridge = _RecommendationEventBridge();
+      final gate = Completer<void>();
+      bridge.recommendationGate = gate.future;
+      final home = HomeController(coreBridge: bridge);
+      await home.load();
+      await home.load();
+      bridge.updates.add({'type': 'recommendations_changed'});
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.refreshes, [false]);
+      bridge.updates.add({'type': 'cache_cleared', 'cache': 'database'});
+      gate.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.refreshes, [false, false]);
+      expect(home.recommendationItems.single.name, 'Cached');
+      await home.load(refresh: true);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.refreshes, [false, false, true]);
+      home.dispose();
+      expect(bridge.updates.hasListener, isFalse);
+      await bridge.updates.close();
+    },
+  );
+
+  test(
     'home and explore separate media invalidations and stop after disposal',
     () async {
       for (final view in RecommendationView.values) {
@@ -231,7 +958,7 @@ void main() {
           'cache': 'images',
         });
         await Future<void>.delayed(Duration.zero);
-        expect(bridge.refreshes, <bool>[true]);
+        expect(bridge.refreshes, <bool>[view == RecommendationView.explore]);
         bridge.trackName = 'Fresh';
         bridge.updates.add(<String, dynamic>{
           'type': 'cache_cleared',
@@ -240,7 +967,10 @@ void main() {
         expect(tracks().single.name, 'Cached');
         await Future<void>.delayed(Duration.zero);
         expect(tracks().single.name, 'Fresh');
-        expect(bridge.refreshes, <bool>[true, false]);
+        expect(bridge.refreshes, <bool>[
+          view == RecommendationView.explore,
+          false,
+        ]);
         final recentReads = bridge.recentReads;
         bridge.updates.add(<String, dynamic>{
           'type': 'provider_instances_changed',
@@ -251,7 +981,10 @@ void main() {
           recentReads + (view == RecommendationView.home ? 1 : 0),
         );
         expect(tracks().single.name, 'Fresh');
-        expect(bridge.refreshes, <bool>[true, false]);
+        expect(bridge.refreshes, <bool>[
+          view == RecommendationView.explore,
+          false,
+        ]);
         final readsBeforeDisposal = bridge.recentReads;
         home.dispose();
         explore.dispose();
@@ -263,7 +996,10 @@ void main() {
           'type': 'provider_instances_changed',
         });
         await Future<void>.delayed(Duration.zero);
-        expect(bridge.refreshes, <bool>[true, false]);
+        expect(bridge.refreshes, <bool>[
+          view == RecommendationView.explore,
+          false,
+        ]);
         expect(bridge.recentReads, readsBeforeDisposal);
         await bridge.updates.close();
       }
@@ -303,6 +1039,36 @@ void main() {
       ProviderManifestRegistry.clear();
     },
   );
+  test('catalog events accept argument-free recommendation queries', () {
+    final change = CatalogReadChange.fromJson({
+      'query': 'RecommendationFolders',
+      'snapshot': {
+        'phase': 'ready',
+        'source': 'server',
+        'knowledge': 'observed_response',
+        'freshness': 'fresh',
+        'observed_at': 1700000000,
+      },
+    });
+    expect(change.kind, CatalogQueryKind.other);
+    expect(change.phase, CatalogLoadPhase.ready);
+    expect(change.knowledge, CatalogReadKnowledge.observedResponse);
+    expect(change.freshness, CatalogFreshness.fresh);
+    expect(change.source, CatalogDataSource.server);
+    expect(change.observedAt, 1700000000);
+    expect(change.itemId, isNull);
+    expect(change.provider, isNull);
+    expect(change.limit, isNull);
+    final update = CatalogUpdate.fromJson({
+      'query': 'RecommendationFolders',
+      'value': {'RecommendationFolders': <Object?>[]},
+    });
+    expect(update.kind, CatalogQueryKind.other);
+    expect(update.itemId, isNull);
+    expect(update.provider, isNull);
+    expect(update.limit, isNull);
+  });
+
   test(
     'server read success preserves a separate cache persistence failure',
     () {
@@ -456,11 +1222,248 @@ void main() {
         });
         await Future<void>.delayed(Duration.zero);
         expect(tracks(), isEmpty);
-        expect(bridge.refreshes, <bool>[true, false, false]);
+        expect(bridge.refreshes, <bool>[
+          view == RecommendationView.explore,
+          false,
+          false,
+        ]);
         home.dispose();
         explore.dispose();
         await bridge.updates.close();
       }
+    },
+  );
+
+  test(
+    'full snapshot covers intervening versioned invalidations without another read',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      bridge.initial.complete(bridge.createSnapshot(revision: 1));
+      await userData.loadLibraryData();
+      final refresh = userData.refreshLibrarySnapshot();
+      await Future<void>.delayed(Duration.zero);
+      bridge.updates.add({
+        'type': 'user_data_metadata_changed',
+        'snapshot': {'revision': 3},
+      });
+      bridge.snapshots.single.complete(bridge.createSnapshot(revision: 3));
+      await refresh;
+      expect(bridge.snapshots, hasLength(1));
+      expect(userData.playlists.single.itemId, 'playlist-id');
+    },
+  );
+
+  test(
+    'recommendation deltas retain folder identity and remove absent folders',
+    () {
+      final first = RecommendationFolder(
+        itemId: 'first',
+        provider: 'source',
+        title: 'First',
+        items: [],
+      );
+      final second = RecommendationFolder(
+        itemId: 'second',
+        provider: 'source',
+        title: 'Second',
+        items: [],
+      );
+      final previous = RecommendationSnapshot(
+        revision: 1,
+        folders: [first, second],
+      );
+      final delta = RecommendationSnapshot.fromJson({
+        'revision': 1,
+        'is_loading': false,
+        'has_load_error': false,
+        'folders': [],
+        'delta': {
+          'revision': 1,
+          'sequence': 2,
+          'order': [
+            {'provider': 'source', 'item_id': 'first'},
+          ],
+        },
+      });
+      final merged = delta.applyTo(previous);
+      expect(merged.folders.single, same(first));
+      expect(previous.folders, [first, second]);
+      expect(merged.delta, isNull);
+      expect(
+        () => delta.applyTo(const RecommendationSnapshot()),
+        throwsStateError,
+      );
+    },
+  );
+
+  test(
+    'home applies only changed sections and rejects stale or missing deltas',
+    () async {
+      Map<String, dynamic> folder(String id, String track) => {
+        'item_id': id,
+        'provider': 'source',
+        'title': id,
+        'items': [_mediaJson('track')..['name'] = track],
+      };
+      RecommendationSnapshot full(int revision, String track) =>
+          RecommendationSnapshot.fromJson({
+            'revision': revision,
+            'is_loading': false,
+            'has_load_error': false,
+            'folders': [folder('user_recommendations', track)],
+          });
+      final bridge = _RecommendationEventBridge();
+      final gate = Completer<void>();
+      bridge.recommendationGate = gate.future;
+      bridge.recommendationResult = full(1, 'Old terminal');
+      final home = HomeController(coreBridge: bridge);
+      addTearDown(() async {
+        home.dispose();
+        await bridge.updates.close();
+      });
+      await home.load();
+      await Future<void>.delayed(Duration.zero);
+      var recommendationChanges = 0;
+      var topChanges = 0;
+      home.recommendationsListenable.addListener(() => recommendationChanges++);
+      home.topTracksListenable.addListener(() => topChanges++);
+      void publish(
+        int revision,
+        int sequence,
+        List<Map<String, dynamic>> folders,
+        List<String> order,
+      ) {
+        bridge.updates.add({
+          'type': 'recommendations_updated',
+          'view': 'home',
+          'snapshot': {
+            'revision': revision,
+            'is_loading': false,
+            'has_load_error': false,
+            'folders': folders,
+            'delta': {
+              'revision': revision,
+              'sequence': sequence,
+              'order': [
+                for (final id in order) {'provider': 'source', 'item_id': id},
+              ],
+            },
+          },
+        });
+      }
+
+      const order = ['user_recommendations', 'user_top_tracks_monthly'];
+      publish(1, 1, [
+        folder(order[0], 'Recommendation'),
+        folder(order[1], 'Top'),
+      ], order);
+      final recommendations = home.recommendationItems;
+      expect(recommendationChanges, 1);
+      expect(topChanges, 1);
+      publish(1, 2, [folder(order[1], 'Changed top')], order);
+      expect(home.recommendationItems, same(recommendations));
+      expect(home.topTracks.single.name, 'Changed top');
+      expect(recommendationChanges, 1);
+      expect(topChanges, 2);
+      publish(1, 2, [folder(order[1], 'Duplicate')], order);
+      expect(home.topTracks.single.name, 'Changed top');
+      publish(1, 3, [], [order[0]]);
+      expect(home.topTracks, isEmpty);
+      expect(home.recommendationItems, same(recommendations));
+      publish(2, 1, [folder(order[0], 'New read')], [order[0]]);
+      publish(1, 4, [folder(order[0], 'Stale')], [order[0]]);
+      expect(home.recommendationItems.single.name, 'New read');
+      publish(2, 3, [folder(order[0], 'Gap')], [order[0]]);
+      expect(home.recommendationItems.single.name, 'New read');
+      bridge.recommendationResult = full(3, 'Recovery');
+      gate.complete();
+      await Future<void>.delayed(Duration.zero);
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.refreshes, hasLength(2));
+      expect(home.recommendationItems.single.name, 'Recovery');
+    },
+  );
+
+  test(
+    'metadata deltas retain tracks and favorites without full snapshot reads',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final snapshot = bridge.createSnapshot(revision: 1);
+      (snapshot['playlists'] as List).single['items'] = [_mediaJson('track')];
+      bridge.initial.complete(snapshot);
+      await userData.loadLibraryData();
+      final tracks = userData.tracksForPlaylist('playlist-id');
+      final favorites = userData.favoriteTracks;
+      bridge.updates.add({
+        'type': 'user_data_metadata_changed',
+        'snapshot': {
+          'revision': 2,
+          'has_loaded_favorites': true,
+          'is_loading_playlists': true,
+          'playlists': [_mediaJson('playlist')..['name'] = 'Renamed'],
+        },
+      });
+      expect(bridge.snapshots, isEmpty);
+      expect(userData.playlists.single.name, 'Renamed');
+      expect(userData.isLoadingPlaylists, isTrue);
+      expect(userData.tracksForPlaylist('playlist-id'), same(tracks));
+      expect(userData.favoriteTracks, same(favorites));
+      bridge.updates.add({
+        'type': 'user_data_metadata_changed',
+        'snapshot': {
+          'revision': 3,
+          'has_loaded_favorites': true,
+          'playlists': [],
+        },
+      });
+      expect(userData.playlists, isEmpty);
+      expect(userData.tracksForPlaylist('playlist-id'), isEmpty);
+      expect(userData.isLoadingPlaylists, isFalse);
+      expect(bridge.snapshots, isEmpty);
+    },
+  );
+
+  test(
+    'private playlist displays retained tracks before snapshot completion',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      final snapshot = bridge.createSnapshot(revision: 1);
+      (snapshot['playlists'] as List).single['items'] = [
+        _mediaJson('track')..['name'] = 'Retained track',
+      ];
+      bridge.initial.complete(snapshot);
+      await userData.loadLibraryData();
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        userDataController: userData,
+        itemId: 'playlist-id',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadPlaylist();
+      await Future<void>.delayed(Duration.zero);
+      expect(bridge.snapshots, hasLength(1));
+      expect(controller.playlist?.itemId, 'playlist-id');
+      expect(controller.tracks.single.name, 'Retained track');
+      expect(controller.isLoadingTracks, isFalse);
+      bridge.snapshots.single.completeError(StateError('snapshot unavailable'));
+      await loading;
+      expect(controller.tracks.single.name, 'Retained track');
     },
   );
 
@@ -768,6 +1771,50 @@ void main() {
       expect(playlistChanges, 0);
       expect(userData.favoriteTracks, same(favorites));
       expect(userData.playlists, same(playlists));
+      expect(bridge.snapshots, isEmpty);
+    },
+  );
+
+  test(
+    'favorite deltas preserve playlist inventories without full reads',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final loading = userData.loadLibraryData();
+      bridge.initial.complete(bridge.createSnapshot(isLoading: true));
+      await loading;
+      final playlists = userData.playlists;
+      final tracks = userData.tracksForPlaylist('playlist-id');
+      var playlistChanges = 0;
+      userData.playlistsChanges.addListener(() => playlistChanges++);
+      bridge.updates.add({
+        'type': 'user_data_favorites_changed',
+        'snapshot': {
+          'revision': 1,
+          'favorites': {
+            'tracks': [_mediaJson('track')..['name'] = 'New favorite'],
+          },
+          'has_loaded_favorites': true,
+          'is_loading_favorites': false,
+          'favorite_overrides': <Object>[],
+        },
+      });
+      await Future<void>.delayed(Duration.zero);
+      expect(userData.favoriteTracks.single.name, 'New favorite');
+      expect(userData.playlists, same(playlists));
+      expect(userData.tracksForPlaylist('playlist-id'), same(tracks));
+      expect(userData.isLoadingPlaylists, isTrue);
+      expect(playlistChanges, 0);
+      expect(bridge.snapshots, isEmpty);
+      bridge.updates.add({
+        'type': 'user_data_favorites_changed',
+        'snapshot': {'revision': 1},
+      });
+      await Future<void>.delayed(Duration.zero);
       expect(bridge.snapshots, isEmpty);
     },
   );

@@ -1,6 +1,6 @@
 import 'dart:async';
-
 import 'package:flutter/material.dart' hide RepeatMode;
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 
 import '../layout/layout_utils.dart';
 import '../../features/shared/selection/selection_controller.dart';
@@ -391,6 +391,20 @@ class _AppShellState extends State<AppShell> {
                         ),
                         Expanded(
                           child: ListView.builder(
+                            prototypeItem: const Padding(
+                              padding: EdgeInsets.symmetric(
+                                horizontal: 4,
+                                vertical: 2,
+                              ),
+                              child: DesktopSidebarPlaylistContent(
+                                title: 'Playlist',
+                                metadata: '0 Titel',
+                                cover: SizedBox.shrink(),
+                              ),
+                            ),
+                            scrollCacheExtent: const ScrollCacheExtent.viewport(
+                              1,
+                            ),
                             padding: const EdgeInsets.symmetric(
                               horizontal: 10,
                               vertical: 0,
@@ -1498,6 +1512,54 @@ class _DesktopNavItemState extends State<_DesktopNavItem> {
   }
 }
 
+class DesktopSidebarPlaylistContent extends StatelessWidget {
+  const DesktopSidebarPlaylistContent({
+    super.key,
+    required this.title,
+    required this.metadata,
+    required this.cover,
+  });
+
+  final String title;
+  final String metadata;
+  final Widget cover;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+      child: Row(
+        children: <Widget>[
+          SizedBox(width: 40, height: 40, child: cover),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: <Widget>[
+                Text(
+                  title,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.textPrimary, fontSize: 13),
+                ),
+                const SizedBox(height: 4),
+                Text(
+                  metadata,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(color: colors.textTertiary, fontSize: 11),
+                ),
+              ],
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
 class _DesktopSidebarPlaylistItem extends StatefulWidget {
   const _DesktopSidebarPlaylistItem({
     super.key,
@@ -1607,67 +1669,70 @@ class _DesktopSidebarPlaylistItemState
               color: _isHovered ? colors.hover : Colors.transparent,
               borderRadius: BorderRadius.circular(10),
             ),
-            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
-            child: Row(
-              children: <Widget>[
-                MouseRegion(
-                  onEnter: (_) => _setCoverHovered(true),
-                  onExit: (_) => _setCoverHovered(false),
-                  child: ClipRRect(
-                    borderRadius: BorderRadius.circular(6),
-                    child: SizedBox(
-                      width: 40,
-                      height: 40,
-                      child: Stack(
-                        fit: StackFit.expand,
-                        children: <Widget>[
-                          coverUrl == null || coverUrl.isEmpty
-                              ? ColoredBox(color: colors.bgTertiary)
-                              : MediaImage(
-                                  source: coverUrl,
-                                  fit: BoxFit.cover,
-                                  fallback: ColoredBox(
-                                    color: colors.bgTertiary,
+            child: DesktopSidebarPlaylistContent(
+              title: title,
+              metadata: metadataText,
+              cover: MouseRegion(
+                onEnter: (_) => _setCoverHovered(true),
+                onExit: (_) => _setCoverHovered(false),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(6),
+                  child: SizedBox(
+                    width: 40,
+                    height: 40,
+                    child: Stack(
+                      fit: StackFit.expand,
+                      children: <Widget>[
+                        coverUrl == null || coverUrl.isEmpty
+                            ? ColoredBox(color: colors.bgTertiary)
+                            : MediaImage(
+                                source: coverUrl,
+                                fit: BoxFit.cover,
+                                cacheWidth:
+                                    (40 *
+                                            MediaQuery.devicePixelRatioOf(
+                                              context,
+                                            ))
+                                        .ceil(),
+                                fallback: ColoredBox(color: colors.bgTertiary),
+                              ),
+                        if (tracks.isNotEmpty)
+                          Positioned.fill(
+                            child: IgnorePointer(
+                              ignoring: !_isCoverHovered,
+                              child: AnimatedOpacity(
+                                opacity: _isCoverHovered ? 1 : 0,
+                                duration: const Duration(milliseconds: 140),
+                                child: ColoredBox(
+                                  color: Colors.black.withValues(
+                                    alpha: colors.coverHoverOverlayOpacity,
                                   ),
-                                ),
-                          if (tracks.isNotEmpty)
-                            Positioned.fill(
-                              child: IgnorePointer(
-                                ignoring: !_isCoverHovered,
-                                child: AnimatedOpacity(
-                                  opacity: _isCoverHovered ? 1 : 0,
-                                  duration: const Duration(milliseconds: 140),
-                                  child: ColoredBox(
-                                    color: Colors.black.withValues(
-                                      alpha: colors.coverHoverOverlayOpacity,
-                                    ),
-                                    child: Center(
-                                      child: MouseRegion(
-                                        onEnter: (_) => _setPlayHovered(true),
-                                        onExit: (_) => _setPlayHovered(false),
-                                        child: AnimatedScale(
-                                          scale: _isPlayHovered ? 1.08 : 1,
-                                          duration: const Duration(
-                                            milliseconds: 140,
-                                          ),
-                                          curve: Curves.easeOutCubic,
-                                          child: GestureDetector(
-                                            onTap: widget.onPlay,
-                                            child: Container(
-                                              width: 28,
-                                              height: 28,
-                                              decoration: BoxDecoration(
-                                                color: colors
-                                                    .overlayPlayButtonBackground,
-                                                borderRadius:
-                                                    BorderRadius.circular(14),
-                                              ),
-                                              child: Icon(
-                                                Icons.play_arrow_sharp,
-                                                size: 18,
-                                                color: colors
-                                                    .overlayPlayButtonForeground,
-                                              ),
+                                  child: Center(
+                                    child: MouseRegion(
+                                      onEnter: (_) => _setPlayHovered(true),
+                                      onExit: (_) => _setPlayHovered(false),
+                                      child: AnimatedScale(
+                                        scale: _isPlayHovered ? 1.08 : 1,
+                                        duration: const Duration(
+                                          milliseconds: 140,
+                                        ),
+                                        curve: Curves.easeOutCubic,
+                                        child: GestureDetector(
+                                          onTap: widget.onPlay,
+                                          child: Container(
+                                            width: 28,
+                                            height: 28,
+                                            decoration: BoxDecoration(
+                                              color: colors
+                                                  .overlayPlayButtonBackground,
+                                              borderRadius:
+                                                  BorderRadius.circular(14),
+                                            ),
+                                            child: Icon(
+                                              Icons.play_arrow_sharp,
+                                              size: 18,
+                                              color: colors
+                                                  .overlayPlayButtonForeground,
                                             ),
                                           ),
                                         ),
@@ -1677,40 +1742,12 @@ class _DesktopSidebarPlaylistItemState
                                 ),
                               ),
                             ),
-                        ],
-                      ),
+                          ),
+                      ],
                     ),
                   ),
                 ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: <Widget>[
-                      Text(
-                        title,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colors.textPrimary,
-                          fontSize: 13,
-                        ),
-                      ),
-                      const SizedBox(height: 4),
-                      Text(
-                        metadataText,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: TextStyle(
-                          color: colors.textTertiary,
-                          fontSize: 11,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),

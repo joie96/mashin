@@ -392,6 +392,8 @@ impl Application {
         context: SessionQueryContext,
     ) -> Result<QueryResult, ApplicationError> {
         use ApplicationQuery::*;
+        use super::repositories::with_request_priority;
+        let priority = query.request_priority();
         if context.is_authenticated
             && !matches!(
                 query,
@@ -466,6 +468,7 @@ impl Application {
         }
         let generation = context.generation;
         let result: Result<QueryResult, String> = match query {
+            GetCacheUsage {} => self.catalog_repository(generation)?.cache_usage().await.map(QueryResult::CacheUsage),
             Recommendations { view, refresh } => {
                 let recommendations = self.recommendation_service(generation)?;
                 let events = {
@@ -486,7 +489,7 @@ impl Application {
                         );
                     }, |query, snapshot| {
                         events.publish(
-                            crate::application::events::ApplicationEvent::CatalogReadChanged { query, snapshot },
+                            crate::application::events::ApplicationEvent::CatalogReadChanged { query, snapshot: (&snapshot).into() },
                         );
                     })
                     .await
@@ -501,7 +504,12 @@ impl Application {
                 .get_icon_data(&provider)
                 .await
                 .map(QueryResult::ProviderIconData),
-            ReadImage { request, refresh } => {
+            query @ (ReadImage { .. } | ObserveImage { .. }) => {
+                let (request, refresh, observation_id) = match query {
+                    ReadImage { request, refresh } => (request, refresh, None),
+                    ObserveImage { request, observation_id, .. } => (request, true, Some(observation_id)),
+                    _ => unreachable!(),
+                };
                 let images = {
                     let coordinator = self.coordinator.lock().map_err(|_| {
                         ApplicationError::internal("core coordinator lock poisoned")
@@ -520,9 +528,14 @@ impl Application {
                         .images
                         .clone()
                 };
-                let snapshot =
-                    super::queries::ImageReadSnapshot::load(images.as_ref(), &request, refresh)
-                        .await?;
+                let snapshot = if let Some(observation_id) = observation_id {
+                    let events = self.coordinator.lock().map_err(|_| ApplicationError::internal("core coordinator lock poisoned"))?.session_events();
+                    super::queries::ImageReadSnapshot::observe(images.as_ref(), &request, |snapshot| {
+                        events.publish(ApplicationEvent::ImageReadUpdated { observation_id, snapshot });
+                    }).await?
+                } else {
+                    super::queries::ImageReadSnapshot::load(images.as_ref(), &request, refresh).await?
+                };
                 if snapshot.did_publish_change {
                     if let Some(proxy_id) = request.image.proxy_id.filter(|proxy_id| {
                         proxy_id.len() == 64
@@ -640,14 +653,21 @@ impl Application {
                 )
                 .await
             }
-            ArtistAlbums { item_id, provider } => {
-                self.refresh_catalog(
-                    generation,
-                    CatalogQuery::ArtistAlbums {
-                        item_id: MediaId(item_id),
-                        provider,
-                    },
-                    false,
+            ArtistAlbums {
+                item_id,
+                provider,
+                ..
+            } => {
+                with_request_priority(
+                    priority,
+                    self.refresh_catalog(
+                        generation,
+                        CatalogQuery::ArtistAlbums {
+                            item_id: MediaId(item_id),
+                            provider,
+                        },
+                        false,
+                    ),
                 )
                 .await
             }
@@ -719,9 +739,12 @@ impl Application {
                 return Err(ApplicationError::internal("state query was not dispatched"))
             }
         };
-        self.project_provider_availability(
-            generation,
-            result.map_err(ApplicationError::command_failed)?,
+        with_request_priority(
+            priority,
+            self.project_provider_availability(
+                generation,
+                result.map_err(ApplicationError::command_failed)?,
+            ),
         )
         .await
     }
@@ -774,18 +797,24 @@ impl Application {
             .catalog_repository(generation)
             .map_err(|error| error.message)?;
         let is_recently_played = matches!(query, CatalogQuery::RecentlyPlayed { .. });
-        let events = {
-            let coordinator = self
+        let (events, publication) = {
+            let mut coordinator = self
                 .coordinator
                 .lock()
                 .map_err(|_| "core coordinator lock poisoned".to_owned())?;
             if coordinator.session_generation != generation {
                 return Err("session changed before catalog observation".to_owned());
             }
-            coordinator.session_events()
+            (coordinator.session_events(), coordinator.catalog_publication(&query))
         };
         use crate::domain::catalog::CatalogLoadPhase;
         use futures_util::StreamExt;
+        let started = std::time::Instant::now();
+        static NEXT_DISPATCH_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let dispatch_id = NEXT_DISPATCH_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let logger = crate::logging::Logger::new("Dispatcher.Catalog");
+        let mut first_data_ms = None;
+        logger.trace(format_args!("dispatch_id={dispatch_id} query={} stage=started force_refresh={force_refresh}", query.kind_name()));
         let mut observations = repository.observe_catalog(query.clone(), force_refresh);
         let mut completed = None;
         let mut published_value = None;
@@ -799,28 +828,38 @@ impl Application {
                 return Err("session changed during catalog observation".to_owned());
             }
             if let Some(value) = snapshot.value.clone() {
-                if published_value.as_ref() != Some(&value) {
+                if !published_value.as_ref().is_some_and(|previous| std::sync::Arc::ptr_eq(previous, &value) || previous == &value) {
+                    let elapsed_ms = started.elapsed().as_millis();
+                    if first_data_ms.is_none() {
+                        first_data_ms = Some(elapsed_ms);
+                        logger.trace(format_args!("dispatch_id={dispatch_id} query={} stage=first_data source={:?} knowledge={:?} elapsed_ms={elapsed_ms}", query.kind_name(), snapshot.source, snapshot.knowledge));
+                    } else {
+                        logger.trace(format_args!("dispatch_id={dispatch_id} query={} stage=updated source={:?} elapsed_ms={elapsed_ms}", query.kind_name(), snapshot.source));
+                    }
+                    let publication_value = publication.value_for_publication(snapshot.publication_revision, &value, published_value.is_none());
                     published_value = Some(value.clone());
-                    events.publish(
+                    if let Some(value) = publication_value { events.publish(
                         crate::application::events::ApplicationEvent::CatalogUpdated {
                             query: query.clone(),
-                            value,
+                            value: std::sync::Arc::unwrap_or_clone(value),
                         },
-                    );
+                    ); }
                 }
             }
             events.publish(
                 crate::application::events::ApplicationEvent::CatalogReadChanged {
                     query: query.clone(),
-                    snapshot: snapshot.clone(),
+                    snapshot: (&snapshot).into(),
                 },
             );
             match snapshot.phase {
                 CatalogLoadPhase::Ready => {
+                    logger.trace(format_args!("dispatch_id={dispatch_id} query={} stage=finished source={:?} first_data_ms={first_data_ms:?} total_ms={}", query.kind_name(), snapshot.source, started.elapsed().as_millis()));
                     completed = snapshot.value;
                     break;
                 }
                 CatalogLoadPhase::Failed | CatalogLoadPhase::Invalidated => {
+                    logger.trace(format_args!("dispatch_id={dispatch_id} query={} stage=finished phase={:?} had_data={} total_ms={}", query.kind_name(), snapshot.phase, first_data_ms.is_some(), started.elapsed().as_millis()));
                     return Err(snapshot
                         .error
                         .unwrap_or_else(|| "catalog refresh failed".to_owned()))
@@ -838,7 +877,7 @@ impl Application {
         {
             return Err("session changed during catalog request".into());
         }
-        match value {
+        match std::sync::Arc::unwrap_or_clone(value) {
             CatalogValue::ProviderManifests(manifests) => {
                 Ok(QueryResult::ProviderManifests(manifests))
             }
@@ -880,7 +919,7 @@ impl Application {
                     "session changed before provider read",
                 ));
             }
-            let events = {
+            let (events, availability) = {
                 let coordinator = self
                     .coordinator
                     .lock()
@@ -890,7 +929,7 @@ impl Application {
                         "session changed before provider read",
                     ));
                 }
-                coordinator.session_events()
+                (coordinator.session_events(), coordinator.provider_availability.clone())
             };
             let providers = match repository.read_instances().await {
                 Ok(read) => {
@@ -900,6 +939,7 @@ impl Application {
                         });
                     }
                     let current = read.current.items;
+                    availability.replace(current.clone());
                     if let (Some(refresh), Some(refresh_guard)) =
                         (read.refresh, context.tasks.try_lock_provider_refresh())
                     {
@@ -908,6 +948,7 @@ impl Application {
                             let _refresh_guard = refresh_guard;
                             match refresh.await {
                                 Ok(update) => {
+                                    availability.replace(update.items.clone());
                                     if let Some(error) = update.cache_error {
                                         events.publish(crate::application::events::ApplicationEvent::Error { error: ApplicationError::command_failed(error) });
                                     }
@@ -1180,7 +1221,7 @@ mod phase_e_tests {
         assert_cached_catalog_publication(
             json!({"kind":"playlistTracks","itemId":"playlist","provider":"library"}),
             "music/playlists/playlist_tracks",
-            json!({"item_id":"playlist","provider_instance_id_or_domain":"library","force_refresh":false,"allow_dynamic_tracks":false}),
+            json!({"item_id":"playlist","provider_instance_id_or_domain":"library","force_refresh":false,"allow_dynamic_tracks":false,"limit":0}),
             json!([{"media_type":"track","provider":"source-a","item_id":"track","name":"Cached","position":1}]),
             json!([{"media_type":"track","provider":"source-a","item_id":"track","name":"Server","position":4}]),
         );
@@ -1272,7 +1313,8 @@ mod phase_e_tests {
             let item = serde_json::from_value(json!({"media_type":"artist","item_id":item_id,
                 "provider":provider,"name":"Cached","metadata":{"images":[{"type":"thumb","provider":"source","path":"Cached"}]}})).unwrap();
             let snapshot = CatalogLoadSnapshot {
-                value: Some(CatalogValue::Item(item)),
+                publication_revision: 0,
+                value: Some(std::sync::Arc::new(CatalogValue::Item(item))),
                 source: Some(CatalogDataSource::Cache),
                 cache_error: None,
                 phase: CatalogLoadPhase::Refreshing,

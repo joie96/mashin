@@ -148,6 +148,18 @@ impl ServerCache {
             .await
     }
 
+    // Physical usage is serialized with maintenance, without activating either database.
+    pub(crate) async fn usage(&self) -> Result<crate::application::repositories::CacheUsage, CacheError> {
+        let runtime = self.state.runtime.lock().await;
+        if runtime.snapshot.is_shutdown {
+            return Err(CacheError::ShuttingDown);
+        }
+        let storage = runtime.storage.clone();
+        tokio::task::spawn_blocking(move || storage.usage())
+            .await
+            .map_err(|_| CacheError::WorkerPanicked)?
+    }
+
     // Active access and lifecycle observation.
     /// Reads only a previously confirmed address binding, never an inferred URL identity.
     pub(crate) async fn server_id_for_address(
@@ -331,6 +343,18 @@ impl ImageLease {
         result
     }
 
+    pub(super) async fn publish_payload(
+        &self,
+        key: ImageVariantKey,
+        payload: ImagePayload,
+        observed_at: i64,
+    ) -> Result<(), CacheError> {
+        self.require_active()?;
+        let result = self.workers.publish_payload(key, payload, observed_at).await;
+        self.require_active()?;
+        result
+    }
+
     pub(super) async fn record_not_found(
         &self,
         key: ImageVariantKey,
@@ -362,6 +386,16 @@ impl ImageLease {
     ) -> Result<ImageRefreshState, CacheError> {
         self.require_active()?;
         let result = self.workers.read_refresh_state(key).await;
+        self.require_active()?;
+        result
+    }
+
+    pub(super) async fn read_inline_refresh_state(
+        &self,
+        key: ImageVariantKey,
+    ) -> Result<ImageRefreshState, CacheError> {
+        self.require_active()?;
+        let result = self.workers.read_inline_refresh_state(key).await;
         self.require_active()?;
         result
     }
@@ -693,6 +727,27 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn cache_usage_does_not_activate_databases_or_server_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = ServerCache::initialize(directory.path().to_owned()).await.unwrap();
+        let usage = cache.usage().await.unwrap();
+        assert_eq!(usage.metadata_bytes, 0);
+        assert!(usage.image_bytes > 0);
+        let snapshot = cache.observe().borrow().clone();
+        assert!(!snapshot.is_database_active);
+        assert!(!snapshot.is_image_active);
+        assert_eq!(snapshot.database_generation, 0);
+        assert_eq!(snapshot.image_generation, 0);
+        assert!(snapshot.server_id.is_none());
+        assert!(!directory.path().join("Cache").join(super::super::database::DATABASE_FILE_NAME).exists());
+        assert!(!directory.path().join("Cache/images/index.sqlite3").exists());
+        cache.shutdown().await.unwrap();
+        assert!(matches!(cache.usage().await, Err(CacheError::ShuttingDown)));
+        drop(cache);
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn image_clear_drains_leases_without_blocking_media_and_survives_cancellation() {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
@@ -982,7 +1037,9 @@ mod tests {
         let cache = initialize(directory.path(), "server-a").await;
         let storage = CacheStorage::open(directory.path()).unwrap();
         let image = image_path(&storage);
-        let index = storage.image_directory().join(super::super::storage::IMAGE_DATABASE_FILE_NAME);
+        let index = storage
+            .image_directory()
+            .join(super::super::storage::IMAGE_DATABASE_FILE_NAME);
         std::fs::write(&image, b"synthetic image").unwrap();
         std::fs::write(&index, b"synthetic index").unwrap();
         let old = cache.database().await.unwrap();

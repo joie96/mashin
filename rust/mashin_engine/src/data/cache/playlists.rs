@@ -47,12 +47,13 @@ pub(super) fn write_playlist_observation(
     incoming: &Playlist,
     user_id: &UserId,
 ) -> Result<(), CacheError> {
-    let playlist = if let Some(previous) = read_playlist(
+    let previous = read_playlist(
         transaction,
         &incoming.media.provider,
         &incoming.media.item_id,
         user_id,
-    )? {
+    )?;
+    let playlist = if let Some(previous) = previous.clone() {
         let mut merged = MediaItem::Playlist(previous);
         merged.merge_known(MediaItem::Playlist(incoming.clone()));
         let MediaItem::Playlist(playlist) = merged else {
@@ -81,6 +82,9 @@ pub(super) fn write_playlist_observation(
         return Err(CacheError::InvalidMediaObservation(
             "external IDs require type and value",
         ));
+    }
+    if previous.as_ref() == Some(&playlist) {
+        return Ok(());
     }
     let media = &playlist.media;
     let known = &media.knowledge;
@@ -215,7 +219,7 @@ fn read_playlist_projection(
         |row| row.get::<_, String>(0),
     )?)?;
     if known.iter().any(|field| field == "provider_mappings") {
-        let mut statement = transaction.prepare("SELECT * FROM playlist_provider_mappings WHERE provider=?1 AND playlist_id=?2 ORDER BY position")?;
+        let mut statement = transaction.prepare_cached("SELECT * FROM playlist_provider_mappings WHERE provider=?1 AND playlist_id=?2 ORDER BY position")?;
         let mappings = statement
             .query_map(params![provider.as_str(), item_id.as_str()], |row| {
                 observed_object(
@@ -229,7 +233,7 @@ fn read_playlist_projection(
         object.insert("provider_mappings".into(), serde_json::to_value(mappings)?);
     }
     if !is_summary && known.iter().any(|field| field == "external_ids") {
-        let mut statement = transaction.prepare("SELECT id_type,external_id FROM playlist_external_ids WHERE provider=?1 AND playlist_id=?2 ORDER BY position")?;
+        let mut statement = transaction.prepare_cached("SELECT id_type,external_id FROM playlist_external_ids WHERE provider=?1 AND playlist_id=?2 ORDER BY position")?;
         let identities = statement
             .query_map(params![provider.as_str(), item_id.as_str()], |row| {
                 Ok(vec![row.get::<_, String>(0)?, row.get::<_, String>(1)?])

@@ -534,7 +534,7 @@ impl<'catalog, Item: Clone + PartialEq + Send + 'catalog> LibraryPageReader<'cat
                         let page = reader.pages.get_mut(&offset).unwrap();
                         let observed_items =
                             if snapshot.knowledge == CatalogReadKnowledge::ObservedResponse {
-                                snapshot.value.and_then(reader.extract)
+                                snapshot.value.map(std::sync::Arc::unwrap_or_clone).and_then(reader.extract)
                             } else {
                                 None
                             };
@@ -911,7 +911,8 @@ mod tests {
                             CatalogValue::Artists(Vec::new())
                         };
                         return Box::pin(stream::iter([CatalogLoadSnapshot {
-                            value: Some(value),
+                            publication_revision: 0,
+                            value: Some(std::sync::Arc::new(value)),
                             source: Some(CatalogDataSource::Server),
                             phase: CatalogLoadPhase::Ready,
                             knowledge: CatalogReadKnowledge::ObservedResponse,
@@ -935,11 +936,12 @@ mod tests {
                     })
                     .collect();
                 let snapshot = CatalogLoadSnapshot {
-                    value: Some(if is_tracks {
+                    publication_revision: 0,
+                    value: Some(std::sync::Arc::new(if is_tracks {
                         CatalogValue::Tracks(serde_json::from_value(json!(items)).unwrap())
                     } else {
                         CatalogValue::Playlists(serde_json::from_value(json!(items)).unwrap())
-                    }),
+                    })),
                     source: Some(CatalogDataSource::Cache),
                     phase: CatalogLoadPhase::Refreshing,
                     knowledge: CatalogReadKnowledge::ObservedResponse,
@@ -952,11 +954,11 @@ mod tests {
                 completed.phase = self.terminal;
                 if self.terminal == CatalogLoadPhase::Ready {
                     if offset != 0 || !self.should_keep_head {
-                        completed.value = Some(if is_tracks {
+                        completed.value = Some(std::sync::Arc::new(if is_tracks {
                             CatalogValue::Tracks(Vec::new())
                         } else {
                             CatalogValue::Playlists(Vec::new())
-                        });
+                        }));
                     }
                     completed.source = Some(CatalogDataSource::Server);
                 } else {
@@ -1269,7 +1271,8 @@ mod tests {
                     _ => panic!("unexpected section query"),
                 };
                 let snapshot = CatalogLoadSnapshot {
-                    value: Some(value.clone()),
+                    publication_revision: 0,
+                    value: Some(std::sync::Arc::new(value.clone())),
                     source: Some(CatalogDataSource::Cache),
                     phase: if should_block {
                         CatalogLoadPhase::Refreshing
@@ -1289,12 +1292,12 @@ mod tests {
                 completed.phase = self.terminal;
                 if self.terminal == CatalogLoadPhase::Ready {
                     completed.source = Some(CatalogDataSource::Server);
-                    completed.value = Some(match value {
+                    completed.value = Some(std::sync::Arc::new(match value {
                         CatalogValue::Albums(_) => CatalogValue::Albums(Vec::new()),
                         CatalogValue::Artists(_) => CatalogValue::Artists(Vec::new()),
                         CatalogValue::Playlists(_) => CatalogValue::Playlists(Vec::new()),
                         _ => unreachable!(),
-                    });
+                    }));
                 } else {
                     completed.error = Some("controlled section failure".into());
                 }

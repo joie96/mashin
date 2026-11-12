@@ -72,6 +72,9 @@ class CatalogReadChange {
     this.cacheError,
     this.searchQuery,
     this.mediaType,
+    this.isServerComplete = false,
+    this.isPersisting = false,
+    this.isPersistenceComplete = false,
   });
 
   final CatalogQueryKind kind;
@@ -88,10 +91,16 @@ class CatalogReadChange {
   final String? cacheError;
   final String? searchQuery;
   final MediaType? mediaType;
+  final bool isServerComplete;
+  final bool isPersisting;
+  final bool isPersistenceComplete;
 
   // Decode missing data as unknown state, never as a synthetic empty response.
   factory CatalogReadChange.fromJson(Map<String, dynamic> json) {
-    final query = Map<String, dynamic>.from(json['query'] as Map);
+    final rawQuery = json['query'];
+    final query = rawQuery is String
+        ? <String, dynamic>{rawQuery: const <String, dynamic>{}}
+        : Map<String, dynamic>.from(rawQuery as Map);
     if (query.length != 1) throw const FormatException('invalid catalog query');
     final arguments = Map<String, dynamic>.from(query.values.single as Map);
     final snapshot = Map<String, dynamic>.from(json['snapshot'] as Map);
@@ -130,6 +139,9 @@ class CatalogReadChange {
         _ => throw const FormatException('invalid catalog data source'),
       },
       cacheError: snapshot['cache_error'] as String?,
+      isServerComplete: snapshot['is_server_complete'] == true,
+      isPersisting: snapshot['is_persisting'] == true,
+      isPersistenceComplete: snapshot['is_persistence_complete'] == true,
       searchQuery: arguments['query'] as String?,
       mediaType: MediaType.values
           .where((type) => type.name == arguments['media_type'])
@@ -176,7 +188,10 @@ class CatalogUpdate {
 
   // Native query identities are independent of the canonical identities in results.
   factory CatalogUpdate.fromJson(Map<String, dynamic> json) {
-    final query = Map<String, dynamic>.from(json['query'] as Map);
+    final rawQuery = json['query'];
+    final query = rawQuery is String
+        ? <String, dynamic>{rawQuery: const <String, dynamic>{}}
+        : Map<String, dynamic>.from(rawQuery as Map);
     final value = Map<String, dynamic>.from(json['value'] as Map);
     if (query.length != 1 || value.length != 1) {
       throw const FormatException('invalid catalog update');
@@ -412,24 +427,182 @@ MediaItem mediaItemFromJson(Map<String, dynamic> json) {
 bool hasSameMediaContent(MediaItem? previous, MediaItem? incoming) {
   if (identical(previous, incoming)) return true;
   if (previous == null || incoming == null) return false;
-  return _hasSameModelValue(
-    createMusicAssistantMediaItemPayload(previous),
-    createMusicAssistantMediaItemPayload(incoming),
-  );
+  if ((
+        previous.runtimeType,
+        previous.itemId,
+        previous.provider,
+        previous.name.trim().isEmpty ? previous.itemId : previous.name,
+        previous.version,
+        previous.sortName,
+        previous.uri,
+        previous.isPlayable,
+        previous.available,
+        previous.mediaType,
+        previous.favorite,
+        previous.position,
+        previous.dateAdded,
+      ) !=
+      (
+        incoming.runtimeType,
+        incoming.itemId,
+        incoming.provider,
+        incoming.name.trim().isEmpty ? incoming.itemId : incoming.name,
+        incoming.version,
+        incoming.sortName,
+        incoming.uri,
+        incoming.isPlayable,
+        incoming.available,
+        incoming.mediaType,
+        incoming.favorite,
+        incoming.position,
+        incoming.dateAdded,
+      )) {
+    return false;
+  }
+  if (!_hasSameModelValue(previous.externalIds, incoming.externalIds) ||
+      !_hasSameModelValue(
+        previous.providerMappings,
+        incoming.providerMappings,
+      ) ||
+      !_hasSameModelValue(previous.metadata, incoming.metadata)) {
+    return false;
+  }
+  return switch ((previous, incoming)) {
+    (Track previous, Track incoming) =>
+      (previous.duration, previous.discNumber, previous.trackNumber) ==
+              (incoming.duration, incoming.discNumber, incoming.trackNumber) &&
+          hasSameMediaListContent(previous.artists, incoming.artists) &&
+          hasSameMediaContent(previous.album, incoming.album) &&
+          _hasSameModelValue(previous.image, incoming.image),
+    (Album previous, Album incoming) =>
+      (previous.isYearKnown, previous.year, previous.albumType) ==
+              (incoming.isYearKnown, incoming.year, incoming.albumType) &&
+          hasSameMediaListContent(previous.artists, incoming.artists),
+    (Artist previous, Artist incoming) =>
+      previous.artistType == incoming.artistType,
+    (Playlist previous, Playlist incoming) =>
+      (previous.owner, previous.isEditable, previous.isDynamic) ==
+              (incoming.owner, incoming.isEditable, incoming.isDynamic) &&
+          _hasSameModelValue(previous.access, incoming.access),
+    (PodcastEpisode previous, PodcastEpisode incoming) =>
+      (previous.duration, previous.resumePositionMs) ==
+              (incoming.duration, incoming.resumePositionMs) &&
+          hasSameMediaContent(previous.podcast, incoming.podcast),
+    (Podcast previous, Podcast incoming) =>
+      (previous.publisher, previous.totalEpisodes) ==
+          (incoming.publisher, incoming.totalEpisodes),
+    _ => true,
+  };
 }
 
 bool hasSameMediaListContent(
   List<MediaItem> previous,
   List<MediaItem> incoming,
-) =>
-    previous.length == incoming.length &&
-    List<bool>.generate(
-      previous.length,
-      (index) => hasSameMediaContent(previous[index], incoming[index]),
-    ).every((isEqual) => isEqual);
+) {
+  if (identical(previous, incoming)) return true;
+  if (previous.length != incoming.length) return false;
+  for (var index = 0; index < previous.length; index++) {
+    if (!hasSameMediaContent(previous[index], incoming[index])) return false;
+  }
+  return true;
+}
 
 bool _hasSameModelValue(Object? previous, Object? incoming) {
   if (identical(previous, incoming) || previous == incoming) return true;
+  if (previous is ProviderMapping && incoming is ProviderMapping) {
+    return (
+              previous.itemId,
+              previous.providerDomain,
+              previous.providerInstance,
+              previous.available,
+              previous.inLibrary,
+              previous.isUnique,
+              previous.url,
+              previous.details,
+            ) ==
+            (
+              incoming.itemId,
+              incoming.providerDomain,
+              incoming.providerInstance,
+              incoming.available,
+              incoming.inLibrary,
+              incoming.isUnique,
+              incoming.url,
+              incoming.details,
+            ) &&
+        _hasSameModelValue(previous.audioFormat, incoming.audioFormat);
+  }
+  if (previous is AudioFormat && incoming is AudioFormat) {
+    return (
+          previous.contentType,
+          previous.codecType,
+          previous.sampleRate,
+          previous.bitDepth,
+          previous.channels,
+          previous.outputFormatStr,
+          previous.bitRate,
+        ) ==
+        (
+          incoming.contentType,
+          incoming.codecType,
+          incoming.sampleRate,
+          incoming.bitDepth,
+          incoming.channels,
+          incoming.outputFormatStr,
+          incoming.bitRate,
+        );
+  }
+  if (previous is MediaItemMetadata && incoming is MediaItemMetadata) {
+    return (
+              previous.description,
+              previous.descriptionLanguage,
+              previous.label,
+              previous.popularity,
+              previous.cacheChecksum,
+              previous.explicit,
+              previous.lyrics,
+              previous.transcript,
+            ) ==
+            (
+              incoming.description,
+              incoming.descriptionLanguage,
+              incoming.label,
+              incoming.popularity,
+              incoming.cacheChecksum,
+              incoming.explicit,
+              incoming.lyrics,
+              incoming.transcript,
+            ) &&
+        _hasSameModelValue(previous.images, incoming.images) &&
+        _hasSameModelValue(previous.genres, incoming.genres);
+  }
+  if (previous is MediaItemImage && incoming is MediaItemImage) {
+    return (
+          previous.type,
+          previous.path,
+          previous.provider,
+          previous.remotelyAccessible,
+          previous.proxyId,
+          previous.cachedInline?.ownerUri,
+          previous.cachedInline?.position,
+          previous.cachedInline?.contentHash,
+        ) ==
+        (
+          incoming.type,
+          incoming.path,
+          incoming.provider,
+          incoming.remotelyAccessible,
+          incoming.proxyId,
+          incoming.cachedInline?.ownerUri,
+          incoming.cachedInline?.position,
+          incoming.cachedInline?.contentHash,
+        );
+  }
+  if (previous is PlaylistAccess && incoming is PlaylistAccess) {
+    return (previous.owner, previous.sharing, previous.collaborative) ==
+            (incoming.owner, incoming.sharing, incoming.collaborative) &&
+        _hasSameModelValue(previous.sharedUsers, incoming.sharedUsers);
+  }
   if (previous is Map && incoming is Map) {
     return previous.length == incoming.length &&
         previous.keys.every(
@@ -439,11 +612,11 @@ bool _hasSameModelValue(Object? previous, Object? incoming) {
         );
   }
   if (previous is List && incoming is List) {
-    return previous.length == incoming.length &&
-        List<bool>.generate(
-          previous.length,
-          (index) => _hasSameModelValue(previous[index], incoming[index]),
-        ).every((isEqual) => isEqual);
+    if (previous.length != incoming.length) return false;
+    for (var index = 0; index < previous.length; index++) {
+      if (!_hasSameModelValue(previous[index], incoming[index])) return false;
+    }
+    return true;
   }
   return false;
 }
@@ -497,7 +670,7 @@ Map<String, dynamic> createMusicAssistantMediaItemPayload(MediaItem mediaItem) {
     payload['disc_number'] = mediaItem.discNumber;
     payload['track_number'] = mediaItem.trackNumber;
   } else if (mediaItem is Album) {
-    payload['year'] = mediaItem.year;
+    if (mediaItem.isYearKnown) payload['year'] = mediaItem.year;
     payload['album_type'] = mediaItem.albumType.name;
     payload['artists'] = mediaItem.artists
         .map(createMusicAssistantMediaItemPayload)
@@ -728,6 +901,7 @@ class ImageRequest {
     this.position = 0,
     this.size = 512,
     this.providerIconRole,
+    this.isBackground = false,
   });
 
   final MediaItemImage image;
@@ -735,6 +909,7 @@ class ImageRequest {
   final int position;
   final int size;
   final String? providerIconRole;
+  final bool isBackground;
 
   factory ImageRequest.fromJson(Map<String, dynamic> json) => ImageRequest(
     image: MediaItemImage.fromJson(json['image'] as Map<String, dynamic>),
@@ -794,6 +969,8 @@ class ImageReadSnapshot {
       ImageReadSnapshot(
         bytes: json['bytes'] == null
             ? null
+            : json['bytes'] is Uint8List
+            ? json['bytes'] as Uint8List
             : base64Decode(json['bytes'] as String),
         cacheError: json['cacheError'] as String?,
         hasRefresh: json['hasRefresh'] as bool,
@@ -1124,6 +1301,7 @@ class Album implements MediaItem {
   @override
   final bool? available;
   final int? year;
+  final bool isYearKnown;
   final AlbumType albumType;
   final List<Artist> artists;
   @override
@@ -1149,13 +1327,14 @@ class Album implements MediaItem {
     this.isPlayable = true,
     this.available,
     this.year,
+    bool isYearKnown = false,
     this.albumType = AlbumType.unknown,
     this.providerMappings = const <ProviderMapping>[],
     this.metadata,
     this.favorite = false,
     this.position,
     this.dateAdded,
-  });
+  }) : isYearKnown = isYearKnown || year != null;
 
   @override
   MediaType get mediaType => MediaType.album;
@@ -1187,6 +1366,7 @@ class Album implements MediaItem {
       isPlayable: json['is_playable'] != false,
       available: json['available'] as bool?,
       year: (json['year'] as num?)?.toInt(),
+      isYearKnown: json.containsKey('year'),
       albumType: _albumTypeFromJson(json['album_type'] as String?),
       artists:
           (json['artists'] as List?)
@@ -2276,10 +2456,15 @@ class ProviderManifestRegistry {
     return _byDomain[domain];
   }
 
-  static String? iconSvgForProvider(String providerOrDomain) {
+  static String? iconSourceForProvider(String providerOrDomain) {
     final manifest = getByProvider(providerOrDomain);
     final data = manifest?.preferredIconData;
-    if (data == null || manifest == null) return null;
+    if (manifest == null) return null;
+    if (data == null || data.trim().isEmpty) {
+      return manifest.hasDefaultIcon && cachedIconSource != null
+          ? _iconSource(manifest.domain, 'default', '')
+          : null;
+    }
     return _iconSource(
       manifest.domain,
       manifest.iconSvg != null ? 'icon_svg' : 'icon',
@@ -2333,18 +2518,23 @@ class ProviderManifestRegistry {
 
 class RecommendationSnapshot {
   const RecommendationSnapshot({
+    this.revision = 0,
     this.folders = const [],
     this.isLoading = false,
     this.hasLoadError = false,
+    this.delta,
   });
 
+  final int revision;
   final List<RecommendationFolder> folders;
   final bool isLoading;
 
   final bool hasLoadError;
+  final RecommendationDelta? delta;
 
   factory RecommendationSnapshot.fromJson(Map<String, dynamic> json) =>
       RecommendationSnapshot(
+        revision: (json['revision'] as int?) ?? 0,
         folders: (json['folders'] as List)
             .map(
               (value) =>
@@ -2353,7 +2543,39 @@ class RecommendationSnapshot {
             .toList(growable: false),
         isLoading: json['is_loading'] as bool,
         hasLoadError: json['has_load_error'] as bool,
+        delta: json['delta'] == null
+            ? null
+            : RecommendationDelta.fromJson(
+                json['delta'] as Map<String, dynamic>,
+              ),
       );
+
+  RecommendationSnapshot applyTo(RecommendationSnapshot previous) {
+    final update = delta;
+    if (update == null) return this;
+    if (update.revision != revision) {
+      throw StateError(
+        'Recommendation delta revision does not match its snapshot.',
+      );
+    }
+    final byIdentity = <(String, String), RecommendationFolder>{
+      for (final folder in previous.folders)
+        (folder.provider, folder.itemId): folder,
+      for (final folder in folders) (folder.provider, folder.itemId): folder,
+    };
+    if (update.order.toSet().length != update.order.length ||
+        update.order.any((identity) => !byIdentity.containsKey(identity))) {
+      throw StateError(
+        'Recommendation delta has an incomplete folder inventory.',
+      );
+    }
+    return RecommendationSnapshot(
+      revision: revision,
+      folders: [for (final identity in update.order) byIdentity[identity]!],
+      isLoading: isLoading,
+      hasLoadError: hasLoadError,
+    );
+  }
 
   bool isFolderLoading(String itemId) {
     final matches = folders.where((folder) => folder.itemId == itemId);
@@ -2368,6 +2590,29 @@ class RecommendationSnapshot {
         ? hasLoadError
         : matches.any((folder) => folder.hasLoadError);
   }
+}
+
+class RecommendationDelta {
+  const RecommendationDelta({
+    required this.revision,
+    required this.sequence,
+    required this.order,
+  });
+
+  final int revision;
+  final int sequence;
+  final List<(String, String)> order;
+
+  factory RecommendationDelta.fromJson(Map<String, dynamic> json) =>
+      RecommendationDelta(
+        revision: json['revision'] as int,
+        sequence: json['sequence'] as int,
+        order: [
+          for (final identity
+              in (json['order'] as List).cast<Map<String, dynamic>>())
+            (identity['provider'] as String, identity['item_id'] as String),
+        ],
+      );
 }
 
 class RecommendationFolder {
@@ -2707,6 +2952,23 @@ class PreferredProvider {
     'providerInstance': providerInstance,
     'providerDomain': providerDomain,
   };
+}
+
+class CacheUsage {
+  const CacheUsage({required this.metadataBytes, required this.imageBytes});
+
+  final int metadataBytes;
+  final int imageBytes;
+
+  factory CacheUsage.fromJson(Map<String, dynamic> json) {
+    final metadataBytes = json['metadataBytes'];
+    final imageBytes = json['imageBytes'];
+    if (metadataBytes is! int || imageBytes is! int ||
+        metadataBytes < 0 || imageBytes < 0) {
+      throw const FormatException('cache usage must contain nonnegative byte counts');
+    }
+    return CacheUsage(metadataBytes: metadataBytes, imageBytes: imageBytes);
+  }
 }
 
 class SessionSettingsUpdate {

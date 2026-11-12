@@ -183,12 +183,13 @@ pub(super) fn write_artist_observation(
     user_id: &UserId,
     membership: FieldKnowledge<bool>,
 ) -> Result<(), CacheError> {
-    let artist = if let Some(previous) = read_artist(
+    let previous = read_artist(
         transaction,
         &incoming.media.provider,
         &incoming.media.item_id,
         user_id,
-    )? {
+    )?;
+    let artist = if let Some(previous) = previous.clone() {
         let mut merged = MediaItem::Artist(previous);
         merged.merge_known(MediaItem::Artist(incoming.clone()));
         let MediaItem::Artist(artist) = merged else {
@@ -207,6 +208,17 @@ pub(super) fn write_artist_observation(
         return Err(CacheError::InvalidMediaObservation(
             "external IDs require type and value",
         ));
+    }
+    if previous.as_ref() == Some(&artist) {
+        if let FieldKnowledge::Known(is_in_library) = membership {
+            transaction.execute(
+                "INSERT INTO artist_library_entries(provider,item_id,is_in_library) VALUES(?1,?2,?3)
+                 ON CONFLICT(provider,item_id) DO UPDATE SET is_in_library=excluded.is_in_library
+                 WHERE is_in_library IS NOT excluded.is_in_library",
+                params![artist.media.provider.as_str(), artist.media.item_id.as_str(), is_in_library],
+            )?;
+        }
+        return Ok(());
     }
     let media = &artist.media;
     let knowledge = &media.knowledge;
@@ -285,7 +297,7 @@ pub(super) fn read_artist(
         return Ok(None);
     };
     artist.media.provider_mappings = read_artist_provider_mappings(snapshot, provider, item_id)?;
-    let mut external_ids = snapshot.prepare(
+    let mut external_ids = snapshot.prepare_cached(
         "SELECT id_type, external_id FROM artist_external_ids
          WHERE artist_provider=?1 AND artist_item_id=?2 ORDER BY position",
     )?;
@@ -343,7 +355,7 @@ pub(super) fn read_artist_lookup(
             provider_domain,
             item_id,
         } => {
-            let mut mappings = snapshot.prepare(
+            let mut mappings = snapshot.prepare_cached(
                 "SELECT DISTINCT artist_item_id FROM artist_provider_mappings
                  WHERE provider_domain=?1 AND item_id=?2 AND artist_provider='library' LIMIT 2",
             )?;
@@ -361,7 +373,7 @@ pub(super) fn read_artist_lookup(
         ArtistLookupKey::ExternalId { id_type, value } => {
             let (id_type, values) = artist_external_lookup_values(id_type, value);
             let values = serde_json::to_string(&values)?;
-            let mut external_ids = snapshot.prepare(
+            let mut external_ids = snapshot.prepare_cached(
                 "SELECT DISTINCT ids.artist_item_id FROM json_each(?2) AS lookup
                  CROSS JOIN artist_external_ids AS ids
                  WHERE ids.id_type=?1 AND ids.external_id COLLATE NOCASE=lookup.value
@@ -380,7 +392,7 @@ pub(super) fn read_artist_lookup(
             provider_instance,
             item_id,
         } => {
-            let mut mappings = snapshot.prepare(
+            let mut mappings = snapshot.prepare_cached(
                 "SELECT DISTINCT artist_item_id FROM artist_provider_mappings
                  WHERE provider_instance=?1 AND item_id=?2 AND artist_provider='library' LIMIT 2",
             )?;
@@ -398,7 +410,7 @@ pub(super) fn read_artist_lookup(
         }
         ArtistLookupKey::ExternalValue(value) => {
             let values = serde_json::to_string(&external_lookup_values(None, value))?;
-            let identities=snapshot.prepare(
+            let identities=snapshot.prepare_cached(
                 "SELECT DISTINCT ids.artist_item_id FROM json_each(?1) AS lookup
                  CROSS JOIN artist_external_ids AS ids
                  WHERE ids.external_id COLLATE NOCASE=lookup.value AND ids.artist_provider='library' LIMIT 2"
@@ -640,7 +652,7 @@ fn read_artist_provider_mappings(
     provider: &ProviderInstanceId,
     item_id: &MediaId,
 ) -> rusqlite::Result<Vec<ProviderMapping>> {
-    let mut mappings = snapshot.prepare(
+    let mut mappings = snapshot.prepare_cached(
         "SELECT item_id, provider_domain, provider_instance, available, in_library, in_library_known,
          is_unique, is_unique_known, audio_format, audio_format_known, url, url_known, details,
          details_known FROM artist_provider_mappings

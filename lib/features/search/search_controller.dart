@@ -30,7 +30,10 @@ class SearchController extends ChangeNotifier {
   StreamSubscription<void>? _cacheSubscription;
   String? _activeQuery;
   CoreQueryScope _queryScope = CoreQueryScope();
-  CoreQueryScope? _trackAlbumsScope;
+  final _artistAlbumScopes = <(String, String), CoreQueryScope>{};
+  final _observedArtistAlbums = <(String, String), List<Album>>{};
+  final _indexesByAlbum = <(String, String), List<int>>{};
+  final _albumCandidates = <(String, String), Map<(String, String), Album>>{};
   List<Track> _sourceTracks = const <Track>[];
 
   int _requestId = 0;
@@ -46,16 +49,33 @@ class SearchController extends ChangeNotifier {
   List<Album> _albums = const <Album>[];
   List<Playlist> _playlists = const <Playlist>[];
   List<Artist> _artists = const <Artist>[];
+  final ValueNotifier<bool> requestChanges = ValueNotifier(false);
+  final Map<MediaType, ChangeNotifier> _sectionChanges = {
+    for (final type in [
+      MediaType.track,
+      MediaType.album,
+      MediaType.playlist,
+      MediaType.artist,
+    ])
+      type: ChangeNotifier(),
+  };
+
+  Listenable sectionChanges(MediaType type) => _sectionChanges[type]!;
 
   // Lifecycle.
   @override
   void dispose() {
     _isDisposed = true;
     _queryScope.cancel();
+    _clearTrackAlbums();
     unawaited(_catalogSubscription?.cancel());
     unawaited(_readSubscription?.cancel());
     unawaited(_cacheSubscription?.cancel());
     _requestId++;
+    requestChanges.dispose();
+    for (final notifier in _sectionChanges.values) {
+      notifier.dispose();
+    }
     super.dispose();
   }
 
@@ -101,7 +121,7 @@ class SearchController extends ChangeNotifier {
     _queryScope.cancel();
     final scope = CoreQueryScope();
     _queryScope = scope;
-    _trackAlbumsScope = null;
+    _clearTrackAlbums();
     _activeQuery = query;
 
     _hasSearchRequest = true;
@@ -120,7 +140,7 @@ class SearchController extends ChangeNotifier {
 
     await scope.run(() async {
       if (_isDisposed || requestId != _requestId) return;
-      if (shouldRetainResults) unawaited(_loadTrackAlbums(requestId));
+      if (shouldRetainResults) _synchronizeTrackAlbums();
       await Future.wait<void>(<Future<void>>[
         _searchMedia(query, MediaType.track, requestId),
         _searchMedia(query, MediaType.album, requestId),
@@ -165,13 +185,21 @@ class SearchController extends ChangeNotifier {
           default:
             wasLoading = false;
         }
-        if (wasLoading) _notifyListenersIfAlive();
+        if (wasLoading) _notifyListenersIfAlive(mediaType);
       }
     }
   }
 
   // Catalog events and dependent album reads.
   void _onCatalogUpdate(CatalogUpdate update) {
+    if (_isDisposed || _queryScope.isCanceled) return;
+    if (update.kind == CatalogQueryKind.artistAlbums) {
+      final key = (update.provider ?? '', update.itemId ?? '');
+      if (_artistAlbumScopes.containsKey(key)) {
+        _acceptArtistAlbums(key, update.albums);
+      }
+      return;
+    }
     if (_isDisposed ||
         _queryScope.isCanceled ||
         update.kind != CatalogQueryKind.search ||
@@ -186,6 +214,17 @@ class SearchController extends ChangeNotifier {
   }
 
   void _onCatalogReadChange(CatalogReadChange change) {
+    if (!_isDisposed &&
+        !_queryScope.isCanceled &&
+        change.kind == CatalogQueryKind.artistAlbums &&
+        change.phase == CatalogLoadPhase.invalidated &&
+        _artistAlbumScopes.containsKey((
+          change.provider ?? '',
+          change.itemId ?? '',
+        ))) {
+      _invalidateSearch();
+      return;
+    }
     if (!_isDisposed &&
         !_queryScope.isCanceled &&
         change.kind == CatalogQueryKind.search &&
@@ -214,11 +253,7 @@ class SearchController extends ChangeNotifier {
         if (hasChanges) {
           _sourceTracks = incoming;
           _tracks = incoming;
-          _trackAlbumsScope?.cancel();
-          _trackAlbumsScope = null;
-        }
-        if (_trackAlbumsScope == null) {
-          unawaited(_loadTrackAlbums(_requestId));
+          _synchronizeTrackAlbums();
         }
       case MediaType.album:
         final incoming = _withFavoriteStatuses(results.albums);
@@ -241,18 +276,13 @@ class SearchController extends ChangeNotifier {
       default:
         return;
     }
-    if (shouldNotify) _notifyListenersIfAlive();
+    if (shouldNotify) _notifyListenersIfAlive(type);
   }
 
-  // Each observed track revision owns its album reads; the scheduler limits I/O.
-  Future<void> _loadTrackAlbums(int requestId) async {
-    final scope = _queryScope.createChild();
-    _trackAlbumsScope = scope;
-    bool isCurrent() =>
-        !_isDisposed && !scope.isCanceled && requestId == _requestId;
+  void _synchronizeTrackAlbums() {
     final Set<(String, String)> artistKeys = <(String, String)>{};
     for (final Track track in _sourceTracks) {
-      if (track.album == null || track.album!.year != null) {
+      if (track.album == null || track.album!.isYearKnown) {
         continue;
       }
       for (final Artist artist in track.artists) {
@@ -261,107 +291,142 @@ class SearchController extends ChangeNotifier {
         }
       }
     }
-    if (artistKeys.isEmpty) {
-      scope.cancel();
-      return;
+    for (final key in _artistAlbumScopes.keys.toList()) {
+      if (artistKeys.contains(key)) continue;
+      _artistAlbumScopes.remove(key)!.cancel();
+      _observedArtistAlbums.remove(key);
     }
-
-    final observed = <(String, String), List<Album>>{};
-    void accept((String, String) key, List<Album> albums) {
-      if (!isCurrent()) return;
-      if (observed[key] case final previous?
-          when hasSameMediaListContent(previous, albums)) {
-        return;
+    _indexesByAlbum.clear();
+    _albumCandidates.clear();
+    for (var index = 0; index < _sourceTracks.length; index++) {
+      final album = _sourceTracks[index].album;
+      if (album != null && !album.isYearKnown) {
+        _indexesByAlbum
+            .putIfAbsent((album.provider, album.itemId), () => [])
+            .add(index);
       }
-      observed[key] = albums;
-      _applyTrackAlbums(observed.values.expand((albums) => albums));
     }
-
-    final subscription = coreBridge.catalogUpdates.listen((update) {
-      final key = (update.provider ?? '', update.itemId ?? '');
-      if (update.kind == CatalogQueryKind.artistAlbums &&
-          artistKeys.contains(key)) {
-        accept(key, update.albums);
+    for (final entry in _observedArtistAlbums.entries) {
+      for (final album in entry.value) {
+        final identity = (album.provider, album.itemId);
+        if (!_indexesByAlbum.containsKey(identity)) continue;
+        _albumCandidates.putIfAbsent(identity, () => {})[entry.key] = album;
       }
-    });
-    final readSubscription = coreBridge.catalogReadChanges.listen((change) {
-      if (isCurrent() &&
-          change.kind == CatalogQueryKind.artistAlbums &&
-          artistKeys.contains((change.provider ?? '', change.itemId ?? '')) &&
-          change.phase == CatalogLoadPhase.invalidated) {
-        _invalidateSearch();
-      }
-    });
-    try {
-      await scope.run(
-        () => Future.wait(
-          artistKeys.map((key) async {
-            try {
-              accept(key, await coreBridge.getArtistAlbums(key.$2, key.$1));
-            } catch (_) {}
-          }),
-        ),
-      );
-    } finally {
-      await subscription.cancel();
-      await readSubscription.cancel();
-      scope.cancel();
+    }
+    _applyTrackAlbums(
+      _albumCandidates.keys.toSet(),
+      _indexesByAlbum,
+      _albumCandidates,
+    );
+    for (final key in artistKeys) {
+      if (_artistAlbumScopes.containsKey(key)) continue;
+      final scope = _queryScope.createChild();
+      _artistAlbumScopes[key] = scope;
+      unawaited(_loadArtistAlbums(key, scope, _requestId));
     }
   }
 
-  // Derived album fields never replace the observed track source.
-  void _applyTrackAlbums(Iterable<Album> albums) {
-    final Map<(String, String), Album> albumsByKey =
-        <(String, String), Album>{};
-    for (final album in albums) {
-      albumsByKey[(album.provider, album.itemId)] = album;
+  Future<void> _loadArtistAlbums(
+    (String, String) key,
+    CoreQueryScope scope,
+    int requestId,
+  ) async {
+    try {
+      final albums = await scope.run(
+        () => coreBridge.getArtistAlbums(key.$2, key.$1, isBackground: true),
+      );
+      if (!_isDisposed &&
+          !scope.isCanceled &&
+          requestId == _requestId &&
+          identical(_artistAlbumScopes[key], scope)) {
+        _acceptArtistAlbums(key, albums);
+      }
+    } catch (_) {}
+  }
+
+  void _acceptArtistAlbums((String, String) key, List<Album> albums) {
+    if (_observedArtistAlbums[key] case final previous?
+        when hasSameMediaListContent(previous, albums)) {
+      return;
     }
-    final List<Track> enriched = _sourceTracks
-        .map((Track track) {
-          final Album? reference = track.album;
-          if (reference == null || reference.year != null) {
-            return track;
-          }
-          final Album? album =
-              albumsByKey[(reference.provider, reference.itemId)];
-          if (album == null) {
-            return track;
-          }
-          return Track(
-            itemId: track.itemId,
-            provider: track.provider,
-            name: track.name,
-            duration: track.duration,
-            artists: track.artists,
-            version: track.version,
-            sortName: track.sortName,
-            uri: track.uri,
-            externalIds: track.externalIds,
-            isPlayable: track.isPlayable,
-            available: track.available,
-            album: album,
-            image: track.image,
-            providerMappings: track.providerMappings,
-            metadata: track.metadata,
-            favorite: track.favorite,
-            position: track.position,
-            dateAdded: track.dateAdded,
-            discNumber: track.discNumber,
-            trackNumber: track.trackNumber,
-          );
-        })
-        .toList(growable: false);
-    if (!hasSameMediaListContent(_tracks, enriched)) {
+    final dirty = <(String, String)>{};
+    for (final album in _observedArtistAlbums[key] ?? const <Album>[]) {
+      final identity = (album.provider, album.itemId);
+      _albumCandidates[identity]?.remove(key);
+      dirty.add(identity);
+    }
+    _observedArtistAlbums[key] = albums;
+    for (final album in albums) {
+      final identity = (album.provider, album.itemId);
+      if (!_indexesByAlbum.containsKey(identity)) continue;
+      _albumCandidates.putIfAbsent(identity, () => {})[key] = album;
+      dirty.add(identity);
+    }
+    _applyTrackAlbums(dirty, _indexesByAlbum, _albumCandidates);
+  }
+
+  // Derived album fields never replace the observed track source.
+  void _applyTrackAlbums(
+    Set<(String, String)> dirty,
+    Map<(String, String), List<int>> indexesByAlbum,
+    Map<(String, String), Map<(String, String), Album>> candidates,
+  ) {
+    List<Track>? enriched;
+    for (final identity in dirty) {
+      final album = candidates[identity]?.values.lastOrNull;
+      for (final index in indexesByAlbum[identity] ?? const <int>[]) {
+        final track = _sourceTracks[index];
+        final updated = album == null
+            ? track
+            : Track(
+                itemId: track.itemId,
+                provider: track.provider,
+                name: track.name,
+                duration: track.duration,
+                artists: track.artists,
+                version: track.version,
+                sortName: track.sortName,
+                uri: track.uri,
+                externalIds: track.externalIds,
+                isPlayable: track.isPlayable,
+                available: track.available,
+                album: album,
+                image: track.image,
+                providerMappings: track.providerMappings,
+                metadata: track.metadata,
+                favorite: track.favorite,
+                position: track.position,
+                dateAdded: track.dateAdded,
+                discNumber: track.discNumber,
+                trackNumber: track.trackNumber,
+              );
+        if (!hasSameMediaContent(_tracks[index], updated)) {
+          enriched ??= _tracks.toList(growable: false);
+          enriched[index] = updated;
+        }
+      }
+    }
+    if (enriched != null) {
       _tracks = enriched;
-      _notifyListenersIfAlive();
+      _notifyListenersIfAlive(MediaType.track);
     }
   }
 
   // Context invalidation and projection helpers.
+  void _clearTrackAlbums() {
+    for (final scope in _artistAlbumScopes.values) {
+      scope.cancel();
+    }
+    _artistAlbumScopes.clear();
+    _observedArtistAlbums.clear();
+    _indexesByAlbum.clear();
+    _albumCandidates.clear();
+  }
+
   void _clearResults({bool shouldRetainQuery = false}) {
     if (!shouldRetainQuery) _activeQuery = null;
     _queryScope.cancel();
-    _trackAlbumsScope = null;
+    _clearTrackAlbums();
     _sourceTracks = const <Track>[];
     _requestId++;
     _hasSearchRequest = false;
@@ -379,9 +444,17 @@ class SearchController extends ChangeNotifier {
   // Retire observed server data but retain the query for a later explicit reload.
   void _invalidateSearch() => _clearResults(shouldRetainQuery: true);
 
-  void _notifyListenersIfAlive() {
+  void _notifyListenersIfAlive([MediaType? type]) {
     if (_isDisposed) {
       return;
+    }
+    requestChanges.value = _hasSearchRequest;
+    if (type != null) {
+      _sectionChanges[type]!.notifyListeners();
+    } else {
+      for (final notifier in _sectionChanges.values) {
+        notifier.notifyListeners();
+      }
     }
     notifyListeners();
   }

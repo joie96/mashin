@@ -16,6 +16,12 @@ pub(crate) fn publish_jni_command_events(events: Vec<ApplicationEvent>) {
 
 // Background changes have no command caller to refresh either platform.
 pub(crate) fn publish_background_event(event: ApplicationEvent) {
+    if let ApplicationEvent::ImageReadUpdated { observation_id, snapshot } = event {
+        super::ffi::event_channel::publish_image_snapshot(
+            serde_json::json!({"type":"image_read_updated", "observation_id":observation_id}), snapshot,
+        );
+        return;
+    }
     publish_event(
         &event,
         true,

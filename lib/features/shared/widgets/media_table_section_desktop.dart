@@ -904,21 +904,28 @@ class _MediaTableSectionDesktopState<T>
       },
     );
 
-    final Widget list = _isExpanded
-        ? expandedList
-        : AnimatedOpacity(
-            duration: _desktopPageFadeDuration,
-            curve: Curves.easeOut,
-            opacity: _isPageFading ? 0 : 1,
-            child: KeyedSubtree(
-              key: ValueKey<int>(_currentPage),
-              child: _buildDesktopPageList(
-                pageIndex: _currentPage,
-                useInternalScroll: useInternalScroll,
-                queueItemNumbers: queueItemNumbers,
+    final Widget list = MediaPageImagePreload(
+      items: widget.items,
+      pageStart: _currentPage * _chunkSize,
+      pageSize: _chunkSize,
+      imageSize: 80,
+      isEnabled: !_isExpanded && _isPagingEnabled,
+      child: _isExpanded
+          ? expandedList
+          : AnimatedOpacity(
+              duration: _desktopPageFadeDuration,
+              curve: Curves.easeOut,
+              opacity: _isPageFading ? 0 : 1,
+              child: KeyedSubtree(
+                key: ValueKey<int>(_currentPage),
+                child: _buildDesktopPageList(
+                  pageIndex: _currentPage,
+                  useInternalScroll: useInternalScroll,
+                  queueItemNumbers: queueItemNumbers,
+                ),
               ),
             ),
-          );
+    );
 
     return Column(
       mainAxisSize: useInternalScroll ? MainAxisSize.max : MainAxisSize.min,
@@ -3475,7 +3482,7 @@ class _MediaProviderIconState extends State<MediaProviderIcon>
     final colors = context.mashinColors;
     final String? trimmed =
         (_iconData ??
-                ProviderManifestRegistry.iconSvgForProvider(
+                ProviderManifestRegistry.iconSourceForProvider(
                   widget.providerId ?? '',
                 ))
             ?.trim();

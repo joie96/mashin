@@ -24,6 +24,8 @@ class UserData extends ChangeNotifier {
   Future<void>? _snapshotRefresh;
   bool _needsSnapshotRefresh = false;
   int _snapshotRevision = 0;
+  int _requiredNativeSnapshotRevision = 0;
+  int _unversionedSnapshotRequest = 0;
   bool _isLoadingLibraryData = false;
   bool _isLoadingFavorites = false;
   bool _hasLoadedFavorites = false;
@@ -118,18 +120,20 @@ class UserData extends ChangeNotifier {
   }
 
   Future<void> setFavorite(Iterable<MediaItem> items, bool favorite) async {
-    await _coreBridge.setUserDataFavorites(
-      items.toList(growable: false),
-      favorite,
+    await _mutateUserData(
+      () => _coreBridge.setUserDataFavorites(
+        items.toList(growable: false),
+        favorite,
+      ),
     );
-    await _refreshSnapshot();
   }
 
   Future<Playlist?> createPrivatePlaylist(String name) async {
     final String normalizedName = name.trim();
     if (normalizedName.isEmpty) return null;
-    await _coreBridge.createPrivatePlaylist(normalizedName);
-    await _refreshSnapshot();
+    await _mutateUserData(
+      () => _coreBridge.createPrivatePlaylist(normalizedName),
+    );
     return _playlists.lastWhere(
       (playlist) => playlist.name == normalizedName,
       orElse: () =>
@@ -139,22 +143,28 @@ class UserData extends ChangeNotifier {
 
   Future<bool> renamePlaylist(Playlist playlist, String name) async {
     if (playlist.itemId.trim().isEmpty || name.trim().isEmpty) return false;
-    await _coreBridge.renamePrivatePlaylist(playlist.itemId, name.trim());
-    await _refreshSnapshot();
+    await _mutateUserData(
+      () => _coreBridge.renamePrivatePlaylist(playlist.itemId, name.trim()),
+      playlistId: playlist.itemId,
+    );
     return true;
   }
 
   Future<bool> refreshPrivatePlaylistCover(Playlist playlist) async {
     if (!isPrivatePlaylist(playlist) || !playlist.isEditable) return false;
-    await _coreBridge.refreshPrivatePlaylistCover(playlist.itemId);
-    await _refreshSnapshot();
+    await _mutateUserData(
+      () => _coreBridge.refreshPrivatePlaylistCover(playlist.itemId),
+      playlistId: playlist.itemId,
+    );
     return true;
   }
 
   Future<bool> removePlaylist(Playlist playlist) async {
     if (playlist.itemId.trim().isEmpty) return false;
-    await _coreBridge.removePrivatePlaylist(playlist.itemId);
-    await _refreshSnapshot();
+    await _mutateUserData(
+      () => _coreBridge.removePrivatePlaylist(playlist.itemId),
+      playlistId: playlist.itemId,
+    );
     return true;
   }
 
@@ -172,8 +182,10 @@ class UserData extends ChangeNotifier {
       }
     }
     if (values.isEmpty) return false;
-    await _coreBridge.addPrivatePlaylistTracks(playlistId, values);
-    await _refreshSnapshot();
+    await _mutateUserData(
+      () => _coreBridge.addPrivatePlaylistTracks(playlistId, values),
+      playlistId: playlistId,
+    );
     return true;
   }
 
@@ -186,16 +198,78 @@ class UserData extends ChangeNotifier {
         .where((uri) => uri.isNotEmpty)
         .toList(growable: false);
     if (playlistId.trim().isEmpty || uris.isEmpty) return false;
-    await _coreBridge.removePrivatePlaylistTracks(playlistId, uris);
-    await _refreshSnapshot();
+    await _mutateUserData(
+      () => _coreBridge.removePrivatePlaylistTracks(playlistId, uris),
+      playlistId: playlistId,
+    );
     return true;
   }
 
   // Snapshot refresh and event processing.
+  Future<void> _mutateUserData(
+    Future<void> Function() command, {
+    String? playlistId,
+  }) async {
+    int observedRevision() => playlistId == null
+        ? _nativeSnapshotRevision
+        : (_playlistRevisions[playlistId] ?? 0) > _nativeSnapshotRevision
+        ? _playlistRevisions[playlistId]!
+        : _nativeSnapshotRevision;
+    final previousRevision = observedRevision();
+    final previousSnapshotRequest = _snapshotRevision;
+    await command();
+    if (_isDisposed) return;
+    if (_snapshotRefresh != null &&
+        _snapshotRevision > previousSnapshotRequest) {
+      await _snapshotRefresh;
+      return;
+    }
+    if (_hasAppliedSnapshot && observedRevision() > previousRevision) {
+      await _snapshotRefresh;
+      return;
+    }
+    await _refreshSnapshot();
+  }
+
   Future<void> _onCoreEvent(Map<String, dynamic> event) async {
     if (_isDisposed) return;
     try {
-      if (event['type'] == 'user_data_changed') {
+      if (event['type'] == 'user_data_metadata_changed') {
+        final snapshot = _map(event['snapshot']);
+        final revision = snapshot['revision'] as int;
+        if (revision <= _nativeSnapshotRevision) return;
+        final latest = _playlistRevisions.values.fold(
+          _nativeSnapshotRevision,
+          (latest, value) => value > latest ? value : latest,
+        );
+        if (!_hasAppliedSnapshot || revision != latest + 1) {
+          await _refreshSnapshot(nativeRevision: revision);
+        } else {
+          _applySnapshot(
+            snapshot,
+            includesFavorites: false,
+            includesPlaylistItems: false,
+          );
+          if (_snapshotRefresh != null) {
+            await _refreshSnapshot(nativeRevision: revision);
+          }
+        }
+      } else if (event['type'] == 'user_data_favorites_changed') {
+        final snapshot = _map(event['snapshot']);
+        final revision = snapshot['revision'] as int;
+        final latest = _playlistRevisions.values.fold(
+          _nativeSnapshotRevision,
+          (latest, value) => value > latest ? value : latest,
+        );
+        if (revision <= latest) return;
+        if (!_hasAppliedSnapshot ||
+            revision != latest + 1 ||
+            _snapshotRefresh != null) {
+          await _refreshSnapshot(nativeRevision: revision);
+        } else {
+          _applySnapshot(snapshot, includesPlaylists: false);
+        }
+      } else if (event['type'] == 'user_data_changed') {
         final playlist = event['playlist'];
         if (playlist is! Map) {
           await _refreshSnapshot();
@@ -206,9 +280,8 @@ class UserData extends ChangeNotifier {
             return;
           }
           if (!_applyPlaylistSnapshot(_map(playlist), revision) ||
-              _snapshotRefresh != null ||
-              _isLoadingLibraryData) {
-            await _refreshSnapshot();
+              _snapshotRefresh != null) {
+            await _refreshSnapshot(nativeRevision: revision);
           }
         }
       }
@@ -219,9 +292,14 @@ class UserData extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshSnapshot() {
+  Future<void> _refreshSnapshot({int? nativeRevision}) {
     if (_isDisposed) return Future<void>.value();
     _snapshotRevision++;
+    if (nativeRevision == null) {
+      _unversionedSnapshotRequest++;
+    } else if (nativeRevision > _requiredNativeSnapshotRevision) {
+      _requiredNativeSnapshotRevision = nativeRevision;
+    }
     _needsSnapshotRefresh = true;
     return _snapshotRefresh ??= Future<void>.microtask(_drainSnapshotRefreshes);
   }
@@ -230,13 +308,15 @@ class UserData extends ChangeNotifier {
     try {
       while (_needsSnapshotRefresh && !_isDisposed) {
         _needsSnapshotRefresh = false;
-        final snapshotRevision = _snapshotRevision;
+        final unversionedRequest = _unversionedSnapshotRequest;
         try {
           final snapshot = await _coreBridge.getUserData();
           if (!_isDisposed &&
-              !_needsSnapshotRefresh &&
-              snapshotRevision == _snapshotRevision) {
+              unversionedRequest == _unversionedSnapshotRequest &&
+              (snapshot['revision'] as int? ?? 0) >=
+                  _requiredNativeSnapshotRevision) {
             _applySnapshot(snapshot);
+            _needsSnapshotRefresh = false;
           }
         } catch (_) {
           if (!_isDisposed && !_needsSnapshotRefresh) rethrow;
@@ -256,12 +336,18 @@ class UserData extends ChangeNotifier {
     if (playlistsChanged) _playlistsChanges.notifyListeners();
   }
 
-  void _applySnapshot(Map<String, dynamic> snapshot) {
+  void _applySnapshot(
+    Map<String, dynamic> snapshot, {
+    bool includesPlaylists = true,
+    bool includesFavorites = true,
+    bool includesPlaylistItems = true,
+  }) {
     final revision = snapshot['revision'] as int? ?? 0;
     if (revision < _nativeSnapshotRevision ||
         _playlistRevisions.values.any((value) => value > revision)) {
       return;
     }
+    _snapshotRevision++;
     _nativeSnapshotRevision = revision;
     _playlistRevisions.removeWhere((_, value) => value <= revision);
     final previousLoadingFavorites = _isLoadingFavorites;
@@ -277,49 +363,57 @@ class UserData extends ChangeNotifier {
     final previousFavoriteArtists = _favoriteArtists;
     _isLoadingFavorites = snapshot['is_loading_favorites'] == true;
     _hasLoadedFavorites = snapshot['has_loaded_favorites'] == true;
-    _favoriteOverrides = {
-      for (final entry in _listOfMaps(snapshot['favorite_overrides']))
-        for (final key in _itemIdentityKeys(
-          MediaItem.fromJson(_map(entry['item'])),
-        ))
-          key: entry['is_favorite'] == true,
-    };
-    _isLoadingPlaylists = snapshot['is_loading_playlists'] == true;
-    final Map<String, dynamic> favorites = _map(snapshot['favorites']);
-    _favoriteTracks = _retainMediaList(
-      _favoriteTracks,
-      _readTracks(favorites['tracks'], true),
-    );
-    _favoriteAlbums = _retainMediaList(
-      _favoriteAlbums,
-      _readAlbums(favorites['albums'], true),
-    );
-    _favoritePlaylists = _retainMediaList(
-      _favoritePlaylists,
-      _readPlaylists(favorites['playlists'], true),
-    );
-    _favoriteArtists = _retainMediaList(
-      _favoriteArtists,
-      _readArtists(favorites['artists'], true),
-    );
-    final favoriteItems = <MediaItem>[
-      ..._favoriteTracks,
-      ..._favoriteAlbums,
-      ..._favoritePlaylists,
-      ..._favoriteArtists,
-    ];
-    _favoriteIdentityKeys = favoriteItems.expand(_itemIdentityKeys).toSet();
-    _favoriteUriKeys = {
-      for (final item in favoriteItems)
-        if ((item.uri ?? '').trim().isNotEmpty)
-          (item.mediaType, item.uri!.trim()),
-    };
+    if (includesFavorites) {
+      _favoriteOverrides = {
+        for (final entry in _listOfMaps(snapshot['favorite_overrides']))
+          for (final key in _itemIdentityKeys(
+            MediaItem.fromJson(_map(entry['item'])),
+          ))
+            key: entry['is_favorite'] == true,
+      };
+      final Map<String, dynamic> favorites = _map(snapshot['favorites']);
+      _favoriteTracks = _retainMediaList(
+        _favoriteTracks,
+        _readTracks(favorites['tracks'], true),
+      );
+      _favoriteAlbums = _retainMediaList(
+        _favoriteAlbums,
+        _readAlbums(favorites['albums'], true),
+      );
+      _favoritePlaylists = _retainMediaList(
+        _favoritePlaylists,
+        _readPlaylists(favorites['playlists'], true),
+      );
+      _favoriteArtists = _retainMediaList(
+        _favoriteArtists,
+        _readArtists(favorites['artists'], true),
+      );
+      final favoriteItems = <MediaItem>[
+        ..._favoriteTracks,
+        ..._favoriteAlbums,
+        ..._favoritePlaylists,
+        ..._favoriteArtists,
+      ];
+      _favoriteIdentityKeys = favoriteItems.expand(_itemIdentityKeys).toSet();
+      _favoriteUriKeys = {
+        for (final item in favoriteItems)
+          if ((item.uri ?? '').trim().isNotEmpty)
+            (item.mediaType, item.uri!.trim()),
+      };
+    }
+    if (includesPlaylists) {
+      _isLoadingPlaylists = snapshot['is_loading_playlists'] == true;
+    }
 
-    final Map<String, List<Track>> tracksByPlaylist = <String, List<Track>>{};
-    final loadingPlaylistIds = <String>{};
+    final Map<String, List<Track>> tracksByPlaylist = includesPlaylists
+        ? <String, List<Track>>{}
+        : previousTracks;
+    final loadingPlaylistIds = includesPlaylists
+        ? <String>{}
+        : previousLoadingIds;
     final List<Playlist> playlists = <Playlist>[];
     for (final Map<String, dynamic> value in _listOfMaps(
-      snapshot['playlists'],
+      includesPlaylists ? snapshot['playlists'] : null,
     )) {
       try {
         final Playlist playlist = Playlist.fromJson(value);
@@ -327,23 +421,27 @@ class UserData extends ChangeNotifier {
         if (value['is_loading_tracks'] == true) {
           loadingPlaylistIds.add(playlist.itemId);
         }
-        tracksByPlaylist[playlist.itemId] = _retainMediaList(
-          previousTracks[playlist.itemId] ?? const <Track>[],
-          _readTracks(value['items'], null),
-        );
+        tracksByPlaylist[playlist.itemId] = includesPlaylistItems
+            ? _retainMediaList(
+                previousTracks[playlist.itemId] ?? const <Track>[],
+                _readTracks(value['items'], null),
+              )
+            : previousTracks[playlist.itemId] ?? const <Track>[];
       } on FormatException {
         continue;
       }
     }
-    playlists.sort(_comparePlaylists);
-    _playlists = _retainMediaList(
-      _playlists,
-      List<Playlist>.unmodifiable(playlists),
-    );
-    _loadingPlaylistIds = loadingPlaylistIds;
-    _playlistTracksByPlaylistId = Map<String, List<Track>>.unmodifiable(
-      tracksByPlaylist,
-    );
+    if (includesPlaylists) {
+      playlists.sort(_comparePlaylists);
+      _playlists = _retainMediaList(
+        _playlists,
+        List<Playlist>.unmodifiable(playlists),
+      );
+      _loadingPlaylistIds = loadingPlaylistIds;
+      _playlistTracksByPlaylistId = Map<String, List<Track>>.unmodifiable(
+        tracksByPlaylist,
+      );
+    }
     final favoritesChanged =
         previousLoadingFavorites != _isLoadingFavorites ||
         previousLoadedFavorites != _hasLoadedFavorites ||
@@ -516,6 +614,7 @@ class UserData extends ChangeNotifier {
     isPlayable: item.isPlayable,
     available: item.available,
     year: item.year,
+    isYearKnown: item.isYearKnown,
     albumType: item.albumType,
     providerMappings: item.providerMappings,
     metadata: item.metadata,

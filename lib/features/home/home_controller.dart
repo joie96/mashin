@@ -30,19 +30,8 @@ class HomeController extends ChangeNotifier {
           _hasStartedLoading &&
           event['type'] == 'cache_cleared' &&
           event['cache'] == 'database') {
-        unawaited(_refreshRecommendationFolders());
+        unawaited(_refreshRecommendationFolders(requiresRestart: true));
         unawaited(_loadRecentListens());
-      }
-      if (!_isDisposed &&
-          _hasStartedLoading &&
-          event['type'] == 'catalog_updated') {
-        final update = CatalogUpdate.fromJson(event);
-        if (update.kind == CatalogQueryKind.recentlyPlayed) {
-          _recentListens = _withFavoriteStatuses(update.tracks);
-          _isLoadingRecentListens = false;
-          _recentListensNotifier.notifyListeners();
-          notifyListeners();
-        }
       }
       if (!_isDisposed &&
           _hasStartedLoading &&
@@ -69,18 +58,34 @@ class HomeController extends ChangeNotifier {
         unawaited(_loadRecentListens());
       }
     });
+    _catalogSubscription = coreBridge.catalogUpdates.listen((update) {
+      if (_isDisposed ||
+          !_hasStartedLoading ||
+          update.kind != CatalogQueryKind.recentlyPlayed) {
+        return;
+      }
+      _recentListens = _withFavoriteStatuses(update.tracks);
+      _isLoadingRecentListens = false;
+      _recentListensNotifier.notifyListeners();
+      notifyListeners();
+    });
   }
 
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
   final math.Random _random;
   StreamSubscription<Map<String, dynamic>>? _eventSubscription;
+  StreamSubscription<CatalogUpdate>? _catalogSubscription;
   bool _hasStartedLoading = false;
   Future<void>? _recommendationRefresh;
   bool _needsRecommendationRefresh = false;
   bool _shouldRefreshRecommendations = false;
   final Map<String, List<(String, String)>> _selectedArtistFolders = {};
   final Map<(String, String), HomeArtistSection> _loadedArtistSections = {};
+  RecommendationSnapshot _snapshot = const RecommendationSnapshot(
+    isLoading: true,
+  );
+  int _recommendationSequence = 0;
 
   bool _isDisposed = false;
   final ChangeNotifier _recommendationsNotifier = ChangeNotifier();
@@ -172,10 +177,10 @@ class HomeController extends ChangeNotifier {
     _notifySection(_artistSectionsNotifier);
   }
 
-  Future<void> load() async {
+  Future<void> load({bool refresh = false}) async {
     if (_isDisposed) return;
     _hasStartedLoading = true;
-    unawaited(_refreshRecommendationFolders(refresh: true));
+    unawaited(_refreshRecommendationFolders(refresh: refresh));
     unawaited(_loadRecentListens());
   }
 
@@ -231,7 +236,12 @@ class HomeController extends ChangeNotifier {
     }
   }
 
-  Future<void> _refreshRecommendationFolders({bool refresh = false}) {
+  Future<void> _refreshRecommendationFolders({
+    bool refresh = false,
+    bool requiresRestart = false,
+  }) {
+    final pending = _recommendationRefresh;
+    if (pending != null && !refresh && !requiresRestart) return pending;
     _shouldRefreshRecommendations |= refresh;
     _needsRecommendationRefresh = true;
     return _recommendationRefresh ??= Future<void>.microtask(() async {
@@ -272,6 +282,51 @@ class HomeController extends ChangeNotifier {
 
   void _applyRecommendationSnapshot(RecommendationSnapshot snapshot) {
     if (_isDisposed) return;
+    Set<String>? changedFolderIds;
+    final delta = snapshot.delta;
+    if (snapshot.revision != 0 && snapshot.revision < _snapshot.revision) {
+      return;
+    }
+    if (delta != null) {
+      if (snapshot.revision == _snapshot.revision &&
+          delta.sequence <= _recommendationSequence) {
+        return;
+      }
+      final isNewRead = snapshot.revision > _snapshot.revision;
+      if (delta.sequence != (isNewRead ? 1 : _recommendationSequence + 1)) {
+        unawaited(_refreshRecommendationFolders(requiresRestart: true));
+        return;
+      }
+      final update = snapshot;
+      try {
+        snapshot = snapshot.applyTo(
+          isNewRead ? const RecommendationSnapshot() : _snapshot,
+        );
+      } on StateError {
+        unawaited(_refreshRecommendationFolders(requiresRestart: true));
+        return;
+      }
+      final retained = snapshot.folders
+          .map((folder) => (folder.provider, folder.itemId))
+          .toSet();
+      changedFolderIds = {
+        for (final folder in update.folders) folder.itemId,
+        for (final folder in _snapshot.folders)
+          if (!retained.contains((folder.provider, folder.itemId)))
+            folder.itemId,
+      };
+      _recommendationSequence = delta.sequence;
+    } else {
+      if (snapshot.revision != 0 &&
+          snapshot.revision == _snapshot.revision &&
+          _recommendationSequence > 0) {
+        return;
+      }
+      _recommendationSequence = 0;
+    }
+    _snapshot = snapshot;
+    bool hasChanged(String identity) =>
+        changedFolderIds == null || changedFolderIds.contains(identity);
     final previousRecommendations = _recommendationItems;
     final previousGenrePlaylists = _genrePlaylists;
     final previousArtistPlaylists = _artistPlaylists;
@@ -292,11 +347,12 @@ class HomeController extends ChangeNotifier {
         .where((folder) => folder.itemId.trim().isNotEmpty)
         .toList(growable: false);
 
-    final List<Track> recommendations = List<Track>.of(
-      _tracksFromFolder(recommendationFolders, 'user_recommendations'),
-    );
-    if (!snapshot.isFolderLoading('user_recommendations') &&
+    if (hasChanged('user_recommendations') &&
+        !snapshot.isFolderLoading('user_recommendations') &&
         !snapshot.hasFolderLoadError('user_recommendations')) {
+      final recommendations = List<Track>.of(
+        _tracksFromFolder(recommendationFolders, 'user_recommendations'),
+      );
       if (!_hasLoadedRecommendations) {
         _shuffle(recommendations);
       } else {
@@ -305,7 +361,8 @@ class HomeController extends ChangeNotifier {
       _recommendationItems = _withFavoriteStatuses(recommendations);
       _hasLoadedRecommendations = true;
     }
-    if (_canApplyFolder(snapshot, 'user_genre_playlists_monthly')) {
+    if (hasChanged('user_genre_playlists_monthly') &&
+        _canApplyFolder(snapshot, 'user_genre_playlists_monthly')) {
       _genrePlaylists = _withFavoriteStatuses(
         _playlistsFromFolder(
           recommendationFolders,
@@ -313,7 +370,8 @@ class HomeController extends ChangeNotifier {
         ).map(_withNormalizedPlaylistName).take(9).toList(growable: false),
       );
     }
-    if (_canApplyFolder(snapshot, 'user_artist_playlists_monthly')) {
+    if (hasChanged('user_artist_playlists_monthly') &&
+        _canApplyFolder(snapshot, 'user_artist_playlists_monthly')) {
       _artistPlaylists = _withFavoriteStatuses(
         _playlistsFromFolder(
           recommendationFolders,
@@ -321,33 +379,43 @@ class HomeController extends ChangeNotifier {
         ).map(_withNormalizedPlaylistName).toList(growable: false),
       );
     }
-    if (_canApplyFolder(snapshot, 'user_top_tracks_monthly')) {
+    if (hasChanged('user_top_tracks_monthly') &&
+        _canApplyFolder(snapshot, 'user_top_tracks_monthly')) {
       _topTracks = _withFavoriteStatuses(
         _tracksFromFolder(recommendationFolders, 'user_top_tracks_monthly'),
       );
     }
-    if (_canApplyFolder(snapshot, 'user_top_artists_monthly')) {
+    if (hasChanged('user_top_artists_monthly') &&
+        _canApplyFolder(snapshot, 'user_top_artists_monthly')) {
       _topArtists = _withFavoriteStatuses(
         _artistsFromFolder(recommendationFolders, 'user_top_artists_monthly'),
       );
     }
-    final List<HomeArtistSection> genreSections = _artistSectionsFromFolders(
-      recommendationFolders,
-      'user_genre_artists_',
-    );
-    final List<HomeArtistSection> similarSections = _artistSectionsFromFolders(
-      recommendationFolders,
-      'user_similar_artists_',
-    );
-    final artistSections = <HomeArtistSection>[
-      for (int index = 0; index < 2; index++) ...<HomeArtistSection>[
-        if (index < genreSections.length) genreSections[index],
-        if (index < similarSections.length) similarSections[index],
-      ],
-    ];
-    if (artistSections.isNotEmpty ||
-        (!snapshot.isLoading && !snapshot.hasLoadError)) {
-      _artistSections = artistSections;
+    if (changedFolderIds == null ||
+        changedFolderIds.any(
+          (identity) =>
+              identity.startsWith('user_genre_artists_') ||
+              identity.startsWith('user_similar_artists_'),
+        )) {
+      final List<HomeArtistSection> genreSections = _artistSectionsFromFolders(
+        recommendationFolders,
+        'user_genre_artists_',
+      );
+      final List<HomeArtistSection> similarSections =
+          _artistSectionsFromFolders(
+            recommendationFolders,
+            'user_similar_artists_',
+          );
+      final artistSections = <HomeArtistSection>[
+        for (int index = 0; index < 2; index++) ...<HomeArtistSection>[
+          if (index < genreSections.length) genreSections[index],
+          if (index < similarSections.length) similarSections[index],
+        ],
+      ];
+      if (artistSections.isNotEmpty ||
+          (!snapshot.isLoading && !snapshot.hasLoadError)) {
+        _artistSections = artistSections;
+      }
     }
     _isLoadingRecommendations = snapshot.isFolderLoading(
       'user_recommendations',
@@ -411,8 +479,9 @@ class HomeController extends ChangeNotifier {
       if (changes[index]) _notifySection(notifiers[index]);
     }
     if (changes.any((hasChanged) => hasChanged) ||
-        hadLoadError != _hasLoadError)
+        hadLoadError != _hasLoadError) {
       notifyListeners();
+    }
   }
 
   // Retain view selections and unchanged content across cache/server publications.
@@ -623,6 +692,7 @@ class HomeController extends ChangeNotifier {
   void dispose() {
     _isDisposed = true;
     unawaited(_eventSubscription?.cancel());
+    unawaited(_catalogSubscription?.cancel());
     _recommendationsNotifier.dispose();
     _genrePlaylistsNotifier.dispose();
     _artistPlaylistsNotifier.dispose();

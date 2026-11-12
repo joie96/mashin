@@ -69,14 +69,22 @@ impl SessionImages {
         {
             return Err("cached inline image requires a payload-free media reference".into());
         }
-        if request.provider_icon_role.as_deref() == Some("default") &&
-            request.image.path.is_empty() && request.image.proxy_id.is_none() && request.owner_uri.is_none() {
-            let key = provider_icon_key(request.image.provider.as_str(), super::providers::ProviderIconRole::Default)?;
+        if request.provider_icon_role.as_deref() == Some("default")
+            && request.image.path.is_empty()
+            && request.image.proxy_id.is_none()
+            && request.owner_uri.is_none()
+        {
+            let key = provider_icon_key(
+                request.image.provider.as_str(),
+                super::providers::ProviderIconRole::Default,
+            )?;
             let (bound, cache_error) = match self.resolve().await {
                 Ok(bound) => (Some(bound), None),
                 Err(error) => (None, Some(error)),
             };
-            return self.read_default_icon(request.image.provider.as_str(), key, bound, cache_error).await;
+            return self
+                .read_default_icon(request.image.provider.as_str(), key, bound, cache_error)
+                .await;
         }
         if request.provider_icon_role.is_some() && (!is_inline || request.owner_uri.is_some()) {
             return Err("provider icon requires inline content without a media owner".into());
@@ -183,16 +191,31 @@ impl SessionImages {
         if !can_fetch_proxy && cached_inline.is_none() {
             return Err("image has no supported proxy or inline reference".into());
         }
-        let mut read = bound
-            .images
-            .begin_read(
-                key_for_size(source, if cached_inline.is_some() { 0 } else { size })?,
-                can_fetch_proxy.then(|| self.inner.client.clone()),
-                Duration::from_secs(300),
-                false,
-            )
-            .await
-            .map_err(|error| error.to_string())?;
+        let mut read_key = key_for_size(source.clone(), size)?;
+        let mut thumbnail_error = None;
+        let state = if cached_inline.is_some() {
+            match bound.images.read_inline_refresh_state(read_key.clone()).await {
+                Ok(state) => Ok(state),
+                Err(super::database::CacheError::Invalidated
+                    | super::database::CacheError::ShuttingDown) => {
+                    return Err("image cache generation invalidated".into());
+                }
+                Err(error) => {
+                    thumbnail_error = Some(error);
+                    read_key = key_for_size(source, 0)?;
+                    bound.images.read_refresh_state(read_key.clone()).await
+                }
+            }
+        } else {
+            bound.images.read_refresh_state(read_key.clone()).await
+        };
+        let mut read = bound.images.begin_read_with_state(
+            read_key,
+            can_fetch_proxy.then(|| self.inner.client.clone()),
+            Duration::from_secs(300),
+            false,
+            state,
+        ).map_err(|error| error.to_string())?;
         let session = self.clone();
         let refresh = read.refresh.take().map(|refresh| {
             let mut invalidation = bound.images.observe_invalidation();
@@ -216,7 +239,10 @@ impl SessionImages {
         Ok(ImageLoad {
             current: ImageUpdate {
                 bytes: read.cached.map(|cached| cached.read.payload.bytes),
-                cache_error: read.cache_error.map(|error| error.to_string()),
+                cache_error: read
+                    .cache_error
+                    .or(thumbnail_error)
+                    .map(|error| error.to_string()),
             },
             refresh,
         })
@@ -232,9 +258,11 @@ impl SessionImages {
     ) -> Result<ImageLoad, String> {
         let mut bytes = None;
         let mut is_recently_not_found = false;
+        let mut is_fresh = false;
         if let Some(bound) = &bound {
             match bound.images.read_refresh_state(key).await {
                 Ok(state) => {
+                    is_fresh = state.is_fresh_for(Duration::from_secs(300));
                     is_recently_not_found = state.is_recently_not_found;
                     if !is_recently_not_found {
                         bytes = state.cached.map(|cached| cached.read.payload.bytes);
@@ -248,7 +276,7 @@ impl SessionImages {
             bytes,
             cache_error: cache_error.clone(),
         };
-        if is_recently_not_found {
+        if is_fresh || is_recently_not_found {
             return Ok(ImageLoad {
                 current,
                 refresh: None,
@@ -822,6 +850,64 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn cached_inline_thumbnails_follow_original_revision_and_survive_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let client = Arc::new(MusicAssistantClient::new("http://127.0.0.1:1", None));
+        let (owner, images) = bound(directory.path(), client.clone()).await;
+        let lease = images.resolve().await.unwrap();
+        let mut read = request(String::new(), Some("a".repeat(64)));
+        read.size = 80;
+        for color in [3, 7] {
+            let bitmap = image::RgbaImage::from_pixel(640, 320, image::Rgba([color, 0, 0, 255]));
+            let mut encoded = std::io::Cursor::new(Vec::new());
+            image::DynamicImage::ImageRgba8(bitmap)
+                .write_to(&mut encoded, image::ImageFormat::Png)
+                .unwrap();
+            let mut playlist: crate::domain::media::Playlist = serde_json::from_value(serde_json::json!({
+                "provider":"library", "item_id":"42", "uri":"library://playlist/42", "name":"Private",
+                "metadata":{"images":[{"type":"thumb", "provider":"builtin", "proxy_id":"a".repeat(64),
+                    "path":format!("data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(encoded.into_inner()))}]}
+            })).unwrap();
+            persist_playlist_images(&lease.images, &mut playlist)
+                .await
+                .unwrap();
+            read.image = playlist.media.metadata.unwrap().images.remove(0);
+            let loaded = images.read_image(&read).await.unwrap();
+            assert!(loaded.refresh.is_none());
+            assert!(loaded.current.cache_error.is_none());
+            let bytes = loaded.current.bytes.unwrap();
+            let thumbnail = image::load_from_memory(&bytes).unwrap().to_rgba8();
+            assert_eq!(thumbnail.dimensions(), (80, 40));
+            assert_eq!(thumbnail.get_pixel(0, 0).0, [color, 0, 0, 255]);
+            assert_eq!(
+                images
+                    .read_image(&read)
+                    .await
+                    .unwrap()
+                    .current
+                    .bytes
+                    .unwrap(),
+                bytes
+            );
+        }
+        owner.shutdown(1).await.unwrap();
+        drop(lease);
+        drop(images);
+        drop(owner);
+        let (owner, images) = bound(directory.path(), client).await;
+        let loaded = images.read_image(&read).await.unwrap();
+        let thumbnail = image::load_from_memory(&loaded.current.bytes.unwrap())
+            .unwrap()
+            .to_rgba8();
+        assert_eq!(thumbnail.dimensions(), (80, 40));
+        assert_eq!(thumbnail.get_pixel(0, 0).0, [7, 0, 0, 255]);
+        owner.shutdown(1).await.unwrap();
+        drop(images);
+        drop(owner);
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn persisted_inline_references_read_files_after_restart_without_payload_or_media_database(
     ) {
         for proxy_id in [None, Some("a".repeat(64))] {
@@ -1218,6 +1304,36 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn fresh_default_icons_skip_refresh_before_and_after_restart() {
+        let directory = tempfile::tempdir().unwrap();
+        let client = Arc::new(MusicAssistantClient::new("http://127.0.0.1:1", None));
+        let mut request = request(String::new(), None);
+        request.image.image_type = "default".into();
+        request.owner_uri = None;
+        request.provider_icon_role = Some("default".into());
+        request.size = 80;
+        for is_reopened in [false, true] {
+            let (owner, images) = bound(directory.path(), client.clone()).await;
+            if !is_reopened {
+                let lease = images.resolve().await.unwrap();
+                persist_provider_icon(&lease.images, "builtin", Some(format!(
+                    "data:image/png;base64,{}", base64::engine::general_purpose::STANDARD.encode(bitmap(8))
+                ))).await.unwrap();
+            }
+            for _ in 0..2 {
+                let read = images.read_image(&request).await.unwrap();
+                assert_eq!(read.current.bytes, Some(bitmap(8)));
+                assert!(read.refresh.is_none());
+                assert_eq!(images.inner.client.pending_read_count(), 0);
+            }
+            owner.shutdown(1).await.unwrap();
+            drop(images);
+            drop(owner);
+        }
+        directory.close().unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn default_icon_reference_reads_local_bytes_before_online_and_rejects_retired_refresh() {
         for has_icon in [false, true] {
             let directory = tempfile::tempdir().unwrap();
@@ -1226,13 +1342,9 @@ mod tests {
             let lease = images.resolve().await.unwrap();
             let bytes = bitmap(8);
             if has_icon {
-                persist_provider_icon(
-                    &lease.images,
-                    "builtin",
-                    Some(format!(
-                        "data:image/png;base64,{}",
-                        base64::engine::general_purpose::STANDARD.encode(&bytes)
-                    )),
+                lease.images.publish_variant(
+                    provider_icon_key("builtin", super::super::providers::ProviderIconRole::Default).unwrap(),
+                    bytes.clone(), 1,
                 )
                 .await
                 .unwrap();
@@ -1278,7 +1390,10 @@ mod tests {
             )]);
             let (owner, images) = bound(directory.path(), Arc::new(client)).await;
             let lease = images.resolve().await.unwrap();
-            persist_provider_icon(&lease.images, "builtin", Some(inline(&cached)))
+            lease.images.publish_variant(
+                provider_icon_key("builtin", super::super::providers::ProviderIconRole::Default).unwrap(),
+                cached.clone(), 1,
+            )
                 .await
                 .unwrap();
             let mut request = request(String::new(), None);

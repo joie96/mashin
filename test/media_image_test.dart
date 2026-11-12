@@ -3,12 +3,16 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
+import 'package:flutter/rendering.dart' show ScrollCacheExtent;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mashin/app/theme/app_theme.dart';
+import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/core/core_query_scope.dart';
 import 'package:mashin/features/shared/widgets/media_image.dart';
+import 'package:mashin/features/shared/widgets/media_row_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_slide_section_desktop.dart';
 import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
 
 void main() {
@@ -32,6 +36,138 @@ void main() {
     MediaItemImage.configureProxyBaseUrl(null);
   });
 
+  for (final isNested in [false, true]) {
+    testWidgets(
+      'prefetched images promote when entering the viewport, nested=$isNested',
+      (tester) async {
+        final controller = ScrollController();
+        final reads = <String, List<bool>>{};
+        final canceled = <String>[];
+        MediaImage.configureImageLoader((request, refresh) {
+          final id = request.image.proxyId!;
+          reads.putIfAbsent(id, () => []).add(request.isBackground);
+          return CoreQueryScope.current!.execute(
+            () => Completer<ImageReadSnapshot>().future,
+            onCancel: () => canceled.add(id),
+          );
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Center(
+              child: SizedBox(
+                height: 100,
+                width: 100,
+                child: ListView.builder(
+                  controller: controller,
+                  scrollCacheExtent: const ScrollCacheExtent.viewport(5),
+                  itemExtent: 100,
+                  itemCount: 8,
+                  itemBuilder: (_, index) {
+                    final image = MediaImage(
+                      source: MediaItemImage(
+                        type: 'thumb',
+                        path: '',
+                        provider: 'builtin',
+                        remotelyAccessible: false,
+                        proxyId: '$index' * 64,
+                      ).getProxyPath()!,
+                      fit: BoxFit.cover,
+                      fallback: const SizedBox.shrink(),
+                    );
+                    if (!isNested) return image;
+                    return ListView(
+                      scrollDirection: Axis.horizontal,
+                      children: [SizedBox(width: 100, child: image)],
+                    );
+                  },
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+        expect(reads['0' * 64], [false]);
+        expect(reads['1' * 64], [true]);
+        expect(reads['3' * 64], isNull);
+        controller.jumpTo(100);
+        await tester.pump();
+        await tester.pump();
+        expect(reads['1' * 64], [true, false]);
+        expect(canceled, contains('1' * 64));
+        controller.jumpTo(300);
+        await tester.pump();
+        await tester.pump();
+        expect(reads['3' * 64], [false]);
+        await tester.pumpWidget(const SizedBox.shrink());
+        controller.dispose();
+      },
+    );
+  }
+
+  for (final isDark in [false, true]) {
+    for (final hasArtwork in [false, true]) {
+      testWidgets(
+        'desktop slide placeholder uses neutral color with dark=$isDark artwork=$hasArtwork',
+        (tester) async {
+          final theme = isDark ? AppTheme.dark() : AppTheme.light();
+          MediaImage.configureImageLoader(
+            (_, _) async => ImageReadSnapshot(bytes: null),
+          );
+          final item = Artist.fromJson({
+            'item_id': 'one',
+            'provider': 'library',
+            'name': 'Artist',
+            if (hasArtwork)
+              'metadata': {
+                'images': [
+                  {
+                    'type': 'thumb',
+                    'path': '',
+                    'provider': 'builtin',
+                    'remotely_accessible': false,
+                    'proxy_id': 'a' * 64,
+                  },
+                ],
+              },
+          });
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: theme,
+              home: Scaffold(
+                body: MediaSlideSectionDesktop<Artist>(
+                  title: 'Artists',
+                  items: [item],
+                  isLoading: false,
+                  emptyText: 'Empty',
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(
+            find.byType(MediaImage),
+            hasArtwork ? findsNWidgets(2) : findsNothing,
+          );
+          final placeholder = tester.widget<Icon>(
+            find.byWidgetPredicate(
+              (widget) =>
+                  widget is Icon &&
+                  widget.icon == Icons.person_outlined &&
+                  widget.size == 46,
+            ),
+          );
+          final context = tester.element(
+            find.byType(MediaSlideSectionDesktop<Artist>),
+          );
+          expect(placeholder.color, context.mashinColors.textSecondary);
+          expect(placeholder.color, isNot(context.mashinColors.accent));
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
+
   testWidgets('unsupported server paths render a placeholder', (tester) async {
     MediaItemImage.configureProxyBaseUrl('https://music.example');
     for (final source in [
@@ -50,6 +186,38 @@ void main() {
       expect(find.text('fallback'), findsOneWidget);
       expect(find.byType(Image), findsNothing);
     }
+  });
+
+  testWidgets('native image decoding respects the presentation dimensions', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    MediaImage.configureImageLoader(
+      (_, _) async => ImageReadSnapshot(bytes: bytes),
+    );
+    final image = MediaItemImage.fromJson({
+      'type': 'thumb',
+      'path': '',
+      'provider': 'builtin',
+      'proxy_id': 'a' * 64,
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaImage(
+          source: image.getProxyPath(size: 80)!,
+          fit: BoxFit.cover,
+          cacheWidth: 80,
+          cacheHeight: 80,
+          fallback: const SizedBox.shrink(),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final provider =
+        tester.widget<Image>(find.byType(Image)).image as ResizeImage;
+    expect(provider.width, 80);
+    expect(provider.height, 80);
+    expect(tester.takeException(), isNull);
   });
 
   testWidgets('persisted inline references retain their native model slot', (
@@ -146,53 +314,101 @@ void main() {
   );
 
   testWidgets(
-    'retained images evict the least recently used entry at the entry limit',
+    'proxy presentation survives transport changes but isolates sizes',
     (tester) async {
       final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
       final pending = Completer<ImageReadSnapshot>();
-      var isBlocked = false;
-      MediaImage.configureImageLoader(
-        (request, refresh) async => isBlocked
-            ? pending.future
-            : ImageReadSnapshot(bytes: Uint8List.fromList(bytes)),
-      );
-      Widget image(int index) => MaterialApp(
+      final requests = <ImageRequest>[];
+      MediaImage.configureImageLoader((request, refresh) async {
+        requests.add(request);
+        return requests.length == 1
+            ? ImageReadSnapshot(bytes: bytes)
+            : pending.future;
+      });
+      Widget image(String path, int size) => MaterialApp(
         home: MediaImage(
           source: MediaItemImage(
             type: 'thumb',
-            path: '',
+            path: path,
             provider: 'builtin',
             remotelyAccessible: false,
-            proxyId: index.toRadixString(16).padLeft(64, '0'),
-          ).getProxyPath()!,
+            proxyId: 'a' * 64,
+          ).getProxyPath(size: size)!,
           fit: BoxFit.cover,
           fallback: const Text('fallback'),
         ),
       );
-      for (var index = 0; index < 256; index++) {
-        await tester.pumpWidget(image(index));
-        await tester.pumpAndSettle();
-      }
-      await tester.pumpWidget(image(0));
+      await tester.pumpWidget(image('old-path', 40));
       await tester.pumpAndSettle();
-      await tester.pumpWidget(image(256));
-      await tester.pumpAndSettle();
-      isBlocked = true;
-      await tester.pumpWidget(image(1));
-      expect(find.text('fallback'), findsOneWidget);
-      await tester.pumpWidget(image(0));
+      final original =
+          tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(image('new-path', 40));
       expect(find.byType(Image), findsOneWidget);
+      expect(
+        (tester.widget<Image>(find.byType(Image)).image as MemoryImage).bytes,
+        same(original.bytes),
+      );
+      expect(requests, hasLength(2));
+      expect(requests.last.image.path, 'new-path');
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pumpWidget(image('new-path', 512));
+      expect(find.text('fallback'), findsOneWidget);
+      expect(requests, hasLength(3));
+      expect(requests.last.size, 512);
       pending.complete(ImageReadSnapshot(bytes: bytes));
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
 
+  testWidgets('retained images have no entry limit within the byte budget', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    final pending = Completer<ImageReadSnapshot>();
+    var isBlocked = false;
+    MediaImage.configureImageLoader(
+      (request, refresh) async => isBlocked
+          ? pending.future
+          : ImageReadSnapshot(bytes: Uint8List.fromList(bytes)),
+    );
+    Widget image(int index) => MaterialApp(
+      home: MediaImage(
+        source: MediaItemImage(
+          type: 'thumb',
+          path: '',
+          provider: 'builtin',
+          remotelyAccessible: false,
+          proxyId: index.toRadixString(16).padLeft(64, '0'),
+        ).getProxyPath()!,
+        fit: BoxFit.cover,
+        fallback: const Text('fallback'),
+      ),
+    );
+    for (var index = 0; index < 256; index++) {
+      await tester.pumpWidget(image(index));
+      await tester.pumpAndSettle();
+    }
+    await tester.pumpWidget(image(0));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(image(256));
+    await tester.pumpAndSettle();
+    isBlocked = true;
+    await tester.pumpWidget(image(1));
+    expect(find.byType(Image), findsOneWidget);
+    await tester.pumpWidget(image(0));
+    expect(find.byType(Image), findsOneWidget);
+    pending.complete(ImageReadSnapshot(bytes: bytes));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('retained image bytes stay within the presentation byte budget', (
     tester,
   ) async {
     final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
-    final padded = Uint8List(4 * 1024 * 1024 + bytes.length)
+    final padded = Uint8List(16 * 1024 * 1024 + bytes.length)
       ..setRange(0, bytes.length, bytes);
     final pending = Completer<ImageReadSnapshot>();
     var isBlocked = false;
@@ -214,7 +430,7 @@ void main() {
         fallback: const Text('fallback'),
       ),
     );
-    for (var index = 0; index < 4; index++) {
+    for (var index = 0; index < 8; index++) {
       await tester.pumpWidget(image(index));
       await tester.pumpAndSettle();
     }
@@ -529,6 +745,48 @@ void main() {
         'item_id': 'other',
       },
     ],
+  });
+
+  testWidgets('resolved artwork survives remount while metadata is pending', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    final pending = Completer<MediaItemImage?>();
+    var reads = 0;
+    MediaImage.configureArtworkLoader((_) async {
+      reads++;
+      if (reads > 1) return pending.future;
+      return MediaItemImage(
+        type: 'thumb',
+        path: '',
+        provider: 'source',
+        remotelyAccessible: false,
+        proxyId: 'a' * 64,
+      );
+    });
+    MediaImage.configureImageLoader(
+      (_, _) async => ImageReadSnapshot(bytes: bytes),
+    );
+    final source = artist().imageUriForSize(256)!;
+    Widget image() => MaterialApp(
+      home: MediaImage(
+        source: source,
+        fit: BoxFit.cover,
+        fallback: const Text('fallback'),
+      ),
+    );
+    await tester.pumpWidget(image());
+    await tester.pumpAndSettle();
+    expect(find.byType(Image), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(image());
+    expect(reads, 2);
+    expect(find.text('fallback'), findsNothing);
+    expect(find.byType(Image), findsOneWidget);
+    pending.complete(null);
+    await tester.pumpAndSettle();
+    expect(find.text('fallback'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
   });
 
   testWidgets('only a rendered image requests missing artwork', (tester) async {
@@ -1175,6 +1433,167 @@ void main() {
     },
   );
 
+  testWidgets(
+    'neighbor pages preload only adjacent images and cancel refreshes',
+    (tester) async {
+      final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+      final requests = <ImageRequest>[];
+      var canceled = 0;
+      MediaImage.configureImageLoader((request, refresh) {
+        if (refresh) {
+          return CoreQueryScope.current!.execute(
+            () => Completer<ImageReadSnapshot>().future,
+            onCancel: () => canceled++,
+          );
+        }
+        requests.add(request);
+        return Future.value(ImageReadSnapshot(bytes: bytes, hasRefresh: true));
+      });
+      ProviderManifestRegistry.registerOne(
+        const ProviderManifest(
+          domain: 'spotify',
+          iconImages: ['default'],
+          raw: {},
+        ),
+      );
+      final items = List.generate(
+        8,
+        (index) => Artist.fromJson({
+          'item_id': '$index',
+          'provider': 'spotify--one',
+          'name': 'Artist $index',
+          'metadata': {
+            'images': [
+              {
+                'type': 'thumb',
+                'path': '',
+                'provider': 'spotify',
+                'remotely_accessible': false,
+                'proxy_id': index.toRadixString(16).padLeft(64, '0'),
+              },
+            ],
+          },
+        }),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: MediaPageImagePreload(
+              items: items,
+              pageStart: 2,
+              pageSize: 2,
+              imageSize: 256,
+              child: const SizedBox(width: 100, height: 100),
+            ),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(requests, hasLength(5));
+      expect(requests.every((request) => request.isBackground), isTrue);
+      expect(
+        requests
+            .where((request) => request.providerIconRole == null)
+            .map((request) => request.image.proxyId)
+            .toSet(),
+        {
+          for (final index in [0, 1, 4, 5])
+            index.toRadixString(16).padLeft(64, '0'),
+        },
+      );
+      expect(
+        requests
+            .where((request) => request.providerIconRole == null)
+            .every((request) => request.size == 256),
+        isTrue,
+      );
+      expect(canceled, 0);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(canceled, 5);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: Column(
+              children: [
+                MediaImage(
+                  source: items[4].imageUriForSize(256)!,
+                  fit: BoxFit.cover,
+                  fallback: const Text('fallback'),
+                ),
+                const MediaProviderIcon(
+                  providerId: 'spotify--one',
+                  providerLabel: 'Spotify',
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      expect(find.text('fallback'), findsNothing);
+      expect(find.byIcon(Icons.radio_button_checked_outlined), findsNothing);
+      expect(find.byType(Image), findsNWidgets(2));
+      await tester.pumpAndSettle();
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(canceled, 7);
+    },
+  );
+
+  testWidgets('desktop row preserves icon state around the page animation', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    MediaImage.configureImageLoader(
+      (_, _) async => ImageReadSnapshot(bytes: bytes),
+    );
+    ProviderManifestRegistry.registerOne(
+      const ProviderManifest(
+        domain: 'spotify',
+        iconImages: ['default'],
+        raw: {},
+      ),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: SizedBox(
+            width: 200,
+            child: MediaRowSectionDesktop<Artist>(
+              title: '',
+              isLoading: false,
+              items: List.generate(
+                3,
+                (index) => Artist.fromJson({
+                  'item_id': '$index',
+                  'provider': 'spotify--one',
+                  'name': 'Artist $index',
+                }),
+              ),
+              emptyText: 'Empty',
+              coreBridge: _UnusedCoreBridge(),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final firstIconState = tester.state(find.byType(MediaProviderIcon));
+    await tester.tap(find.byIcon(Icons.chevron_right_outlined));
+    await tester.pump();
+    expect(tester.state(find.byType(MediaProviderIcon)), same(firstIconState));
+    await tester.pump(const Duration(milliseconds: 220));
+    final nextIconState = tester.state(find.byType(MediaProviderIcon));
+    expect(nextIconState, isNot(same(firstIconState)));
+    expect(find.byIcon(Icons.radio_button_checked_outlined), findsNothing);
+    await tester.pump(const Duration(milliseconds: 220));
+    await tester.pumpAndSettle();
+    expect(tester.state(find.byType(MediaProviderIcon)), same(nextIconState));
+    expect(find.byIcon(Icons.radio_button_checked_outlined), findsNothing);
+    expect(tester.takeException(), isNull);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('provider icons use the native loader with their manifest slot', (
     tester,
   ) async {
@@ -1374,3 +1793,5 @@ void main() {
     },
   );
 }
+
+class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {}

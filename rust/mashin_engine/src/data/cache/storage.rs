@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 
 use cap_std::fs::{Dir, OpenOptions};
 
+use crate::application::repositories::CacheUsage;
 use super::database::{validate_directory, validate_file, CacheError, DATABASE_FILE_NAME};
 
 const CACHE_DIRECTORY_NAME: &str = "Cache";
@@ -179,6 +180,25 @@ impl CacheStorage {
     /// Deletes image files and their separate index, leaving all media database files intact.
     pub(super) fn clear_image_files(&self) -> Result<(), CacheError> {
         self.clear_files(CacheArea::Images)
+    }
+
+    // Read-only physical usage; files can disappear during worker maintenance.
+    pub(crate) fn usage(&self) -> Result<CacheUsage, CacheError> {
+        let mut metadata_bytes = 0;
+        for entry in self.directory.entries()? {
+            let entry = entry?;
+            let name = entry.file_name();
+            if name.to_str().is_some_and(|name| CacheArea::Database.owns_file(name)) {
+                match self.directory.symlink_metadata(&name) {
+                    Ok(metadata) if metadata.is_file() => metadata_bytes += metadata.len(),
+                    Ok(_) => {}
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                    Err(error) => return Err(error.into()),
+                }
+            }
+        }
+        let image_bytes = directory_bytes(&self.directory.open_dir("images")?)?;
+        Ok(CacheUsage { metadata_bytes, image_bytes })
     }
 
     // Worker and file-owner locations.
@@ -372,6 +392,31 @@ impl CacheArea {
     }
 }
 
+// Handle-relative traversal never follows image-directory redirects.
+fn directory_bytes(directory: &Dir) -> Result<u64, CacheError> {
+    let mut bytes = 0;
+    for entry in directory.entries()? {
+        let entry = entry?;
+        let name = entry.file_name();
+        let result = (|| -> Result<u64, CacheError> {
+            let metadata = directory.symlink_metadata(&name)?;
+            if metadata.file_type().is_symlink() {
+                return Ok(0);
+            }
+            if metadata.is_dir() {
+                return directory_bytes(&directory.open_dir(&name)?);
+            }
+            Ok(if metadata.is_file() { metadata.len() } else { 0 })
+        })();
+        match result {
+            Ok(size) => bytes += size,
+            Err(CacheError::Io(error)) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(bytes)
+}
+
 // Cache-format publication and validation.
 fn is_image_shard(name: &str) -> bool {
     name.len() == 2
@@ -477,6 +522,29 @@ mod tests {
         let shard = storage.image_directory().join("aa");
         std::fs::create_dir_all(&shard).unwrap();
         shard.join(image_name())
+    }
+
+    #[test]
+    fn cache_usage_counts_database_sidecars_and_entire_image_directory() {
+        let application = tempfile::tempdir().unwrap();
+        let storage = CacheStorage::open(application.path()).unwrap();
+        let root = storage.database_directory();
+        for (suffix, length) in [("", 11), ("-wal", 13), ("-shm", 17), ("-journal", 19)] {
+            std::fs::write(root.join(format!("{DATABASE_FILE_NAME}{suffix}")), vec![0; length]).unwrap();
+        }
+        std::fs::write(root.join(format!("{DATABASE_FILE_NAME}.tmp-{}", "a".repeat(32))), vec![0; 31]).unwrap();
+        std::fs::write(application.path().join("settings.json"), vec![0; 100]).unwrap();
+        std::fs::write(image_path(&storage), vec![0; 23]).unwrap();
+        std::fs::write(storage.image_directory().join(IMAGE_DATABASE_FILE_NAME), vec![0; 29]).unwrap();
+        std::fs::write(storage.image_directory().join(format!("{IMAGE_DATABASE_FILE_NAME}-wal")), vec![0; 37]).unwrap();
+        let usage = storage.usage().unwrap();
+        assert_eq!(usage.metadata_bytes, 91);
+        assert_eq!(usage.image_bytes, 23 + 29 + 37 + IMAGE_FORMAT.len() as u64);
+        storage.clear_database_files().unwrap();
+        assert_eq!(storage.usage().unwrap().metadata_bytes, 0);
+        assert_eq!(storage.usage().unwrap().image_bytes, usage.image_bytes);
+        storage.clear_image_files().unwrap();
+        assert_eq!(storage.usage().unwrap().image_bytes, IMAGE_FORMAT.len() as u64);
     }
 
     #[test]

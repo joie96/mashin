@@ -10,7 +10,7 @@ use rusqlite::{params, Connection, OpenFlags, OptionalExtension};
 
 use super::database::{validate_file, CacheError};
 use super::image_files::{
-    ImageFileLease, ImageFileLeases, ImageFileRecord, ImageFiles, ImagePayload,
+    ImageFileLease, ImageFileLeases, ImageFileRecord, ImageFiles, ImagePayload, PendingImageFileRead,
 };
 use super::image_sources::{ImageSourceKey, ImageVariantKey};
 use super::storage::{CacheStorage, IMAGE_DATABASE_FILE_NAME};
@@ -73,7 +73,7 @@ CREATE TABLE image_refresh_states (
 
 pub(super) struct ImageIndex {
     connection: Connection,
-    files: ImageFiles,
+    files: std::sync::Arc<ImageFiles>,
     refresh_observations: HashMap<ImageVariantKey, ImageRefreshObservation>,
 }
 
@@ -82,6 +82,19 @@ pub(super) struct ImageRefreshState {
     pub(super) source_revision: Option<i64>,
     pub(super) confirmed_at: Option<i64>,
     pub(super) is_recently_not_found: bool,
+}
+
+impl ImageRefreshState {
+    // Positive freshness requires readable bytes from the current source revision.
+    pub(super) fn is_fresh_for(&self, fresh_for: Duration) -> bool {
+        let now = chrono::Utc::now().timestamp();
+        self.cached.as_ref().is_some_and(|cached| {
+            cached.read.is_current_source()
+                && now.checked_sub(self.confirmed_at.unwrap_or(cached.read.observed_at))
+                    .and_then(|age| u64::try_from(age).ok())
+                    .is_some_and(|age| Duration::from_secs(age) < fresh_for)
+        })
+    }
 }
 
 enum ImageRefreshObservation {
@@ -104,13 +117,104 @@ pub(super) struct ImageVariantRead {
 
 pub(super) struct ImageVariantLease {
     pub(super) read: ImageVariantRead,
-    _file: ImageFileLease,
+    _file: std::sync::Arc<ImageFileLease>,
+}
+
+pub(super) struct PendingImageVariantLease {
+    file: PendingImageFileRead,
+    source_revision: i64,
+    variant_revision: i64,
+    observed_at: i64,
+}
+
+pub(super) struct PendingImageRefreshState {
+    cached: Option<PendingImageVariantLease>,
+    source_revision: Option<i64>,
+    confirmed_at: Option<i64>,
+    is_recently_not_found: bool,
+}
+
+impl PendingImageVariantLease {
+    pub(super) async fn validate_with<ReadFuture>(
+        self,
+        read: impl FnOnce(PendingImageFileRead) -> ReadFuture,
+    ) -> Result<Option<ImageVariantLease>, CacheError>
+    where
+        ReadFuture: std::future::Future<Output = Result<Option<super::image_files::ImageFileRead>, CacheError>>,
+    {
+        Ok(read(self.file).await?.map(|file| ImageVariantLease {
+            read: ImageVariantRead {
+                payload: file.payload,
+                source_revision: self.source_revision,
+                variant_revision: self.variant_revision,
+                observed_at: self.observed_at,
+            },
+            _file: file.lease,
+        }))
+    }
+
+    /// File integrity and decoding happen outside the index owner.
+    pub(super) fn validate(self) -> Result<Option<ImageVariantLease>, CacheError> {
+        Ok(self.file.validate()?.map(|file| ImageVariantLease {
+            read: ImageVariantRead {
+                payload: file.payload,
+                source_revision: self.source_revision,
+                variant_revision: self.variant_revision,
+                observed_at: self.observed_at,
+            },
+            _file: file.lease,
+        }))
+    }
+}
+
+impl PendingImageRefreshState {
+    pub(super) async fn validate_with<ReadFuture>(
+        self,
+        read: impl FnOnce(PendingImageFileRead) -> ReadFuture,
+    ) -> Result<ImageRefreshState, CacheError>
+    where
+        ReadFuture: std::future::Future<Output = Result<Option<super::image_files::ImageFileRead>, CacheError>>,
+    {
+        let cached = match self.cached {
+            Some(cached) => cached.validate_with(read).await?,
+            None => None,
+        };
+        Ok(ImageRefreshState {
+            confirmed_at: self.confirmed_at.filter(|_| cached.is_some()),
+            cached,
+            source_revision: self.source_revision,
+            is_recently_not_found: self.is_recently_not_found,
+        })
+    }
+
+    pub(super) fn requires_validation(&self) -> bool {
+        self.cached.is_some()
+    }
+
+    /// A corrupt or missing payload cannot retain positive freshness.
+    pub(super) fn validate(self) -> Result<ImageRefreshState, CacheError> {
+        let cached = self.cached.map(PendingImageVariantLease::validate).transpose()?.flatten();
+        let confirmed_at = self.confirmed_at.filter(|_| cached.is_some());
+        Ok(ImageRefreshState {
+            cached,
+            source_revision: self.source_revision,
+            confirmed_at,
+            is_recently_not_found: self.is_recently_not_found,
+        })
+    }
 }
 
 impl ImageVariantRead {
     // Superseded variants remain usable until their own successful replacement.
     pub(super) fn is_current_source(&self) -> bool {
         self.source_revision == self.variant_revision
+    }
+}
+
+#[cfg(test)]
+impl ImageVariantLease {
+    pub(super) fn shares_file_with(&self, other: &Self) -> bool {
+        std::sync::Arc::ptr_eq(&self._file, &other._file)
     }
 }
 
@@ -178,17 +282,12 @@ impl ImageIndex {
             result => result?,
         }
         connection.pragma_update(None, "foreign_keys", true)?;
-        let journal_mode: String =
-            connection.query_row("PRAGMA journal_mode=WAL", [], |row| row.get(0))?;
-        if !journal_mode.eq_ignore_ascii_case("wal") {
-            return Err(CacheError::ForeignFormat);
-        }
-        connection.pragma_update(None, "synchronous", "FULL")?;
+        super::database::configure_cache_wal(&connection)?;
         let files = ImageFiles::open(storage)?;
         files.clear_incomplete_publications()?;
         Ok(Self {
             connection,
-            files,
+            files: std::sync::Arc::new(files),
             refresh_observations: HashMap::new(),
         })
     }
@@ -198,6 +297,11 @@ impl ImageIndex {
         self.connection.close().map_err(|(_, error)| error.into())
     }
 
+    /// Runs on the index owner thread without waiting for SQLite reader locks.
+    pub(super) fn maintain_wal(&self, maintenance: &mut super::database::CacheWalMaintenance) {
+        maintenance.maintain(&self.connection, "images");
+    }
+
     // Publication failure leaves the prior index intact; SQL failure may leave only orphan bytes.
     pub(super) fn publish_variant(
         &mut self,
@@ -205,13 +309,52 @@ impl ImageIndex {
         bytes: Vec<u8>,
         observed_at: i64,
     ) -> Result<(), CacheError> {
+        self.publish_observation(key, bytes, observed_at, None)
+    }
+
+    pub(super) fn publish_derived_variant(
+        &mut self,
+        key: &ImageVariantKey,
+        bytes: Vec<u8>,
+        observed_at: i64,
+        source_revision: i64,
+    ) -> Result<(), CacheError> {
+        self.publish_observation(key, bytes, observed_at, Some(source_revision))
+    }
+
+    fn publish_observation(
+        &mut self,
+        key: &ImageVariantKey,
+        bytes: Vec<u8>,
+        observed_at: i64,
+        derived_revision: Option<i64>,
+    ) -> Result<(), CacheError> {
+        let file = self.files.publish(bytes)?;
+        self.publish_file_observation(key, file, observed_at, derived_revision)
+    }
+
+    pub(super) fn publication_files(&self) -> std::sync::Arc<ImageFiles> {
+        self.files.clone()
+    }
+
+    pub(super) fn publish_file_observation(
+        &mut self,
+        key: &ImageVariantKey,
+        file: super::image_files::ImageFileRecord,
+        observed_at: i64,
+        derived_revision: Option<i64>,
+    ) -> Result<(), CacheError> {
         let (source_kind, provider, reference) = source_parts(&key.source)?;
         if observed_at < 0 {
             return Err(CacheError::InvalidImageObservation(
                 "invalid image observation time",
             ));
         }
-        let file = self.files.publish(bytes)?;
+        if let Some(revision) = derived_revision {
+            if read_source_revision(&self.connection, &key.source)? != Some(revision) {
+                return Err(CacheError::Invalidated);
+            }
+        }
         let byte_size = i64::try_from(file.byte_size).map_err(|_| {
             CacheError::InvalidImageObservation("image file size exceeds SQL integer range")
         })?;
@@ -236,9 +379,10 @@ impl ImageIndex {
             "SELECT revision FROM image_sources WHERE source_kind=?1 AND provider=?2 AND reference=?3",
             params![source_kind, provider, reference], |row| row.get(0),
         ).optional()?;
-        let changed_content = previous
-            .as_ref()
-            .is_some_and(|previous| previous.file != file);
+        let changed_content = derived_revision.is_none()
+            && previous
+                .as_ref()
+                .is_some_and(|previous| previous.file != file);
         let revision = match previous_revision {
             Some(revision) if changed_content => {
                 revision
@@ -306,7 +450,16 @@ impl ImageIndex {
         key: &ImageVariantKey,
         now: Instant,
     ) -> Result<ImageRefreshState, CacheError> {
-        let cached = self.lease_variant(key)?;
+        self.prepare_refresh_state(key, now)?.validate()
+    }
+
+    /// Captures one index revision and leased file before off-thread validation.
+    pub(super) fn prepare_refresh_state(
+        &mut self,
+        key: &ImageVariantKey,
+        now: Instant,
+    ) -> Result<PendingImageRefreshState, CacheError> {
+        let cached = self.prepare_variant(key)?;
         let source_revision = read_source_revision(&self.connection, &key.source)?;
         if !self.refresh_observations.contains_key(key) {
             if let Some(observation) = read_refresh_observation(&self.connection, key, now)? {
@@ -320,7 +473,7 @@ impl ImageIndex {
             }) if Some(*confirmed_revision) == source_revision
                 && cached
                     .as_ref()
-                    .is_some_and(|cached| cached.read.is_current_source()) =>
+                    .is_some_and(|cached| cached.source_revision == cached.variant_revision) =>
             {
                 (Some(*confirmed_at), false)
             }
@@ -336,7 +489,7 @@ impl ImageIndex {
             }
             _ => (None, false),
         };
-        Ok(ImageRefreshState {
+        Ok(PendingImageRefreshState {
             cached,
             source_revision,
             confirmed_at,
@@ -357,20 +510,25 @@ impl ImageIndex {
         &self,
         key: &ImageVariantKey,
     ) -> Result<Option<ImageVariantLease>, CacheError> {
+        self.prepare_variant(key)?.map(PendingImageVariantLease::validate).transpose().map(Option::flatten)
+    }
+
+    /// Opens a revision-bound handle without serializing payload validation on SQLite.
+    pub(super) fn prepare_variant(
+        &self,
+        key: &ImageVariantKey,
+    ) -> Result<Option<PendingImageVariantLease>, CacheError> {
         let Some(stored) = read_stored_variant(&self.connection, key)? else {
             return Ok(None);
         };
         Ok(self
             .files
-            .read_leased(&stored.file)?
-            .map(|file| ImageVariantLease {
-                read: ImageVariantRead {
-                    payload: file.payload,
-                    source_revision: stored.source_revision,
-                    variant_revision: stored.variant_revision,
-                    observed_at: stored.observed_at,
-                },
-                _file: file.lease,
+            .open_leased(&stored.file)?
+            .map(|file| PendingImageVariantLease {
+                file,
+                source_revision: stored.source_revision,
+                variant_revision: stored.variant_revision,
+                observed_at: stored.observed_at,
             }))
     }
 
@@ -667,6 +825,42 @@ mod tests {
         assert!(reopened.read_variant(&selected).unwrap().is_none());
         assert_eq!(std::fs::read(media).unwrap(), b"preserved media area");
         reopened.shutdown().unwrap();
+    }
+
+    #[test]
+    fn derived_variants_preserve_source_revision_and_reject_retired_originals() {
+        let application = tempfile::tempdir().unwrap();
+        let storage = storage(application.path());
+        let mut index = ImageIndex::open(&storage, "server").unwrap();
+        let original = key("a", ImageSize::Original);
+        let thumbnail = key("a", ImageSize::Pixels80);
+        index.publish_variant(&original, bitmap(1), 1).unwrap();
+        index
+            .publish_derived_variant(&thumbnail, bitmap(2), 1, 1)
+            .unwrap();
+        assert!(index
+            .read_variant(&original)
+            .unwrap()
+            .unwrap()
+            .is_current_source());
+        index.publish_variant(&original, bitmap(3), 2).unwrap();
+        assert!(matches!(
+            index.publish_derived_variant(&thumbnail, bitmap(4), 1, 1),
+            Err(CacheError::Invalidated)
+        ));
+        index
+            .publish_derived_variant(&thumbnail, bitmap(5), 2, 2)
+            .unwrap();
+        let current = index.read_variant(&thumbnail).unwrap().unwrap();
+        assert!(current.is_current_source());
+        assert_eq!(current.source_revision, 2);
+        assert_eq!(current.payload.bytes, bitmap(5));
+        assert!(index
+            .read_variant(&original)
+            .unwrap()
+            .unwrap()
+            .is_current_source());
+        index.shutdown().unwrap();
     }
 
     #[test]
@@ -988,17 +1182,19 @@ mod tests {
         index.publish_variant(&first, bytes.clone(), 10).unwrap();
         index.publish_variant(&second, bytes.clone(), 11).unwrap();
         assert_eq!(
-            std::fs::read_dir(storage.image_directory().join(
-                &format!("{:x}", sha2::Sha256::digest(&bytes))[..2],
-            ))
+            std::fs::read_dir(
+                storage
+                    .image_directory()
+                    .join(&format!("{:x}", sha2::Sha256::digest(&bytes))[..2],)
+            )
+            .unwrap()
+            .filter(|entry| entry
+                .as_ref()
                 .unwrap()
-                .filter(|entry| entry
-                    .as_ref()
-                    .unwrap()
-                    .file_name()
-                    .to_string_lossy()
-                    .ends_with(".png"))
-                .count(),
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".png"))
+            .count(),
             1
         );
         std::fs::write(
@@ -1133,11 +1329,13 @@ mod tests {
         let stored = read_stored_variant(&index.connection, &selected)
             .unwrap()
             .unwrap();
-        let path = storage
-            .image_directory()
-            .join(super::super::image_files::image_file_name(
-                &stored.file.content_hash, &stored.file.mime_type,
-            ).unwrap());
+        let path = storage.image_directory().join(
+            super::super::image_files::image_file_name(
+                &stored.file.content_hash,
+                &stored.file.mime_type,
+            )
+            .unwrap(),
+        );
         std::fs::write(&path, b"corrupt").unwrap();
         assert!(index.read_variant(&selected).unwrap().is_none());
         index.publish_variant(&selected, bitmap(1), 2).unwrap();

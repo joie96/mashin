@@ -1,11 +1,11 @@
 //! Parallel migrated-media reads over the existing MA read-group scheduler.
-//! Only active refreshes live in RAM. Last-consumer drop aborts network work;
+//! Only active refreshes live in RAM. Last-consumer drop aborts unconfirmed network work;
 //! accepted SQLite writes retain worker durability and leases reject old generations.
 //! Confirmed mutations reserve owner-wide FIFO order before asynchronous cache prerequisites.
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, Weak};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use futures_util::{stream::BoxStream, StreamExt};
 use tokio::sync::watch;
@@ -51,6 +51,9 @@ struct CacheContext {
     is_identity_verified: std::sync::atomic::AtomicBool,
 }
 struct Refresh {
+    read_id: u64,
+    started: Instant,
+    query_kind: &'static str,
     group: Arc<ReadGroup>,
     changes: watch::Sender<CatalogLoadSnapshot>,
     updates: tokio::sync::broadcast::Sender<CatalogLoadSnapshot>,
@@ -60,6 +63,52 @@ struct Refresh {
 enum RefreshError {
     Failed(String),
     Invalidated(String),
+}
+
+#[derive(Default)]
+struct RefreshTimings {
+    cache_status: Option<&'static str>,
+    cache_ms: Option<u128>,
+    cache_used_before_server: bool,
+    server_succeeded: Option<bool>,
+    server_ms: Option<u128>,
+}
+
+impl RefreshTimings {
+    // One result per shared refresh; source transitions remain trace diagnostics.
+    fn log_result(&self, refresh: &Refresh, state: &CatalogLoadSnapshot) {
+        LOGGER.debug(format_args!(
+            "{}",
+            self.result_message(
+                refresh.read_id,
+                refresh.query_kind,
+                state,
+                refresh.started.elapsed().as_millis(),
+            )
+        ));
+    }
+
+    fn result_message(
+        &self,
+        read_id: u64,
+        query_kind: &str,
+        state: &CatalogLoadSnapshot,
+        total_ms: u128,
+    ) -> String {
+        let cache_ms = self
+            .cache_ms
+            .map(|elapsed| elapsed.to_string())
+            .unwrap_or_else(|| "none".into());
+        let server_ms = self
+            .server_ms
+            .map(|elapsed| elapsed.to_string())
+            .unwrap_or_else(|| "none".into());
+        let server = self
+            .server_succeeded
+            .map(|succeeded| if succeeded { "ok" } else { "error" })
+            .unwrap_or("not_completed");
+        format!("read_id={read_id} query={query_kind} cache={} cache_ms={cache_ms} used_before_server={} server={server} server_ms={server_ms} phase={:?} cache_error={} total_ms={total_ms}", self.cache_status.unwrap_or("not_completed"), self.cache_used_before_server, state.phase, state.cache_error.is_some())
+    }
 }
 
 impl RefreshError {
@@ -77,6 +126,9 @@ pub(super) struct ServerIdentity {
 }
 impl Drop for Refresh {
     fn drop(&mut self) {
+        if matches!(self.changes.borrow().phase, CatalogLoadPhase::ReadingLocal | CatalogLoadPhase::Refreshing) {
+            LOGGER.trace(format_args!("read_id={} query={} stage=canceled elapsed_ms={}", self.read_id, self.query_kind, self.started.elapsed().as_millis()));
+        }
         if let Some(worker) = self
             .worker
             .get_mut()
@@ -90,7 +142,9 @@ impl Drop for Refresh {
 
 impl Refresh {
     // Keep the current state and preserve each source transition for active subscribers.
-    fn publish(&self, snapshot: CatalogLoadSnapshot) {
+    fn publish(&self, mut snapshot: CatalogLoadSnapshot) {
+        static NEXT_PUBLICATION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        snapshot.publication_revision = NEXT_PUBLICATION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
         self.changes.send_replace(snapshot.clone());
         let _ = self.updates.send(snapshot);
     }
@@ -190,7 +244,7 @@ impl CachedCatalog {
                 .unwrap_or_else(|| "provider session invalidated".into()));
         }
         let current = ProviderUpdate {
-            items: first.value.and_then(extract),
+            items: first.value.map(Arc::unwrap_or_clone).and_then(extract),
             cache_error: first.cache_error,
         };
         let refresh = match first.phase {
@@ -209,7 +263,7 @@ impl CachedCatalog {
                     match state.phase {
                         CatalogLoadPhase::Ready => {
                             return Ok(ProviderUpdate {
-                                items: state.value.and_then(extract),
+                                items: state.value.map(Arc::unwrap_or_clone).and_then(extract),
                                 cache_error: state.cache_error,
                             })
                         }
@@ -530,7 +584,11 @@ impl CatalogRuntime {
         let requires_independent_refresh = match &query {
             CatalogQuery::LibraryArtists { filters, .. } => filters.requires_new_random_sample(),
             CatalogQuery::LibraryAlbums { filters, .. } => filters.requires_new_random_sample(),
-            CatalogQuery::PlaylistTracks { .. } | CatalogQuery::RecommendationItems { .. } => true,
+            CatalogQuery::PlaylistTracks {
+                allow_dynamic_tracks,
+                ..
+            } => *allow_dynamic_tracks,
+            CatalogQuery::RecommendationItems { .. } => true,
             CatalogQuery::SimilarTracks {
                 allow_lookup: true, ..
             } => true,
@@ -542,10 +600,16 @@ impl CatalogRuntime {
             .filter(|_| !requires_independent_refresh)
         {
             refresh.group.promote_to_current_priority();
+            LOGGER.trace(format_args!("read_id={} query={} stage=joined", refresh.read_id, query.kind_name()));
             return refresh;
         }
+        static NEXT_READ_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        let read_id = NEXT_READ_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        let started = Instant::now();
+        LOGGER.trace(format_args!("read_id={read_id} query={} stage=started force_refresh={force_refresh}", query.kind_name()));
         let group = self.client.create_read_group();
         let (changes, _) = watch::channel(CatalogLoadSnapshot {
+            publication_revision: 0,
             value: None,
             source: None,
             phase: CatalogLoadPhase::ReadingLocal,
@@ -556,6 +620,9 @@ impl CatalogRuntime {
             cache_error: None,
         });
         let refresh = Arc::new(Refresh {
+            read_id,
+            started,
+            query_kind: query.kind_name(),
             group: group.clone(),
             changes,
             updates: tokio::sync::broadcast::channel(8).0,
@@ -567,6 +634,7 @@ impl CatalogRuntime {
             let mut state = refresh.changes.borrow().clone();
             state.phase = CatalogLoadPhase::Invalidated;
             state.error = Some(error);
+            RefreshTimings::default().log_result(&refresh, &state);
             refresh.publish(state);
             return refresh;
         }
@@ -587,10 +655,26 @@ impl CatalogRuntime {
                     let mut remote = Box::pin(crate::data::music_assistant::catalog::load_catalog(&runtime.client, &query, force_refresh));
                     let mut local_result = None;
                     let mut remote_result = None;
+                    // A confirmed server response owns its pending persistence independently of display waiters.
+                    let mut _persistence_owner = None;
+                    let mut timings = RefreshTimings::default();
                     while local_result.is_none() || remote_result.is_none() {
                         tokio::select! {
                             result = &mut local, if local_result.is_none() => {
                                 if runtime.require_active().is_err() { break; }
+                                let (cache, knowledge, is_used, cache_error) = match &result {
+                                    Ok((_, cached)) => (
+                                        if cached.value.is_some() { "hit" } else { "miss" },
+                                        cached.knowledge,
+                                        cached.value.is_some() && publication.upgrade().is_some_and(|publication| publication.changes.borrow().source != Some(crate::domain::catalog::CatalogDataSource::Server)),
+                                        cached.cache_error.is_some(),
+                                    ),
+                                    Err(_) => ("error", CatalogReadKnowledge::Unknown, false, true),
+                                };
+                                timings.cache_ms = Some(started.elapsed().as_millis());
+                                timings.cache_status = Some(cache);
+                                timings.cache_used_before_server = is_used;
+                                LOGGER.trace(format_args!("read_id={read_id} query={} stage=local cache={cache} used_before_server={is_used} knowledge={knowledge:?} elapsed_ms={} cache_error={cache_error}", query.kind_name(), started.elapsed().as_millis()));
                                 if let Some(publication) = publication.upgrade() {
                                     let mut state = publication.changes.borrow().clone();
                                     state.phase = CatalogLoadPhase::Refreshing;
@@ -606,7 +690,7 @@ impl CatalogRuntime {
                                         Ok((_, cached)) => {
                                             state.cache_error = cached.cache_error.clone();
                                             if let Some(server_value) = state.value.as_ref() {
-                                                state.value = Some(merge_server_value(cached.value.clone(), server_value.clone()));
+                                                state.value = Some(Arc::new(merge_server_value(cached.value.clone().map(Arc::unwrap_or_clone), server_value.as_ref().clone())));
                                             }
                                         }
                                         Err(RefreshError::Failed(error) | RefreshError::Invalidated(error)) => state.cache_error = Some(error.clone()),
@@ -617,11 +701,15 @@ impl CatalogRuntime {
                             }
                             result = &mut remote, if remote_result.is_none() => {
                                 if runtime.require_active().is_err() { break; }
+                                timings.server_ms = Some(started.elapsed().as_millis());
+                                timings.server_succeeded = Some(result.is_ok());
+                                LOGGER.trace(format_args!("read_id={read_id} query={} stage=server elapsed_ms={} success={}", query.kind_name(), started.elapsed().as_millis(), result.is_ok()));
                                 if let (Ok(value), Some(publication)) = (&result, publication.upgrade()) {
+                                    _persistence_owner = Some(publication.clone());
                                     if runtime.confirmed_revision.load(std::sync::atomic::Ordering::Acquire) == expected_revision {
                                         let mut state = publication.changes.borrow().clone();
                                         state.phase = CatalogLoadPhase::Refreshing;
-                                        state.value = Some(merge_server_value(state.value.take(), value.clone()));
+                                        state.value = Some(Arc::new(merge_server_value(state.value.take().map(Arc::unwrap_or_clone), value.clone())));
                                         state.source = Some(crate::domain::catalog::CatalogDataSource::Server);
                                         state.knowledge = CatalogReadKnowledge::ObservedResponse;
                                         state.freshness = CatalogFreshness::Fresh;
@@ -643,6 +731,7 @@ impl CatalogRuntime {
                             state.knowledge = CatalogReadKnowledge::Unknown;
                             state.freshness = CatalogFreshness::Unknown;
                             state.observed_at = None;
+                            timings.log_result(&publication, &state);
                             publication.publish(state);
                         }
                         return;
@@ -655,10 +744,12 @@ impl CatalogRuntime {
                         Err(error) => {
                             state.phase = CatalogLoadPhase::Failed;
                             state.error = Some(error);
+                            timings.log_result(&publication, &state);
                             publication.publish(state);
                             return;
                         }
                     };
+                    let persistence_started = Instant::now();
                     let persistence = match local_result {
                         Ok((context, _)) => {
                             let verify = runtime.verify_server_identity(&context, false);
@@ -685,13 +776,14 @@ impl CatalogRuntime {
                         }
                         Err(error) => Err(error),
                     };
+                    LOGGER.trace(format_args!("read_id={read_id} query={} stage=persistence_finished elapsed_ms={} success={}", query.kind_name(), persistence_started.elapsed().as_millis(), persistence.is_ok()));
                     if runtime.confirmed_revision.load(std::sync::atomic::Ordering::Acquire) != expected_revision {
                         state.phase = CatalogLoadPhase::Failed;
                         state.error = Some("catalog refresh superseded by confirmed mutation".into());
                         if let Ok(context) = runtime.cache_context().await {
                             let user_id = context.user_id.clone();
                             let latest_query = query.clone();
-                            state.value = context.database.read_snapshot(move |snapshot| read_partial_cached(snapshot, &latest_query, &user_id)).await.ok().flatten();
+                            state.value = context.database.read_snapshot(move |snapshot| read_partial_cached(snapshot, &latest_query, &user_id)).await.ok().flatten().map(Arc::new);
                         } else { state.value = None; }
                         state.knowledge = if state.value.is_some() { CatalogReadKnowledge::Partial } else { CatalogReadKnowledge::Unknown };
                         state.freshness = CatalogFreshness::Unknown;
@@ -701,7 +793,7 @@ impl CatalogRuntime {
                         match persistence {
                             Ok(()) => {}
                             Err(RefreshError::Failed(error)) => {
-                                LOGGER.debug(format_args!("Cache persistence failed: {error}"));
+                                LOGGER.trace(format_args!("Cache persistence failed: {error}"));
                                 state.cache_error = Some(error);
                             }
                             Err(RefreshError::Invalidated(error)) => {
@@ -715,6 +807,7 @@ impl CatalogRuntime {
                             }
                         }
                     }
+                    timings.log_result(&publication, &state);
                     publication.publish(state);
                 }),
             )
@@ -812,6 +905,7 @@ impl CatalogRuntime {
             }
         }
         let snapshot = CatalogLoadSnapshot {
+            publication_revision: 0,
             source: value
                 .as_ref()
                 .map(|_| crate::domain::catalog::CatalogDataSource::Cache),
@@ -829,7 +923,7 @@ impl CatalogRuntime {
             } else {
                 CatalogFreshness::Unknown
             },
-            value,
+            value: value.map(Arc::new),
             phase: CatalogLoadPhase::Refreshing,
             observed_at: observed.map(|value| value.observed_at),
             error: None,
@@ -952,6 +1046,22 @@ fn merge_server_value(previous: Option<CatalogValue>, incoming: CatalogValue) ->
 }
 
 impl CatalogClient for CachedCatalog {
+    fn cache_usage(&self) -> futures_util::future::BoxFuture<'_, Result<crate::application::repositories::CacheUsage, String>> {
+        Box::pin(async move {
+            match &self.inner.access {
+                CacheAccess::Session(session) => {
+                    let mut owner = session.owner.cache.lock().await;
+                    session.owner.require_generation(session.generation)?;
+                    if owner.is_none() {
+                        *owner = Some(ServerCache::initialize((session.owner.directory)()?).await.map_err(|error| error.to_string())?);
+                    }
+                    owner.as_ref().unwrap().usage().await.map_err(|error| error.to_string())
+                }
+                CacheAccess::Active(context) => context.cache.usage().await.map_err(|error| error.to_string()),
+            }
+        })
+    }
+
     fn clear_database_cache(&self) -> futures_util::future::BoxFuture<'_, Result<(), String>> {
         Box::pin(async move {
             let _order = self.inner.begin_confirmed_write().await;
@@ -1203,6 +1313,7 @@ impl CatalogClient for CachedCatalog {
                     CatalogLoadPhase::Ready => {
                         return state
                             .value
+                            .map(Arc::unwrap_or_clone)
                             .ok_or_else(|| "ready catalog read has no value".to_owned())
                     }
                     CatalogLoadPhase::Failed | CatalogLoadPhase::Invalidated => {
@@ -1224,6 +1335,7 @@ impl CatalogClient for CachedCatalog {
         if supports_cached_read(&query) {
             self.observe_cached(query, force_refresh)
         } else {
+            LOGGER.trace(format_args!("query={} cache=bypass reason=unsupported force_refresh={force_refresh}", query.kind_name()));
             self.inner.client.observe_catalog(query, force_refresh)
         }
     }
@@ -1408,7 +1520,7 @@ impl SessionCache {
             return Ok(catalog.clone());
         }
         let catalog = async {
-            LOGGER.debug(format_args!("Cache initialization: resolving user"));
+            LOGGER.trace(format_args!("Cache initialization: resolving user"));
             let user_id = match self.user_id.clone() {
                 Some(user_id) => user_id,
                 None => {
@@ -1437,7 +1549,7 @@ impl SessionCache {
             };
             let _owner = self.owner.cache.lock().await;
             self.owner.require_generation(self.generation)?;
-            LOGGER.debug(format_args!("Cache initialization: activating database"));
+            LOGGER.trace(format_args!("Cache initialization: activating database"));
             cache
                 .activate(server_id.clone())
                 .await
@@ -1450,7 +1562,7 @@ impl SessionCache {
             }
             let database = cache.database().await.map_err(|error| error.to_string())?;
             self.owner.require_generation(self.generation)?;
-            LOGGER.debug(format_args!("Cache initialization: database ready"));
+            LOGGER.trace(format_args!("Cache initialization: database ready"));
             Ok::<_, String>(Arc::new(CacheContext {
                 cache,
                 database,
@@ -1472,6 +1584,76 @@ mod tests {
     use crate::data::music_assistant::client::tests::{server, server_with_request_handler};
     use crate::domain::identifiers::MediaId;
     use serde_json::json;
+
+    #[test]
+    fn refresh_result_reports_cache_and_server_timings_in_one_line() {
+        let timings = RefreshTimings {
+            cache_status: Some("hit"),
+            cache_ms: Some(375),
+            cache_used_before_server: true,
+            server_succeeded: Some(true),
+            server_ms: Some(16370),
+        };
+        let state = CatalogLoadSnapshot {
+            publication_revision: 0,
+            value: None,
+            source: None,
+            phase: CatalogLoadPhase::Ready,
+            knowledge: CatalogReadKnowledge::ObservedResponse,
+            freshness: CatalogFreshness::Fresh,
+            observed_at: None,
+            error: None,
+            cache_error: None,
+        };
+        let message = timings.result_message(12, "PlaylistTracks", &state, 17231);
+        assert_eq!(message, "read_id=12 query=PlaylistTracks cache=hit cache_ms=375 used_before_server=true server=ok server_ms=16370 phase=Ready cache_error=false total_ms=17231");
+        assert_eq!(message.lines().count(), 1);
+    }
+
+    #[test]
+    fn refresh_result_distinguishes_cache_misses_and_source_errors() {
+        let mut state = CatalogLoadSnapshot {
+            publication_revision: 0,
+            value: None,
+            source: None,
+            phase: CatalogLoadPhase::Ready,
+            knowledge: CatalogReadKnowledge::Unknown,
+            freshness: CatalogFreshness::Unknown,
+            observed_at: None,
+            error: None,
+            cache_error: None,
+        };
+        let mut timings = RefreshTimings {
+            cache_status: Some("miss"),
+            cache_ms: Some(2),
+            cache_used_before_server: false,
+            server_succeeded: Some(true),
+            server_ms: Some(1486),
+        };
+        assert_eq!(timings.result_message(55, "ArtistAlbums", &state, 1511), "read_id=55 query=ArtistAlbums cache=miss cache_ms=2 used_before_server=false server=ok server_ms=1486 phase=Ready cache_error=false total_ms=1511");
+        timings.cache_status = Some("error");
+        timings.server_succeeded = Some(false);
+        state.phase = CatalogLoadPhase::Failed;
+        state.error = Some("synthetic server failure".into());
+        state.cache_error = Some("synthetic cache failure".into());
+        assert_eq!(timings.result_message(55, "ArtistAlbums", &state, 1511), "read_id=55 query=ArtistAlbums cache=error cache_ms=2 used_before_server=false server=error server_ms=1486 phase=Failed cache_error=true total_ms=1511");
+    }
+
+    #[test]
+    fn refresh_result_does_not_fabricate_timings_for_unfinished_sources() {
+        let state = CatalogLoadSnapshot {
+            publication_revision: 0,
+            value: None,
+            source: None,
+            phase: CatalogLoadPhase::Invalidated,
+            knowledge: CatalogReadKnowledge::Unknown,
+            freshness: CatalogFreshness::Unknown,
+            observed_at: None,
+            error: Some("session invalidated".into()),
+            cache_error: None,
+        };
+        assert_eq!(RefreshTimings::default().result_message(1, "Album", &state, 0), "read_id=1 query=Album cache=not_completed cache_ms=none used_before_server=false server=not_completed server_ms=none phase=Invalidated cache_error=false total_ms=0");
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn default_provider_icon_survives_offline_reopen_and_confirmed_absence() {
@@ -1618,7 +1800,7 @@ mod tests {
         .unwrap();
         let mut updates = catalog.observe_catalog(CatalogQuery::ProviderManifests {}, false);
         let local = updates.next().await.unwrap();
-        let Some(CatalogValue::ProviderManifests(manifests)) = local.value else {
+        let Some(CatalogValue::ProviderManifests(manifests)) = local.value.as_deref().cloned() else {
             panic!("local manifests missing")
         };
         assert_eq!(manifests[0].name.as_deref(), Some("Original"));
@@ -1638,7 +1820,7 @@ mod tests {
                 break state;
             }
         };
-        let Some(CatalogValue::ProviderManifests(manifests)) = terminal.value else {
+        let Some(CatalogValue::ProviderManifests(manifests)) = terminal.value.as_deref().cloned() else {
             panic!("server manifests missing")
         };
         assert_eq!(manifests[0].name.as_deref(), Some("Updated"));
@@ -1735,7 +1917,7 @@ mod tests {
             let local = updates.next().await.unwrap();
             assert_eq!(
                 local.value,
-                Some(CatalogValue::ProviderInstances(old.clone()))
+                Some(Arc::new(CatalogValue::ProviderInstances(old.clone())))
             );
             assert_eq!(local.phase, CatalogLoadPhase::Refreshing);
             entered.notified().await;
@@ -2400,12 +2582,12 @@ mod tests {
             .unwrap();
             let mut first = catalog.observe_catalog(read_query.clone(), false);
             let initial = first.next().await.unwrap();
-            assert_eq!(initial.value, Some(old_value.clone()));
+            assert_eq!(initial.value, Some(Arc::new(old_value.clone())));
             assert_eq!(initial.knowledge, CatalogReadKnowledge::ObservedResponse);
             assert_eq!(initial.freshness, CatalogFreshness::Fresh);
             entered.notified().await;
             let mut second = catalog.observe_catalog(read_query.clone(), false);
-            assert_eq!(second.next().await.unwrap().value, Some(old_value));
+            assert_eq!(second.next().await.unwrap().value, Some(Arc::new(old_value)));
             release.wait();
             for updates in [&mut first, &mut second] {
                 let completed = completed_snapshot(updates).await;
@@ -2414,15 +2596,15 @@ mod tests {
                     completed.source,
                     Some(crate::domain::catalog::CatalogDataSource::Server)
                 );
-                assert_eq!(completed.value, Some(new_value.clone()));
+                assert_eq!(completed.value, Some(Arc::new(new_value.clone())));
                 assert!(completed.cache_error.is_none());
             }
             assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 1);
             let mut forced = catalog.observe_catalog(read_query.clone(), true);
-            assert_eq!(forced.next().await.unwrap().value, Some(new_value.clone()));
+            assert_eq!(forced.next().await.unwrap().value, Some(Arc::new(new_value.clone())));
             let failed = completed_snapshot(&mut forced).await;
             assert_eq!(failed.phase, CatalogLoadPhase::Failed);
-            assert_eq!(failed.value, Some(new_value.clone()));
+            assert_eq!(failed.value, Some(Arc::new(new_value.clone())));
             assert!(failed.error.is_some());
             drop(first);
             drop(second);
@@ -2669,7 +2851,7 @@ mod tests {
             .unwrap();
             let mut first = catalog.observe_catalog(read_query.clone(), false);
             let initial = first.next().await.unwrap();
-            assert_eq!(initial.value, Some(previous_value.clone()));
+            assert_eq!(initial.value, Some(Arc::new(previous_value.clone())));
             assert_eq!(initial.phase, CatalogLoadPhase::Refreshing);
             if matches!(
                 read_query,
@@ -2686,23 +2868,23 @@ mod tests {
             }
             entered.notified().await;
             let mut second = catalog.observe_catalog(read_query.clone(), false);
-            assert_eq!(second.next().await.unwrap().value, Some(previous_value));
+            assert_eq!(second.next().await.unwrap().value, Some(Arc::new(previous_value)));
             release.wait();
             for observation in [&mut first, &mut second] {
                 let completed = completed_snapshot(observation).await;
                 assert_eq!(completed.phase, CatalogLoadPhase::Ready);
                 assert_eq!(completed.freshness, CatalogFreshness::Fresh);
-                assert_eq!(completed.value, Some(refreshed_value.clone()));
+                assert_eq!(completed.value, Some(Arc::new(refreshed_value.clone())));
             }
             assert_eq!(request_count.load(std::sync::atomic::Ordering::SeqCst), 1);
             let mut forced = catalog.observe_catalog(read_query.clone(), true);
             assert_eq!(
                 forced.next().await.unwrap().value,
-                Some(refreshed_value.clone())
+                Some(Arc::new(refreshed_value.clone()))
             );
             let failure = forced.next().await.unwrap();
             assert_eq!(failure.phase, CatalogLoadPhase::Failed);
-            assert_eq!(failure.value, Some(refreshed_value.clone()));
+            assert_eq!(failure.value, Some(Arc::new(refreshed_value.clone())));
             assert_eq!(failure.knowledge, CatalogReadKnowledge::ObservedResponse);
             assert!(failure.error.is_some());
             drop(first);
@@ -2885,7 +3067,7 @@ mod tests {
                 },
             )))
             .chain(
-                [("builtin", false), ("library", true), ("source-a", false)].map(
+                [("builtin", true), ("library", true), ("source-a", true)].map(
                     |(provider, allow_dynamic_tracks)| {
                         (
                             "music/playlists/playlist_tracks",
@@ -3040,12 +3222,12 @@ mod tests {
         .await
         .unwrap();
         let mut observation = catalog.observe_catalog(query.clone(), false);
-        assert_eq!(observation.next().await.unwrap().value, Some(previous));
+        assert_eq!(observation.next().await.unwrap().value, Some(Arc::new(previous)));
         entered.notified().await;
         release.wait();
         let completed = completed_snapshot(&mut observation).await;
         assert_eq!(completed.phase, CatalogLoadPhase::Ready);
-        let confirmed = completed.value.unwrap();
+        let confirmed = Arc::unwrap_or_clone(completed.value.unwrap());
         drop(observation);
         drop(catalog);
         cache.shutdown().await.unwrap();
@@ -3188,8 +3370,8 @@ mod tests {
             .unwrap();
             let mut first = catalog.observe_catalog(query.clone(), false);
             let mut second = catalog.observe_catalog(query.clone(), false);
-            assert_eq!(first.next().await.unwrap().value, Some(old.clone()));
-            assert_eq!(second.next().await.unwrap().value, Some(old));
+            assert_eq!(first.next().await.unwrap().value, Some(Arc::new(old.clone())));
+            assert_eq!(second.next().await.unwrap().value, Some(Arc::new(old)));
             entered.notified().await;
             release.wait();
             let completed = completed_snapshot(&mut first).await;
@@ -3199,7 +3381,7 @@ mod tests {
                 Some(crate::domain::catalog::CatalogDataSource::Server)
             );
             assert_eq!(completed_snapshot(&mut second).await.value, completed.value);
-            let Some(CatalogValue::Tracks(tracks)) = &completed.value else {
+            let Some(CatalogValue::Tracks(tracks)) = completed.value.as_deref() else {
                 panic!("versions missing")
             };
             assert_eq!(tracks.len(), 2);
@@ -3211,7 +3393,7 @@ mod tests {
             let mut empty = catalog.observe_catalog(query.clone(), true);
             let replaced = completed_snapshot(&mut empty).await;
             assert_eq!(replaced.phase, CatalogLoadPhase::Ready);
-            assert_eq!(replaced.value, Some(CatalogValue::Tracks(Vec::new())));
+            assert_eq!(replaced.value, Some(Arc::new(CatalogValue::Tracks(Vec::new()))));
             let mut stale_first = catalog.observe_catalog(query.clone(), true);
             let mut stale_second = catalog.observe_catalog(query.clone(), true);
             assert_eq!(stale_first.next().await.unwrap().value, replaced.value);
@@ -3370,8 +3552,8 @@ mod tests {
         .unwrap();
         let mut first = catalog.observe_catalog(query.clone(), false);
         let mut second = catalog.observe_catalog(query.clone(), false);
-        assert_eq!(first.next().await.unwrap().value, Some(old.clone()));
-        assert_eq!(second.next().await.unwrap().value, Some(old));
+        assert_eq!(first.next().await.unwrap().value, Some(Arc::new(old.clone())));
+        assert_eq!(second.next().await.unwrap().value, Some(Arc::new(old)));
         entered.notified().await;
         release.wait();
         let completed = completed_snapshot(&mut first).await;
@@ -3381,7 +3563,7 @@ mod tests {
             Some(crate::domain::catalog::CatalogDataSource::Server)
         );
         assert_eq!(completed_snapshot(&mut second).await.value, completed.value);
-        let Some(CatalogValue::Search(results)) = &completed.value else {
+        let Some(CatalogValue::Search(results)) = completed.value.as_deref() else {
             panic!("track search missing")
         };
         assert_eq!(results.tracks.len(), 3);
@@ -3395,7 +3577,7 @@ mod tests {
         assert_eq!(replaced.phase, CatalogLoadPhase::Ready);
         assert_eq!(
             replaced.value,
-            Some(CatalogValue::Search(Default::default()))
+            Some(Arc::new(CatalogValue::Search(Default::default())))
         );
         drop(first);
         drop(second);
@@ -3532,13 +3714,13 @@ mod tests {
             .unwrap();
             let mut first = catalog.observe_catalog(query.clone(), false);
             let local = first.next().await.unwrap();
-            assert_eq!(local.value, Some(old));
+            assert_eq!(local.value, Some(Arc::new(old)));
             assert_eq!(local.freshness, CatalogFreshness::Fresh);
             entered.notified().await;
             release.wait();
             let ready = completed_snapshot(&mut first).await;
             assert_eq!(ready.phase, CatalogLoadPhase::Ready);
-            assert_eq!(ready.value, Some(updated.clone()));
+            assert_eq!(ready.value, Some(Arc::new(updated.clone())));
             assert_eq!(
                 ready.source,
                 Some(crate::domain::catalog::CatalogDataSource::Server)
@@ -3546,11 +3728,11 @@ mod tests {
             let mut failed = catalog.observe_catalog(query.clone(), true);
             let retained = completed_snapshot(&mut failed).await;
             assert_eq!(retained.phase, CatalogLoadPhase::Failed);
-            assert_eq!(retained.value, Some(updated.clone()));
+            assert_eq!(retained.value, Some(Arc::new(updated.clone())));
             let mut online_only = catalog.observe_catalog(query.clone(), true);
             let uncommitted = completed_snapshot(&mut online_only).await;
             assert_eq!(uncommitted.phase, CatalogLoadPhase::Ready);
-            assert_eq!(uncommitted.value, Some(unsupported));
+            assert_eq!(uncommitted.value, Some(Arc::new(unsupported)));
             assert!(uncommitted.cache_error.is_some());
             let retained_query = query.clone();
             cache
@@ -3579,7 +3761,7 @@ mod tests {
             let mut replacement = catalog.observe_catalog(query.clone(), true);
             let replaced = completed_snapshot(&mut replacement).await;
             assert_eq!(replaced.phase, CatalogLoadPhase::Ready);
-            assert_eq!(replaced.value, Some(empty.clone()));
+            assert_eq!(replaced.value, Some(Arc::new(empty.clone())));
             drop(first);
             drop(failed);
             drop(online_only);
@@ -3656,7 +3838,7 @@ mod tests {
         assert_eq!(completed.knowledge, CatalogReadKnowledge::ObservedResponse);
         assert_eq!(completed.freshness, CatalogFreshness::Fresh);
         let observed_at = completed.observed_at.unwrap();
-        let Some(CatalogValue::Search(results)) = completed.value else {
+        let Some(CatalogValue::Search(results)) = completed.value.as_deref().cloned() else {
             panic!("artist search response expected");
         };
         assert_eq!(results.artists.len(), 3);
@@ -3778,7 +3960,7 @@ mod tests {
         .await
         .unwrap();
         let mut observation = catalog.observe_catalog(query(), false);
-        assert_eq!(observation.next().await.unwrap().value, Some(value("Old")));
+        assert_eq!(observation.next().await.unwrap().value, Some(Arc::new(value("Old"))));
         entered.notified().await;
         let confirmed = serde_json::from_value(
             json!({"provider":"library","item_id":"007","name":"Confirmed","favorite":null}),
@@ -3793,7 +3975,7 @@ mod tests {
         assert_eq!(retired.phase, CatalogLoadPhase::Failed);
         assert_eq!(retired.knowledge, CatalogReadKnowledge::Partial);
         assert_eq!(retired.observed_at, None);
-        let Some(CatalogValue::Artist(artist)) = retired.value else {
+        let Some(CatalogValue::Artist(artist)) = retired.value.as_deref().cloned() else {
             panic!("confirmed readback missing")
         };
         assert_eq!(artist.media.name, "Confirmed");
@@ -3893,11 +4075,11 @@ mod tests {
         let mut second = catalog.observe_catalog(album_query.clone(), false);
         assert_eq!(
             first.next().await.unwrap().value,
-            Some(CatalogValue::Album(old.clone()))
+            Some(Arc::new(CatalogValue::Album(old.clone())))
         );
         assert_eq!(
             second.next().await.unwrap().value,
-            Some(CatalogValue::Album(old))
+            Some(Arc::new(CatalogValue::Album(old)))
         );
         entered.notified().await;
         let confirmed: Album = serde_json::from_value(json!({
@@ -3914,7 +4096,7 @@ mod tests {
             assert_eq!(retired.phase, CatalogLoadPhase::Failed);
             assert_eq!(retired.knowledge, CatalogReadKnowledge::Partial);
             assert_eq!(retired.observed_at, None);
-            let Some(CatalogValue::Album(album)) = retired.value else {
+            let Some(CatalogValue::Album(album)) = retired.value.as_deref().cloned() else {
                 panic!("confirmed album readback missing")
             };
             assert_eq!(album.media.name, "Confirmed album");
@@ -4203,8 +4385,8 @@ mod tests {
             .unwrap();
             let mut first = catalog.observe_catalog(query.clone(), false);
             let mut second = catalog.observe_catalog(query.clone(), false);
-            assert_eq!(first.next().await.unwrap().value, Some(value.clone()));
-            assert_eq!(second.next().await.unwrap().value, Some(value.clone()));
+            assert_eq!(first.next().await.unwrap().value, Some(Arc::new(value.clone())));
+            assert_eq!(second.next().await.unwrap().value, Some(Arc::new(value.clone())));
             entered.notified().await;
             assert_eq!(
                 catalog
@@ -4218,7 +4400,7 @@ mod tests {
                 let retired = completed_snapshot(updates).await;
                 assert_eq!(retired.phase, CatalogLoadPhase::Failed);
                 if should_fail_commit {
-                    assert_eq!(retired.value, Some(value.clone()));
+                    assert_eq!(retired.value, Some(Arc::new(value.clone())));
                 } else {
                     assert!(retired.value.is_none());
                 }
@@ -4364,8 +4546,8 @@ mod tests {
             .unwrap();
             let mut first = catalog.observe_catalog(read_query.clone(), false);
             let mut second = catalog.observe_catalog(read_query.clone(), false);
-            assert_eq!(first.next().await.unwrap().value, Some(old_value.clone()));
-            assert_eq!(second.next().await.unwrap().value, Some(old_value.clone()));
+            assert_eq!(first.next().await.unwrap().value, Some(Arc::new(old_value.clone())));
+            assert_eq!(second.next().await.unwrap().value, Some(Arc::new(old_value.clone())));
             entered.notified().await;
             {
                 let invalid = serde_json::from_value(json!({"media_type":if is_playlist { "playlist" } else { "track" },"provider":"library","item_id":"007","name":"Invalid","favorite":null,"external_ids":[["malformed"]]})).unwrap();
@@ -4399,7 +4581,7 @@ mod tests {
                     assert_eq!(retired.knowledge, CatalogReadKnowledge::Partial);
                     assert_eq!(retired.observed_at, None);
                 }
-                let item = match retired.value.unwrap() {
+                let item = match Arc::unwrap_or_clone(retired.value.unwrap()) {
                     CatalogValue::Track(item) => MediaItem::Track(item),
                     CatalogValue::Playlist(item) => MediaItem::Playlist(item),
                     CatalogValue::Item(item) => item,
@@ -4500,17 +4682,35 @@ mod tests {
         )
         .await
         .unwrap();
-        let first = with_request_priority(RequestPriority::Background, async {
-            catalog.inner.refresh(query(), false)
-        })
-        .await;
-        assert_eq!(first.changes.borrow().phase, CatalogLoadPhase::ReadingLocal);
-        let second = catalog.inner.refresh(query(), false);
-        assert!(Arc::ptr_eq(&first, &second));
-        assert_eq!(
-            first.group.effective_priority(),
-            RequestPriority::Foreground
-        );
+        for read_query in std::iter::once(query()).chain(
+            ["builtin", "library", "source-a"].map(|provider| CatalogQuery::PlaylistTracks {
+                provider: provider.into(),
+                item_id: MediaId("playlist".into()),
+                allow_dynamic_tracks: false,
+            }),
+        ) {
+            let first = with_request_priority(RequestPriority::Background, async {
+                catalog.inner.refresh(read_query.clone(), false)
+            })
+            .await;
+            assert_eq!(first.changes.borrow().phase, CatalogLoadPhase::ReadingLocal);
+            let second = catalog.inner.refresh(read_query.clone(), false);
+            assert!(Arc::ptr_eq(&first, &second));
+            assert_eq!(first.group.effective_priority(), RequestPriority::Foreground);
+            let forced = catalog.inner.refresh(read_query, true);
+            assert!(!Arc::ptr_eq(&first, &forced));
+            drop(second);
+            assert_eq!(first.changes.borrow().phase, CatalogLoadPhase::ReadingLocal);
+            drop((first, forced));
+        }
+        let dynamic_query = CatalogQuery::PlaylistTracks {
+            provider: "library".into(),
+            item_id: MediaId("playlist".into()),
+            allow_dynamic_tracks: true,
+        };
+        let first = catalog.inner.refresh(dynamic_query.clone(), false);
+        let second = catalog.inner.refresh(dynamic_query, false);
+        assert!(!Arc::ptr_eq(&first, &second));
         drop((first, second));
         cache.shutdown().await.unwrap();
     }
@@ -4548,7 +4748,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(first_local.value, Some(value("Old")));
+        assert_eq!(first_local.value, Some(Arc::new(value("Old"))));
         assert_eq!(first_local.phase, CatalogLoadPhase::Refreshing);
         let mut second = catalog.observe_catalog(query(), false);
         assert_eq!(
@@ -4559,7 +4759,7 @@ mod tests {
             .await
             .unwrap()
             .value,
-            Some(value("Old"))
+            Some(Arc::new(value("Old")))
         );
         entered.notified().await;
         let refreshes = catalog.inner.refreshes.lock().unwrap();
@@ -4580,7 +4780,7 @@ mod tests {
         release.wait();
         let completed = completed_snapshot(&mut second).await;
         assert_eq!(completed.phase, CatalogLoadPhase::Ready);
-        assert_eq!(completed.value, Some(value("Fresh")));
+        assert_eq!(completed.value, Some(Arc::new(value("Fresh"))));
         assert!(completed.observed_at.unwrap() > 100);
         assert!(second.next().await.is_none());
         drop(second);
@@ -4613,10 +4813,10 @@ mod tests {
         .await
         .unwrap();
         let mut updates = catalog.observe_catalog(query(), true);
-        assert_eq!(updates.next().await.unwrap().value, Some(value("Old")));
+        assert_eq!(updates.next().await.unwrap().value, Some(Arc::new(value("Old"))));
         let failed = updates.next().await.unwrap();
         assert_eq!(failed.phase, CatalogLoadPhase::Failed);
-        assert_eq!(failed.value, Some(value("Old")));
+        assert_eq!(failed.value, Some(Arc::new(value("Old"))));
         assert_eq!(failed.observed_at, Some(100));
         assert!(failed.error.is_some());
         drop(updates);
@@ -4790,6 +4990,68 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn sidebar_full_playlist_refresh_is_shared_with_details_and_retained_offline() {
+        use crate::application::repositories::{with_request_priority, RequestPriority};
+        let directory = tempfile::tempdir().unwrap();
+        let cache = cache(directory.path()).await;
+        let query = CatalogQuery::PlaylistTracks {
+            item_id: crate::domain::identifiers::MediaId("sidebar".into()),
+            provider: "library".into(),
+            allow_dynamic_tracks: false,
+        };
+        let response = json!((0..601).map(|position| json!({
+            "media_type":"track", "item_id":format!("track-{}", position % 3),
+            "provider":"library", "name":format!("Track {}", position % 3),
+            "duration":180, "position":position
+        })).collect::<Vec<_>>());
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let arrived = entered.clone();
+        let (release, gate) = std::sync::mpsc::channel();
+        let (client, worker) = crate::data::music_assistant::client::tests::server_with_request_handler(
+            vec![("music/playlists/playlist_tracks", response)], move |_| {
+                arrived.notify_one();
+                gate.recv_timeout(Duration::from_secs(5)).unwrap();
+            },
+        );
+        let catalog = CachedCatalog::new(Arc::new(client), cache.clone(), UserId("user".into()), Duration::ZERO).await.unwrap();
+        let sidebar = with_request_priority(RequestPriority::Background, async {
+            catalog.inner.refresh(query.clone(), false)
+        }).await;
+        tokio::time::timeout(Duration::from_secs(3), entered.notified()).await.unwrap();
+        let details = with_request_priority(RequestPriority::Foreground, async {
+            catalog.inner.refresh(query.clone(), false)
+        }).await;
+        let is_shared = Arc::ptr_eq(&sidebar, &details);
+        release.send(()).unwrap();
+        assert!(is_shared, "opening details duplicated the sidebar refresh");
+        let mut changes = details.changes.subscribe();
+        tokio::time::timeout(Duration::from_secs(5), async {
+            while changes.borrow_and_update().phase != CatalogLoadPhase::Ready {
+                changes.changed().await.unwrap();
+            }
+        }).await.unwrap();
+        let requests = worker.join().unwrap();
+        assert_eq!(requests.len(), 1);
+        assert_eq!(requests[0]["args"]["limit"], 0);
+        let offline = CachedCatalog::new(
+            Arc::new(crate::data::music_assistant::client::MusicAssistantClient::new("http://127.0.0.1:1", None)),
+            cache.clone(), UserId("user".into()), Duration::ZERO,
+        ).await.unwrap();
+        let Ok((_, cached)) = offline.inner.read_local(&query).await else { panic!("expected offline cache read") };
+        assert_eq!(cached.knowledge, CatalogReadKnowledge::ObservedResponse);
+        let Some(CatalogValue::Tracks(tracks)) = cached.value.as_deref().cloned() else { panic!("expected cached tracks") };
+        assert_eq!(tracks.len(), 601);
+        assert_eq!(tracks.iter().map(|track| u64::from(track.duration)).sum::<u64>(), 601 * 180);
+        assert_eq!(tracks[0].media.item_id, tracks[3].media.item_id);
+        assert_eq!(tracks[600].media.position, Some(600));
+        drop(offline);
+        drop(sidebar);
+        drop(details);
+        drop(catalog);
+        cache.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn completed_dynamic_radio_read_waits_past_cached_sample_and_rejects_refresh_failures() {
         use futures_util::FutureExt;
         for response in [
@@ -4854,7 +5116,7 @@ mod tests {
                 Some(crate::domain::catalog::CatalogDataSource::Cache)
             );
             assert_eq!(local.knowledge, CatalogReadKnowledge::ObservedResponse);
-            assert_eq!(local.value, Some(CatalogValue::Tracks(cached)));
+            assert_eq!(local.value, Some(Arc::new(CatalogValue::Tracks(cached))));
             let mut completed = Box::pin(catalog.load_catalog(query, true));
             tokio::time::timeout(Duration::from_secs(3), async {
                 tokio::select! {
@@ -4956,11 +5218,11 @@ mod tests {
             first.source,
             Some(crate::domain::catalog::CatalogDataSource::Server)
         );
-        assert_eq!(first.value, Some(value("Server")));
+        assert_eq!(first.value, Some(Arc::new(value("Server"))));
         assert_eq!(first.phase, CatalogLoadPhase::Refreshing);
         drop(guard);
         while let Some(snapshot) = updates.next().await {
-            assert_eq!(snapshot.value, Some(value("Server")));
+            assert_eq!(snapshot.value, Some(Arc::new(value("Server"))));
             assert_eq!(
                 snapshot.source,
                 Some(crate::domain::catalog::CatalogDataSource::Server)
@@ -5005,7 +5267,7 @@ mod tests {
         let mut updates = catalog.observe_catalog(query(), false);
         let completed = completed_snapshot(&mut updates).await;
         assert_eq!(completed.phase, CatalogLoadPhase::Ready);
-        assert_eq!(completed.value, Some(value("Server")));
+        assert_eq!(completed.value, Some(Arc::new(value("Server"))));
         assert_eq!(
             completed.source,
             Some(crate::domain::catalog::CatalogDataSource::Server)
@@ -5075,7 +5337,7 @@ mod tests {
                 completed.source,
                 Some(crate::domain::catalog::CatalogDataSource::Server)
             );
-            let CatalogValue::Artist(artist) = completed.value.unwrap() else {
+            let CatalogValue::Artist(artist) = Arc::unwrap_or_clone(completed.value.unwrap()) else {
                 panic!("expected artist")
             };
             assert_eq!(artist.media.name, "Server");
@@ -5109,7 +5371,7 @@ mod tests {
         let mut updates = catalog.observe_catalog(query(), false);
         let completed = completed_snapshot(&mut updates).await;
         assert_eq!(completed.phase, CatalogLoadPhase::Ready);
-        assert_eq!(completed.value, Some(value("Server")));
+        assert_eq!(completed.value, Some(Arc::new(value("Server"))));
         assert!(completed
             .cache_error
             .unwrap()
@@ -5187,7 +5449,7 @@ mod tests {
             assert_eq!(local.knowledge, CatalogReadKnowledge::Partial);
             assert_eq!(local.freshness, CatalogFreshness::Unknown);
             assert_eq!(local.observed_at, None);
-            let Some(CatalogValue::Artists(items)) = &local.value else {
+            let Some(CatalogValue::Artists(items)) = local.value.as_deref() else {
                 panic!("expected cached artists")
             };
             assert_eq!(items.len(), 1);
@@ -5198,7 +5460,7 @@ mod tests {
             if succeeds {
                 assert_eq!(refreshed.phase, CatalogLoadPhase::Ready);
                 assert_eq!(refreshed.knowledge, CatalogReadKnowledge::ObservedResponse);
-                assert_eq!(refreshed.value, Some(CatalogValue::Artists(Vec::new())));
+                assert_eq!(refreshed.value, Some(Arc::new(CatalogValue::Artists(Vec::new()))));
                 assert_eq!(refreshed.freshness, CatalogFreshness::Fresh);
                 assert!(refreshed.observed_at.is_some());
             } else {
@@ -5264,7 +5526,7 @@ mod tests {
             assert_eq!(local.knowledge, CatalogReadKnowledge::Partial);
             assert_eq!(local.freshness, CatalogFreshness::Unknown);
             assert_eq!(local.observed_at, None);
-            let Some(CatalogValue::Albums(items)) = &local.value else {
+            let Some(CatalogValue::Albums(items)) = local.value.as_deref() else {
                 panic!("expected partial albums")
             };
             assert_eq!(items.len(), 1);
@@ -5277,7 +5539,7 @@ mod tests {
                 assert_eq!(refreshed.source, Some(CatalogDataSource::Server));
                 assert_eq!(refreshed.knowledge, CatalogReadKnowledge::ObservedResponse);
                 assert_eq!(refreshed.freshness, CatalogFreshness::Fresh);
-                assert_eq!(refreshed.value, Some(CatalogValue::Albums(vec![])));
+                assert_eq!(refreshed.value, Some(Arc::new(CatalogValue::Albums(vec![]))));
             } else {
                 assert_eq!(refreshed.phase, CatalogLoadPhase::Failed);
                 assert_eq!(refreshed.value, local.value);
@@ -5327,7 +5589,7 @@ mod tests {
         .unwrap();
         let mut updates = catalog.observe_catalog(query(), false);
         let local = updates.next().await.unwrap();
-        assert_eq!(local.value, Some(value("Old")));
+        assert_eq!(local.value, Some(Arc::new(value("Old"))));
         assert_eq!(local.knowledge, CatalogReadKnowledge::Partial);
         assert_eq!(local.observed_at, None);
         let failed = updates.next().await.unwrap();
@@ -5387,7 +5649,7 @@ mod tests {
             let second = owner.session(client, Some(UserId("user".into())), 3);
             let mut updates = second.observe_catalog(query(), false);
             let local = updates.next().await.unwrap();
-            assert_eq!(local.value, Some(value("Old")));
+            assert_eq!(local.value, Some(Arc::new(value("Old"))));
             assert_eq!(local.phase, CatalogLoadPhase::Refreshing);
             assert_eq!(local.freshness, CatalogFreshness::Stale);
             entered.notified().await;

@@ -79,6 +79,24 @@ class MediaLibraryBrowserTest {
 
     // Discover categories preserve the Flutter feed order and expose their actual media.
     @Test
+    fun paginationMaterializesOnlyRequestedTracksAndReusesUnchangedProjections() {
+        val tracks = JSONArray().apply { repeat(200) { put(item("track-$it", "track")) } }
+        userData = JSONObject().put("is_loading_favorites", false).put("favorites", JSONObject().put("tracks", tracks))
+        val first = checkNotNull(browser.onGetChildren(session, controller, "favorites:tracks", 0, 5, null).get(5, TimeUnit.SECONDS).value)
+        assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "track-0", "track-1", "track-2"), first.map { it.mediaMetadata.title.toString() })
+        assertEquals(LibraryResult.RESULT_SUCCESS, browser.onGetItem(session, controller, "browse:track:test:track-0").get().resultCode)
+        assertEquals(LibraryResult.RESULT_ERROR_BAD_VALUE, browser.onGetItem(session, controller, "browse:track:test:track-50").get().resultCode)
+        val repeated = checkNotNull(browser.onGetChildren(session, controller, "favorites:tracks", 0, 5, null).get(5, TimeUnit.SECONDS).value)
+        assertEquals(first.map { it.mediaId }, repeated.map { it.mediaId })
+        first.zip(repeated).forEach { (previous, current) -> assertSame(previous, current) }
+        val second = checkNotNull(browser.onGetChildren(session, controller, "favorites:tracks", 1, 5, null).get(5, TimeUnit.SECONDS).value)
+        assertEquals((3..7).map { "track-$it" }, second.map { it.mediaMetadata.title.toString() })
+        browser.startPlayback(first.first().mediaId).get()
+        assertEquals(200, JSONObject(requests.single().arguments).getJSONObject("request").getJSONArray("mediaItems").length())
+        assertTrue(checkNotNull(browser.onGetChildren(session, controller, "favorites:tracks", Int.MAX_VALUE, Int.MAX_VALUE, null).get(5, TimeUnit.SECONDS).value).isEmpty())
+    }
+
+    @Test
     fun failedSearchWithoutCachedValuesReportsAnErrorInsteadOfEmptySuccess() {
         val search = queryFixture.search { _, _ -> error("Offline search") }
         val searchBrowser = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), search = search) {
@@ -189,7 +207,7 @@ class MediaLibraryBrowserTest {
         val favorites = JSONObject()
         categories.forEach { (category, mediaType) -> favorites.put(category, JSONArray().put(item(category, mediaType))) }
         userData = JSONObject().put("is_loading_favorites", false).put("favorites", favorites)
-        browser.onCoreEvent("user_data_changed")
+        browser.onCoreEvent("user_data_favorites_changed")
         pending.zip(categories).forEach { (result, category) ->
             assertEquals(category.first, checkNotNull(result.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
         }
@@ -203,7 +221,7 @@ class MediaLibraryBrowserTest {
 
         val playlist = item("private", "playlist").put("provider", "library").put("is_loading_tracks", true)
         userData = JSONObject().put("is_loading_playlists", false).put("playlists", JSONArray().put(playlist))
-        browser.onCoreEvent("user_data_changed")
+        browser.onCoreEvent("user_data_metadata_changed")
         val mediaId = checkNotNull(metadata.get(5, TimeUnit.SECONDS).value).single().mediaId
         val tracks = browser.onGetChildren(session, controller, mediaId, 0, Int.MAX_VALUE, null)
         assertThrows(TimeoutException::class.java) { tracks.get(100, TimeUnit.MILLISECONDS) }
@@ -221,7 +239,7 @@ class MediaLibraryBrowserTest {
         val pending = browser.onGetChildren(session, controller, "favorites:tracks", 0, Int.MAX_VALUE, null)
         assertThrows(TimeoutException::class.java) { pending.get(100, TimeUnit.MILLISECONDS) }
         userData = JSONObject().put("is_loading_favorites", false)
-        browser.onCoreEvent("user_data_changed")
+        browser.onCoreEvent("user_data_metadata_changed")
         assertTrue(checkNotNull(pending.get(5, TimeUnit.SECONDS).value).isEmpty())
     }
 

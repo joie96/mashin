@@ -152,6 +152,7 @@ pub(crate) async fn load_catalog(
                 } => {
                     arguments["force_refresh"] = json!(force_refresh);
                     arguments["allow_dynamic_tracks"] = json!(allow_dynamic_tracks);
+                    arguments["limit"] = json!(0);
                 }
                 CatalogQuery::SimilarArtists { limit, .. } => arguments["limit"] = json!(limit),
                 CatalogQuery::SimilarTracks {
@@ -269,13 +270,14 @@ mod tests {
 
     #[tokio::test]
     async fn playlist_tracks_preserve_occurrences_flags_and_reject_mixed_media() {
+        let tracks = (0..601).map(|index| json!({
+            "media_type":"track","provider":"source-a","item_id":"same",
+            "name":"Track","position":index * 3 + 1
+        })).collect::<Vec<_>>();
         let (client, worker) = server(vec![
             (
                 "music/playlists/playlist_tracks",
-                json!([
-                    {"media_type":"track","provider":"source-a","item_id":"same","name":"Track","position":1},
-                    {"media_type":"track","provider":"source-a","item_id":"same","name":"Track","position":4}
-                ]),
+                json!(tracks),
             ),
             (
                 "music/playlists/playlist_tracks",
@@ -302,9 +304,10 @@ mod tests {
                 let CatalogValue::Tracks(tracks) = result.unwrap() else {
                     panic!("playlist tracks missing")
                 };
-                assert_eq!(tracks.len(), 2);
+                assert_eq!(tracks.len(), 601);
                 assert_eq!(tracks[0].media.position, Some(1));
                 assert_eq!(tracks[1].media.position, Some(4));
+                assert_eq!(tracks[600].media.position, Some(1801));
                 assert_eq!(tracks[0].media.item_id, tracks[1].media.item_id);
             }
         }
@@ -312,7 +315,7 @@ mod tests {
         for (request, flag) in requests.iter().zip([false, true]) {
             assert_eq!(
                 request["args"],
-                json!({"item_id":"playlist","provider_instance_id_or_domain":"library","force_refresh":flag,"allow_dynamic_tracks":flag})
+                json!({"item_id":"playlist","provider_instance_id_or_domain":"library","force_refresh":flag,"allow_dynamic_tracks":flag,"limit":0})
             );
         }
     }

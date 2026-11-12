@@ -13,7 +13,7 @@ use sha2::{Digest, Sha256};
 use super::database::{validate_directory, validate_file, CacheError};
 use super::storage::CacheStorage;
 
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub(super) struct ImageFileRecord {
     pub(super) content_hash: String,
     pub(super) mime_type: String,
@@ -37,9 +37,15 @@ struct FileLeaseState {
     released: Condvar,
 }
 
+#[derive(Clone)]
 pub(super) struct ImageFileRead {
     pub(super) payload: ImagePayload,
-    pub(super) lease: ImageFileLease,
+    pub(super) lease: Arc<ImageFileLease>,
+}
+
+pub(super) struct PendingImageFileRead {
+    record: ImageFileRecord,
+    lease: ImageFileLease,
 }
 
 pub(super) struct ImageFileLease {
@@ -79,6 +85,29 @@ impl Drop for ImageFileLease {
     }
 }
 
+impl PendingImageFileRead {
+    pub(super) fn record(&self) -> ImageFileRecord {
+        self.record.clone()
+    }
+
+    /// Validates off the index thread while retaining the admitted file handle.
+    pub(super) fn validate(mut self) -> Result<Option<ImageFileRead>, CacheError> {
+        let mut bytes = Vec::new();
+        self.lease.file.as_mut().ok_or(CacheError::WorkerUnavailable)?.read_to_end(&mut bytes)?;
+        if bytes.len() as u64 != self.record.byte_size
+            || format!("{:x}", Sha256::digest(&bytes)) != self.record.content_hash
+        {
+            return Ok(None);
+        }
+        match ImagePayload::decode_bytes(bytes) {
+            Ok(payload) if payload.mime_type == self.record.mime_type => {
+                Ok(Some(ImageFileRead { payload, lease: Arc::new(self.lease) }))
+            }
+            _ => Ok(None),
+        }
+    }
+}
+
 impl ImageFiles {
     // Blocking capability initialization; the caller retains exclusive runtime ownership.
     pub(super) fn open(storage: &CacheStorage) -> Result<Self, CacheError> {
@@ -115,6 +144,10 @@ impl ImageFiles {
     // Complete content is published before its caller may commit an index reference.
     pub(super) fn publish(&self, bytes: Vec<u8>) -> Result<ImageFileRecord, CacheError> {
         let payload = ImagePayload::decode_bytes(bytes)?;
+        self.publish_payload(payload)
+    }
+
+    pub(super) fn publish_payload(&self, payload: ImagePayload) -> Result<ImageFileRecord, CacheError> {
         let record = ImageFileRecord {
             content_hash: format!("{:x}", Sha256::digest(&payload.bytes)),
             mime_type: payload.mime_type.to_owned(),
@@ -172,6 +205,14 @@ impl ImageFiles {
         &self,
         record: &ImageFileRecord,
     ) -> Result<Option<ImageFileRead>, CacheError> {
+        self.open_leased(record)?.map(PendingImageFileRead::validate).transpose().map(Option::flatten)
+    }
+
+    /// Admits a handle without reading or decoding its payload on the index owner.
+    pub(super) fn open_leased(
+        &self,
+        record: &ImageFileRecord,
+    ) -> Result<Option<PendingImageFileRead>, CacheError> {
         let name = image_file_name(&record.content_hash, &record.mime_type)?;
         match validate_directory(&self.path.join(&record.content_hash[..2])) {
             Ok(()) => {}
@@ -181,7 +222,7 @@ impl ImageFiles {
             Err(error) => return Err(error),
         }
         validate_file(&self.path.join(&name))?;
-        let mut file = match self.directory.open(&name) {
+        let file = match self.directory.open(&name) {
             Ok(file) => file,
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(None),
             Err(error) => return Err(error.into()),
@@ -189,31 +230,11 @@ impl ImageFiles {
         if file.metadata()?.len() != record.byte_size {
             return Ok(None);
         }
-        let mut bytes = Vec::new();
-        file.read_to_end(&mut bytes)?;
-        if bytes.len() as u64 != record.byte_size
-            || format!("{:x}", Sha256::digest(&bytes)) != record.content_hash
-        {
-            return Ok(None);
-        }
-        match ImagePayload::decode_bytes(bytes) {
-            Ok(payload) if payload.mime_type == record.mime_type => {
-                *self
-                    .leases
-                    .state
-                    .active
-                    .lock()
-                    .unwrap_or_else(|error| error.into_inner()) += 1;
-                Ok(Some(ImageFileRead {
-                    payload,
-                    lease: ImageFileLease {
-                        file: Some(file),
-                        leases: self.leases.clone(),
-                    },
-                }))
-            }
-            _ => Ok(None),
-        }
+        *self.leases.state.active.lock().unwrap_or_else(|error| error.into_inner()) += 1;
+        Ok(Some(PendingImageFileRead {
+            record: record.clone(),
+            lease: ImageFileLease { file: Some(file), leases: self.leases.clone() },
+        }))
     }
 
     pub(super) fn file_leases(&self) -> ImageFileLeases {
