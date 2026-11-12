@@ -11,7 +11,7 @@ class SettingsScreenMobile extends StatelessWidget {
     required this.cacheContent,
     required this.musicAssistantUrl,
     required this.onLogout,
-    required this.isDarkTheme,
+    required this.themePreference,
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
@@ -22,9 +22,9 @@ class SettingsScreenMobile extends StatelessWidget {
   final Widget cacheContent;
   final String musicAssistantUrl;
   final VoidCallback? onLogout;
-  final bool isDarkTheme;
+  final ThemePreference themePreference;
   final LogLevelPreference logLevel;
-  final ValueChanged<bool> onThemeChanged;
+  final ValueChanged<ThemePreference> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final bool shouldShowMultiDeviceButton;
   final ValueChanged<bool> onMultiDeviceButtonVisibilityChanged;
@@ -80,7 +80,8 @@ class SettingsScreenMobile extends StatelessWidget {
                 const SizedBox(height: 32),
                 Text('Theme', style: Theme.of(context).textTheme.titleMedium),
                 const SizedBox(height: 12),
-                SegmentedButton<bool>(
+                SegmentedButton<ThemePreference>(
+                  showSelectedIcon: false,
                   style: ButtonStyle(
                     backgroundColor: WidgetStateProperty.resolveWith<Color?>(
                       (Set<WidgetState> states) =>
@@ -92,20 +93,25 @@ class SettingsScreenMobile extends StatelessWidget {
                       colors.textPrimary,
                     ),
                   ),
-                  segments: const <ButtonSegment<bool>>[
-                    ButtonSegment<bool>(
-                      value: false,
+                  segments: const <ButtonSegment<ThemePreference>>[
+                    ButtonSegment<ThemePreference>(
+                      value: ThemePreference.light,
                       icon: Icon(Icons.light_mode_outlined),
                       label: Text('Hell'),
                     ),
-                    ButtonSegment<bool>(
-                      value: true,
+                    ButtonSegment<ThemePreference>(
+                      value: ThemePreference.dark,
                       icon: Icon(Icons.dark_mode_outlined),
                       label: Text('Dunkel'),
                     ),
+                    ButtonSegment<ThemePreference>(
+                      value: ThemePreference.system,
+                      icon: Icon(Icons.brightness_auto_outlined),
+                      label: Text('System'),
+                    ),
                   ],
-                  selected: <bool>{isDarkTheme},
-                  onSelectionChanged: (Set<bool> selection) =>
+                  selected: <ThemePreference>{themePreference},
+                  onSelectionChanged: (Set<ThemePreference> selection) =>
                       onThemeChanged(selection.first),
                 ),
                 const SizedBox(height: 24),

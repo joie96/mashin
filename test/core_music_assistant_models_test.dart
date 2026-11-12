@@ -2305,7 +2305,7 @@ void main() {
   test('settings wire contains only online session preferences', () {
     expect(
       const SessionSettingsUpdate(
-        isDarkTheme: true,
+        themePreference: ThemePreference.dark,
         logLevel: LogLevelPreference.info,
         shouldShowMultiDeviceButton: false,
       ).toJson(),
@@ -2315,6 +2315,19 @@ void main() {
         'shouldShowMultiDeviceButton': false,
       },
     );
+  });
+
+  test('all native theme preferences roundtrip without losing system mode', () {
+    for (final preference in ThemePreference.values) {
+      final update = SessionSettingsUpdate(
+        themePreference: preference,
+        logLevel: LogLevelPreference.info,
+      );
+      final settings = SessionSettings.fromJson(update.toJson());
+      expect(update.toJson()['theme'], preference.name);
+      expect(settings.themePreference, preference);
+    }
+    expect(SessionSettings.fromJson({}).themePreference, ThemePreference.dark);
   });
 
   test('artwork requires an observed proxy ID or inline content', () {

@@ -2971,20 +2971,22 @@ class CacheUsage {
   }
 }
 
+enum ThemePreference { dark, light, system }
+
 class SessionSettingsUpdate {
   const SessionSettingsUpdate({
-    required this.isDarkTheme,
+    required this.themePreference,
     required this.logLevel,
     this.shouldShowMultiDeviceButton = true,
   });
 
-  final bool isDarkTheme;
+  final ThemePreference themePreference;
   final LogLevelPreference logLevel;
 
   final bool shouldShowMultiDeviceButton;
 
   Map<String, Object?> toJson() => <String, Object?>{
-    'theme': isDarkTheme ? 'dark' : 'light',
+    'theme': themePreference.name,
     'logLevel': logLevel.name,
     'shouldShowMultiDeviceButton': shouldShowMultiDeviceButton,
   };
@@ -2995,7 +2997,7 @@ class SessionSettings {
     required this.musicAssistantUrl,
     required this.username,
     required this.audioProfile,
-    required this.isDarkTheme,
+    required this.themePreference,
     required this.logLevel,
     this.shouldShowMultiDeviceButton = true,
     this.preferredProvider,
@@ -3004,7 +3006,7 @@ class SessionSettings {
   final String musicAssistantUrl;
   final String? username;
   final String audioProfile;
-  final bool isDarkTheme;
+  final ThemePreference themePreference;
   final LogLevelPreference logLevel;
   final PreferredProvider? preferredProvider;
   final bool shouldShowMultiDeviceButton;
@@ -3014,7 +3016,11 @@ class SessionSettings {
       musicAssistantUrl: json['musicAssistantUrl'] as String? ?? '',
       username: json['username'] as String?,
       audioProfile: json['audioProfile'] as String? ?? '',
-      isDarkTheme: json['theme'] != 'light',
+      themePreference: switch (json['theme']) {
+        'light' => ThemePreference.light,
+        'system' => ThemePreference.system,
+        _ => ThemePreference.dark,
+      },
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
       shouldShowMultiDeviceButton:
           json['shouldShowMultiDeviceButton'] as bool? ?? true,

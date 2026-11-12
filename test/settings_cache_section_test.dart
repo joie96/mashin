@@ -49,7 +49,7 @@ Widget _settings(_CacheBridge bridge) => SettingsEditor(
   coreBridge: bridge,
   musicAssistantUrl: 'https://music.example',
   settings: const SessionSettingsUpdate(
-    isDarkTheme: false,
+    themePreference: ThemePreference.light,
     logLevel: LogLevelPreference.info,
   ),
   onSave: (_) async {},
@@ -57,6 +57,133 @@ Widget _settings(_CacheBridge bridge) => SettingsEditor(
 );
 
 void main() {
+  for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
+    for (final preference in ThemePreference.values) {
+      testWidgets('$platform $preference handles system brightness changes', (
+        tester,
+      ) async {
+        final dispatcher = tester.platformDispatcher;
+        addTearDown(dispatcher.clearPlatformBrightnessTestValue);
+        final observed = <Brightness>[];
+        dispatcher.platformBrightnessTestValue = Brightness.light;
+        await tester.pumpWidget(
+          MaterialApp(
+            themeMode: AppTheme.modeFor(preference),
+            theme: AppTheme.light().copyWith(platform: platform),
+            darkTheme: AppTheme.dark().copyWith(platform: platform),
+            home: Builder(
+              builder: (context) {
+                observed.add(Theme.of(context).brightness);
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        );
+        expect(
+          observed.last,
+          preference == ThemePreference.dark
+              ? Brightness.dark
+              : Brightness.light,
+        );
+        dispatcher.platformBrightnessTestValue = Brightness.dark;
+        await tester.pumpAndSettle();
+        expect(
+          observed.last,
+          preference == ThemePreference.light
+              ? Brightness.light
+              : Brightness.dark,
+        );
+        dispatcher.platformBrightnessTestValue = Brightness.light;
+        await tester.pumpAndSettle();
+        expect(
+          observed.last,
+          preference == ThemePreference.dark
+              ? Brightness.dark
+              : Brightness.light,
+        );
+      });
+    }
+  }
+
+  for (final width in [320.0, 390.0, 1200.0]) {
+    testWidgets('all theme options persist at width $width', (tester) async {
+      tester.view.physicalSize = Size(width, 1000);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final saved = <SessionSettingsUpdate>[];
+      await tester.pumpWidget(
+        _app(
+          SettingsEditor(
+            coreBridge: _CacheBridge(),
+            musicAssistantUrl: 'https://music.example',
+            settings: const SessionSettingsUpdate(
+              themePreference: ThemePreference.dark,
+              logLevel: LogLevelPreference.warn,
+              shouldShowMultiDeviceButton: false,
+            ),
+            onSave: (update) async => saved.add(update),
+            onLogout: () async {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      for (final entry in {
+        'System': ThemePreference.system,
+        'Hell': ThemePreference.light,
+        'Dunkel': ThemePreference.dark,
+      }.entries) {
+        if (width == 1200) {
+          final dropdown = find.byType(
+            DropdownButtonFormField<ThemePreference>,
+          );
+          expect(find.byType(SegmentedButton<ThemePreference>), findsNothing);
+          await tester.ensureVisible(dropdown);
+          await tester.tap(dropdown);
+          await tester.pumpAndSettle();
+          for (final icon in [
+            Icons.light_mode_outlined,
+            Icons.dark_mode_outlined,
+            Icons.brightness_auto_outlined,
+          ]) {
+            expect(find.byIcon(icon), findsWidgets);
+          }
+          await tester.tap(find.text(entry.key).last);
+        } else {
+          await tester.ensureVisible(find.text(entry.key));
+          await tester.tap(find.text(entry.key));
+        }
+        await tester.pumpAndSettle();
+        expect(saved.last.themePreference, entry.value);
+        expect(saved.last.toJson()['theme'], entry.value.name);
+        expect(saved.last.logLevel, LogLevelPreference.warn);
+        expect(saved.last.shouldShowMultiDeviceButton, isFalse);
+        if (width == 1200) {
+          expect(
+            tester
+                .state<FormFieldState<ThemePreference>>(
+                  find.byType(DropdownButtonFormField<ThemePreference>),
+                )
+                .value,
+            entry.value,
+          );
+        } else {
+          expect(
+            tester
+                .widget<SegmentedButton<ThemePreference>>(
+                  find.byType(SegmentedButton<ThemePreference>),
+                )
+                .selected,
+            {entry.value},
+          );
+        }
+        expect(tester.takeException(), isNull);
+      }
+      expect(saved, hasLength(3));
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
   test('cache usage decodes the native byte-count contract strictly', () {
     final usage = CacheUsage.fromJson({'metadataBytes': 60, 'imageBytes': 72});
     expect(usage.metadataBytes, 60);
@@ -86,7 +213,7 @@ void main() {
             coreBridge: bridge,
             musicAssistantUrl: 'https://music.example',
             settings: const SessionSettingsUpdate(
-              isDarkTheme: false,
+              themePreference: ThemePreference.light,
               logLevel: LogLevelPreference.info,
             ),
             onSave: (_) async {},

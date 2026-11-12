@@ -227,6 +227,42 @@ impl ConfigurationFile {
 pub(crate) mod tests {
     use super::*;
 
+    #[test]
+    fn theme_preferences_survive_configuration_reopen() {
+        let directory = TestDirectory::new();
+        let path = directory.0.join("configuration.json");
+        let mut session = session_config();
+        for (theme, wire_value) in [
+            (ThemePreference::Light, "light"),
+            (ThemePreference::Dark, "dark"),
+            (ThemePreference::System, "system"),
+        ] {
+            let update: crate::domain::settings::SessionSettingsUpdate =
+                serde_json::from_value(serde_json::json!({
+                    "theme": wire_value,
+                    "logLevel": "info",
+                    "shouldShowMultiDeviceButton": false,
+                }))
+                .unwrap();
+            assert_eq!(update.theme, theme);
+            session.theme = update.theme;
+            let preferences = SessionPreferences::from(&session);
+            ConfigurationFile::with_path(path.clone())
+                .save(&preferences)
+                .unwrap();
+            let restored = ConfigurationFile::with_path(path.clone())
+                .load()
+                .unwrap()
+                .unwrap();
+            assert_eq!(restored, preferences);
+            assert_eq!(
+                serde_json::to_value(&restored).unwrap()["theme"],
+                wire_value
+            );
+            assert_eq!(restored.into_session(None).theme, theme);
+        }
+    }
+
     pub(crate) struct TestDirectory(pub(crate) PathBuf);
 
     impl TestDirectory {

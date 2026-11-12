@@ -38,7 +38,7 @@ class SettingsScreenDesktop extends StatelessWidget {
     super.key,
     required this.cacheContent,
     required this.musicAssistantUrl,
-    required this.isDarkTheme,
+    required this.themePreference,
     required this.logLevel,
     required this.onThemeChanged,
     required this.onLogLevelChanged,
@@ -48,9 +48,9 @@ class SettingsScreenDesktop extends StatelessWidget {
 
   final Widget cacheContent;
   final String musicAssistantUrl;
-  final bool isDarkTheme;
+  final ThemePreference themePreference;
   final LogLevelPreference logLevel;
-  final ValueChanged<bool> onThemeChanged;
+  final ValueChanged<ThemePreference> onThemeChanged;
   final ValueChanged<LogLevelPreference> onLogLevelChanged;
   final bool shouldShowMultiDeviceButton;
   final ValueChanged<bool> onMultiDeviceButtonVisibilityChanged;
@@ -100,7 +100,7 @@ class SettingsScreenDesktop extends StatelessWidget {
                     _DesktopSettingsForm(
                       cacheContent: cacheContent,
                       musicAssistantUrl: musicAssistantUrl,
-                      isDarkTheme: isDarkTheme,
+                      themePreference: themePreference,
                       onThemeChanged: onThemeChanged,
                       shouldShowMultiDeviceButton: shouldShowMultiDeviceButton,
                       onMultiDeviceButtonVisibilityChanged:
@@ -168,7 +168,7 @@ class _DesktopSettingsForm extends StatelessWidget {
   const _DesktopSettingsForm({
     required this.cacheContent,
     required this.musicAssistantUrl,
-    required this.isDarkTheme,
+    required this.themePreference,
     required this.onThemeChanged,
     required this.shouldShowMultiDeviceButton,
     required this.onMultiDeviceButtonVisibilityChanged,
@@ -176,14 +176,19 @@ class _DesktopSettingsForm extends StatelessWidget {
 
   final Widget cacheContent;
   final String musicAssistantUrl;
-  final bool isDarkTheme;
-  final ValueChanged<bool> onThemeChanged;
+  final ThemePreference themePreference;
+  final ValueChanged<ThemePreference> onThemeChanged;
   final bool shouldShowMultiDeviceButton;
   final ValueChanged<bool> onMultiDeviceButtonVisibilityChanged;
 
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    const themeOptions = [
+      (ThemePreference.light, 'Hell', Icons.light_mode_outlined),
+      (ThemePreference.dark, 'Dunkel', Icons.dark_mode_outlined),
+      (ThemePreference.system, 'System', Icons.brightness_auto_outlined),
+    ];
     return ListView(
       padding: const EdgeInsets.only(top: 12, bottom: 32),
       children: <Widget>[
@@ -210,36 +215,41 @@ class _DesktopSettingsForm extends StatelessWidget {
           title: 'Darstellung',
           child: _DesktopSettingRow(
             title: 'Theme',
-            description: 'Wähle die helle oder dunkle Darstellung der App.',
+            description: '',
             control: SizedBox(
               width: _desktopSettingsControlWidth,
-              child: SegmentedButton<bool>(
-                style: ButtonStyle(
-                  backgroundColor: WidgetStateProperty.resolveWith<Color?>(
-                    (Set<WidgetState> states) =>
-                        states.contains(WidgetState.selected)
-                        ? colors.selection
-                        : colors.bgSecondary,
-                  ),
-                  foregroundColor: WidgetStatePropertyAll<Color>(
-                    colors.textPrimary,
-                  ),
+              child: DropdownButtonFormField<ThemePreference>(
+                key: ValueKey(themePreference),
+                initialValue: themePreference,
+                isExpanded: true,
+                isDense: true,
+                decoration: _desktopSettingsFieldDecoration(
+                  colors: colors,
+                  icon: switch (themePreference) {
+                    ThemePreference.light => Icons.light_mode_outlined,
+                    ThemePreference.dark => Icons.dark_mode_outlined,
+                    ThemePreference.system => Icons.brightness_auto_outlined,
+                  },
                 ),
-                segments: const <ButtonSegment<bool>>[
-                  ButtonSegment<bool>(
-                    value: false,
-                    icon: Icon(Icons.light_mode_outlined),
-                    label: Text('Hell'),
-                  ),
-                  ButtonSegment<bool>(
-                    value: true,
-                    icon: Icon(Icons.dark_mode_outlined),
-                    label: Text('Dunkel'),
-                  ),
+                selectedItemBuilder: (context) => [
+                  for (final option in themeOptions) Text(option.$2),
                 ],
-                selected: <bool>{isDarkTheme},
-                onSelectionChanged: (Set<bool> selection) =>
-                    onThemeChanged(selection.first),
+                items: [
+                  for (final option in themeOptions)
+                    DropdownMenuItem(
+                      value: option.$1,
+                      child: Row(
+                        children: [
+                          Icon(option.$3, size: 18),
+                          const SizedBox(width: 12),
+                          Text(option.$2),
+                        ],
+                      ),
+                    ),
+                ],
+                onChanged: (value) {
+                  if (value != null) onThemeChanged(value);
+                },
               ),
             ),
           ),

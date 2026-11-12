@@ -82,6 +82,7 @@ pub(crate) struct RemoteOutputConfig {
 pub(crate) enum ThemePreference {
     Dark,
     Light,
+    System,
 }
 
 impl Default for ThemePreference {

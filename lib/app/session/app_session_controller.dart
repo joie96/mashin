@@ -56,7 +56,7 @@ class AppSessionController extends ChangeNotifier {
   bool _isAuthenticated = false;
   bool _isLoading = true;
   bool _isDisposed = false;
-  bool _isDarkTheme = true;
+  ThemePreference _themePreference = ThemePreference.dark;
   bool _shouldShowMultiDeviceButton = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
 
@@ -66,7 +66,7 @@ class AppSessionController extends ChangeNotifier {
   String get audioProfile => _audioProfile;
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
-  bool get isDarkTheme => _isDarkTheme;
+  ThemePreference get themePreference => _themePreference;
   bool get shouldShowMultiDeviceButton => _shouldShowMultiDeviceButton;
   LogLevelPreference get logLevel => _logLevel;
   PreferredProvider? get preferredProvider =>
@@ -144,14 +144,14 @@ class AppSessionController extends ChangeNotifier {
     notifyListeners();
   }
 
-  Future<void> setDarkTheme(bool isDarkTheme) async {
-    if (isDarkTheme == _isDarkTheme) {
+  Future<void> setThemePreference(ThemePreference themePreference) async {
+    if (themePreference == _themePreference) {
       return;
     }
 
     await saveSessionSettings(
       SessionSettingsUpdate(
-        isDarkTheme: isDarkTheme,
+        themePreference: themePreference,
         logLevel: _logLevel,
         shouldShowMultiDeviceButton: _shouldShowMultiDeviceButton,
       ),
@@ -160,7 +160,7 @@ class AppSessionController extends ChangeNotifier {
 
   Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
     await coreBridge.saveSessionSettings(settings);
-    _isDarkTheme = settings.isDarkTheme;
+    _themePreference = settings.themePreference;
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     notifyListeners();
@@ -196,7 +196,7 @@ class AppSessionController extends ChangeNotifier {
     MediaItemImage.configureProxyBaseUrl(_baseUrl);
     _username = settings.username;
     _audioProfile = settings.audioProfile;
-    _isDarkTheme = settings.isDarkTheme;
+    _themePreference = settings.themePreference;
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     PreferredProviderController.instance.initialize(

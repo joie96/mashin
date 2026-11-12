@@ -442,9 +442,9 @@ class _AppShellState extends State<AppShell> {
                         _DesktopTopBar(
                           canGoBack: _canGoBack,
                           onBack: _onBack,
-                          onToggleTheme: _toggleTheme,
+                          onThemeChanged: _setThemePreference,
                           onLogout: _logout,
-                          isDarkTheme: widget.session.isDarkTheme,
+                          themePreference: widget.session.themePreference,
                           searchController: _desktopSearchController,
                           onSearchChanged: _onDesktopSearchChanged,
                           onSearchSubmitted: _submitDesktopSearch,
@@ -1028,8 +1028,8 @@ class _AppShellState extends State<AppShell> {
     if (confirmed) await controller.removePlaylist(playlist);
   }
 
-  void _toggleTheme() {
-    unawaited(widget.session.setDarkTheme(!widget.session.isDarkTheme));
+  void _setThemePreference(ThemePreference preference) {
+    unawaited(widget.session.setThemePreference(preference));
   }
 
   Future<void> _logout() async {
@@ -1274,9 +1274,9 @@ class _QueueUiScope extends StatelessWidget {
 class _DesktopTopBar extends StatelessWidget {
   final bool canGoBack;
   final VoidCallback onBack;
-  final VoidCallback onToggleTheme;
+  final ValueChanged<ThemePreference> onThemeChanged;
   final Future<void> Function() onLogout;
-  final bool isDarkTheme;
+  final ThemePreference themePreference;
   final TextEditingController searchController;
   final ValueChanged<String> onSearchChanged;
   final ValueChanged<String> onSearchSubmitted;
@@ -1285,9 +1285,9 @@ class _DesktopTopBar extends StatelessWidget {
   const _DesktopTopBar({
     required this.canGoBack,
     required this.onBack,
-    required this.onToggleTheme,
+    required this.onThemeChanged,
     required this.onLogout,
-    required this.isDarkTheme,
+    required this.themePreference,
     required this.searchController,
     required this.onSearchChanged,
     required this.onSearchSubmitted,
@@ -1392,16 +1392,19 @@ class _DesktopTopBar extends StatelessWidget {
           const SizedBox(width: 14),
           IconButton(
             tooltip: 'Theme wechseln',
-            onPressed: onToggleTheme,
+            onPressed: () => onThemeChanged(switch (themePreference) {
+              ThemePreference.light => ThemePreference.dark,
+              ThemePreference.dark => ThemePreference.system,
+              ThemePreference.system => ThemePreference.light,
+            }),
             padding: EdgeInsets.zero,
             constraints: const BoxConstraints(minWidth: 40, minHeight: 40),
             visualDensity: VisualDensity.standard,
-            icon: Icon(
-              isDarkTheme
-                  ? Icons.light_mode_outlined
-                  : Icons.dark_mode_outlined,
-              size: 18,
-            ),
+            icon: Icon(switch (themePreference) {
+              ThemePreference.light => Icons.light_mode_outlined,
+              ThemePreference.dark => Icons.dark_mode_outlined,
+              ThemePreference.system => Icons.brightness_auto_outlined,
+            }, size: 18),
           ),
           const SizedBox(width: 12),
           Builder(
@@ -2833,7 +2836,7 @@ class _MashinAppState extends State<MashinApp> {
   void initState() {
     super.initState();
     _session = widget.session;
-    _themeMode = _session.isDarkTheme ? ThemeMode.dark : ThemeMode.light;
+    _themeMode = AppTheme.modeFor(_session.themePreference);
     _appRouter = AppRouter(_session);
     _session.addListener(_onSessionChanged);
   }
@@ -2848,7 +2851,7 @@ class _MashinAppState extends State<MashinApp> {
 
   void _onSessionChanged() {
     setState(() {
-      _themeMode = _session.isDarkTheme ? ThemeMode.dark : ThemeMode.light;
+      _themeMode = AppTheme.modeFor(_session.themePreference);
     });
   }
 

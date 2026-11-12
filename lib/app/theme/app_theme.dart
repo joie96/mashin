@@ -1,7 +1,15 @@
 import 'package:flutter/material.dart';
 
+import '../../features/core/core_models.dart';
+
 class AppTheme {
   const AppTheme._();
+
+  static ThemeMode modeFor(ThemePreference preference) => switch (preference) {
+    ThemePreference.dark => ThemeMode.dark,
+    ThemePreference.light => ThemeMode.light,
+    ThemePreference.system => ThemeMode.system,
+  };
 
   static const Duration tooltipWaitDuration = Duration(milliseconds: 600);
 

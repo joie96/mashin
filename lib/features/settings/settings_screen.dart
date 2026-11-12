@@ -19,7 +19,7 @@ class SettingsScreen extends StatelessWidget {
     coreBridge: session.coreBridge,
     musicAssistantUrl: session.baseUrl,
     settings: SessionSettingsUpdate(
-      isDarkTheme: session.isDarkTheme,
+      themePreference: session.themePreference,
       logLevel: session.logLevel,
       shouldShowMultiDeviceButton: session.shouldShowMultiDeviceButton,
     ),
@@ -85,7 +85,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
 
   // Ordered settings persistence.
   void _saveSettings(SessionSettingsUpdate update) {
-    if (update.isDarkTheme == _settings.isDarkTheme &&
+    if (update.themePreference == _settings.themePreference &&
         update.logLevel == _settings.logLevel &&
         update.shouldShowMultiDeviceButton ==
             _settings.shouldShowMultiDeviceButton) {
@@ -109,11 +109,11 @@ class _SettingsEditorState extends State<SettingsEditor> {
     });
   }
 
-  void _saveTheme(bool value) {
+  void _saveTheme(ThemePreference value) {
     setState(
       () => _saveSettings(
         SessionSettingsUpdate(
-          isDarkTheme: value,
+          themePreference: value,
           logLevel: _settings.logLevel,
           shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
         ),
@@ -125,7 +125,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
     setState(
       () => _saveSettings(
         SessionSettingsUpdate(
-          isDarkTheme: _settings.isDarkTheme,
+          themePreference: _settings.themePreference,
           logLevel: value,
           shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
         ),
@@ -137,7 +137,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
     setState(
       () => _saveSettings(
         SessionSettingsUpdate(
-          isDarkTheme: _settings.isDarkTheme,
+          themePreference: _settings.themePreference,
           logLevel: _settings.logLevel,
           shouldShowMultiDeviceButton: value,
         ),
@@ -211,7 +211,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
             cacheContent: _buildCacheContent(),
             musicAssistantUrl: widget.musicAssistantUrl,
             onLogout: _isLoggingOut ? null : _logout,
-            isDarkTheme: _settings.isDarkTheme,
+            themePreference: _settings.themePreference,
             logLevel: _settings.logLevel,
             onThemeChanged: _saveTheme,
             onLogLevelChanged: _saveLogLevel,
@@ -222,7 +222,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
         : SettingsScreenDesktop(
             cacheContent: _buildCacheContent(),
             musicAssistantUrl: widget.musicAssistantUrl,
-            isDarkTheme: _settings.isDarkTheme,
+            themePreference: _settings.themePreference,
             logLevel: _settings.logLevel,
             onThemeChanged: _saveTheme,
             onLogLevelChanged: _saveLogLevel,
