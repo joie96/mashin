@@ -1,12 +1,246 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/session/preferred_provider_controller.dart';
 import 'package:mashin/features/artist/artist_detail_controller.dart';
+import 'package:mashin/features/artist/artist_detail_section.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/core/core_query_scope.dart';
 
 void main() {
+  for (final isSliver in [false, true]) {
+    for (final hasCachedTracks in [false, true]) {
+      testWidgets(
+        'section failure offers retry sliver=$isSliver cached=$hasCachedTracks',
+        (tester) async {
+          final bridge = _ArtistBridge(deferSections: true);
+          final controller = ArtistDetailController(
+            coreBridge: bridge,
+            itemId: '007',
+            providerInstanceIdOrDomain: 'library',
+          );
+          addTearDown(() async {
+            controller.dispose();
+            await bridge.updates.close();
+          });
+          final loading = controller.loadArtist();
+          bridge.emit('007', 'Artist');
+          var sectionBuilds = 0;
+          final section = ArtistDetailSection(
+            controller: controller,
+            kind: CatalogQueryKind.artistTopTracks,
+            title: 'Top Tracks',
+            isSliver: isSliver,
+            builder: (_) {
+              sectionBuilds++;
+              final content = Text(
+                controller.isLoadingTopTracks
+                    ? 'Loading'
+                    : controller.topTracks.isEmpty
+                    ? 'No tracks'
+                    : 'Cached tracks',
+              );
+              return isSliver ? SliverToBoxAdapter(child: content) : content;
+            },
+          );
+          await tester.pumpWidget(
+            MaterialApp(
+              home: Scaffold(
+                body: isSliver ? CustomScrollView(slivers: [section]) : section,
+              ),
+            ),
+          );
+          if (hasCachedTracks) {
+            bridge.emitSection('ArtistTopTracks', 'Tracks', '007', 'library', [
+              {
+                'provider': 'library',
+                'item_id': 'cached',
+                'name': 'Cached track',
+              },
+            ]);
+            await tester.pumpAndSettle();
+          }
+          final previousBuilds = sectionBuilds;
+          (controller.topTracksListenable as ChangeNotifier).notifyListeners();
+          await tester.pump();
+          expect(sectionBuilds, greaterThan(previousBuilds));
+          bridge.trackRequests['library']!.completeError(StateError('timeout'));
+          await tester.pumpAndSettle();
+          expect(
+            controller.hasSectionError(CatalogQueryKind.artistTopTracks),
+            isTrue,
+          );
+          expect(
+            find.text(
+              hasCachedTracks
+                  ? 'Aktualisieren fehlgeschlagen.'
+                  : 'Laden fehlgeschlagen.',
+            ),
+            findsOneWidget,
+          );
+          expect(find.text('No tracks'), findsNothing);
+          if (hasCachedTracks) {
+            expect(find.text('Cached tracks'), findsOneWidget);
+          }
+          await tester.tap(find.byTooltip('Top Tracks erneut laden'));
+          await tester.pumpAndSettle();
+          expect(find.text('Laden fehlgeschlagen.'), findsNothing);
+          expect(
+            find.text(hasCachedTracks ? 'Cached tracks' : 'Loading'),
+            findsOneWidget,
+          );
+          bridge.trackRequests['library']!.complete([]);
+          bridge.albumRequests['library']!.complete([]);
+          bridge.similarRequests['library']!.complete([]);
+          bridge.metadata.complete(controller.artist!);
+          await tester.pumpAndSettle();
+          await loading;
+          expect(find.text('No tracks'), findsOneWidget);
+          expect(find.byTooltip('Top Tracks erneut laden'), findsNothing);
+        },
+      );
+    }
+  }
+
+  test(
+    'returning to selected provider restarts interrupted cached refreshes',
+    () async {
+      PreferredProviderController.instance.initialize(
+        preferredProvider: null,
+        persist: (_) async {},
+      );
+      addTearDown(PreferredProviderController.instance.reset);
+      final bridge = _ArtistBridge(deferSections: true);
+      final controller = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: '007',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadArtist();
+      bridge.emit(
+        '007',
+        'Artist',
+        mappings: [
+          for (final source in ['a', 'b'])
+            {
+              'provider_domain': 'source',
+              'provider_instance': 'source-$source',
+              'item_id': 'artist-$source',
+              'available': true,
+            },
+        ],
+      );
+      bridge.metadata.complete(controller.artist!);
+      await Future<void>.delayed(Duration.zero);
+      await controller.selectProvider(
+        controller.sectionProvider.mappings.firstWhere(
+          (mapping) => mapping.providerInstance == 'source-b',
+        ),
+      );
+      await loading;
+      for (final (query, value) in [
+        ('ArtistAlbums', 'Albums'),
+        ('ArtistTopTracks', 'Tracks'),
+        ('SimilarArtists', 'Artists'),
+      ]) {
+        bridge.emitSection(
+          query,
+          value,
+          'artist-b',
+          'source-b',
+          [],
+          limit: query == 'SimilarArtists' ? 25 : null,
+        );
+      }
+      expect(controller.isLoadingSections, isFalse);
+      await controller.setPageVisible(false);
+      expect(
+        bridge.canceledRequests,
+        containsAll(['albums:source-b', 'tracks:source-b', 'similar:source-b']),
+      );
+      final returning = controller.setPageVisible(true);
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.sectionProvider.selectedProvider, 'source-b');
+      expect(bridge.albumRequestCount, 3);
+      bridge.albumRequests['source-b']!.complete([]);
+      bridge.trackRequests['source-b']!.complete([]);
+      bridge.similarRequests['source-b']!.complete([]);
+      await returning;
+    },
+  );
+
+  test(
+    'failed top tracks retry independently of pending artist sections',
+    () async {
+      final bridge = _ArtistBridge(deferSections: true);
+      final controller = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: '007',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      final loading = controller.loadArtist();
+      bridge.emit('007', 'Artist');
+      await Future<void>.delayed(Duration.zero);
+      final pendingAlbums = bridge.albumRequests['library']!;
+      final pendingSimilar = bridge.similarRequests['library']!;
+      bridge.trackRequests['library']!.completeError(StateError('timeout'));
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.isLoadingTopTracks, isFalse);
+      expect(controller.hasObservedTopTracks, isFalse);
+      expect(
+        controller.hasSectionError(CatalogQueryKind.artistTopTracks),
+        isTrue,
+      );
+      expect(controller.isLoadingAlbums, isTrue);
+      expect(controller.isLoadingSimilarArtists, isTrue);
+
+      final retry = controller.retrySection(CatalogQueryKind.artistTopTracks);
+      expect(controller.isLoadingTopTracks, isTrue);
+      expect(
+        controller.hasSectionError(CatalogQueryKind.artistTopTracks),
+        isFalse,
+      );
+      expect(bridge.albumRequests['library'], same(pendingAlbums));
+      expect(bridge.similarRequests['library'], same(pendingSimilar));
+      expect(bridge.canceledRequests, isEmpty);
+      bridge.trackRequests['library']!.complete([]);
+      await retry;
+      expect(controller.isLoadingTopTracks, isFalse);
+      expect(controller.hasObservedTopTracks, isTrue);
+      expect(
+        controller.hasSectionError(CatalogQueryKind.artistTopTracks),
+        isFalse,
+      );
+      expect(controller.topTracks, isEmpty);
+      pendingAlbums.complete([
+        Album.fromJson({
+          'provider': 'library',
+          'item_id': 'album',
+          'name': 'Album',
+        }),
+      ]);
+      pendingSimilar.complete([]);
+      bridge.metadata.complete(controller.artist!);
+      await loading;
+      expect(controller.albums.single.name, 'Album');
+      expect(controller.hasObservedSimilarArtists, isTrue);
+      expect(
+        controller.hasSectionError(CatalogQueryKind.similarArtists),
+        isFalse,
+      );
+    },
+  );
+
   test(
     'late cached albums reproject top track years without waiting for refresh',
     () async {
@@ -243,22 +477,7 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(bridge.albumRequests.containsKey('source-a'), isTrue);
       expect(bridge.metadata.isCompleted, isFalse);
-      bridge.emitSection('ArtistAlbums', 'Albums', 'artist-a', 'source-a', []);
-      bridge.emitSection(
-        'ArtistTopTracks',
-        'Tracks',
-        'artist-a',
-        'source-a',
-        [],
-      );
-      bridge.emitSection(
-        'SimilarArtists',
-        'Artists',
-        'artist-a',
-        'source-a',
-        [],
-        limit: 25,
-      );
+      expect(controller.isLoadingSections, isTrue);
       final selected = controller.sectionProvider.mappings.firstWhere(
         (mapping) => mapping.providerInstance == 'source-b',
       );
@@ -266,6 +485,12 @@ void main() {
       await Future<void>.delayed(Duration.zero);
       expect(controller.sectionProvider.selectedProvider, 'source-b');
       expect(controller.artist?.provider, 'library');
+      expect(
+        bridge.canceledRequests,
+        containsAll(['albums:source-a', 'tracks:source-a', 'similar:source-a']),
+      );
+      await switching;
+      expect(bridge.trackRequests['source-b']!.isCompleted, isFalse);
       bridge.albumRequests['source-a']!.complete([
         Album.fromJson({
           'item_id': 'old',
@@ -305,12 +530,20 @@ void main() {
       bridge.albumRequests['source-b']!.completeError(StateError('offline'));
       bridge.trackRequests['source-b']!.completeError(StateError('offline'));
       bridge.similarRequests['source-b']!.completeError(StateError('offline'));
-      await switching;
-      bridge.metadata.completeError(StateError('offline'));
+      bridge.metadata.complete(
+        Artist.fromJson({
+          'item_id': '007',
+          'provider': 'library',
+          'name': 'Refreshed',
+          'provider_mappings': mappings,
+        }),
+      );
       await loading;
       expect(controller.albums.single.name, 'Cached B');
-      expect(controller.artist?.name, 'Cached');
+      expect(controller.artist?.name, 'Refreshed');
       expect(controller.artist?.provider, 'library');
+      expect(controller.sectionProvider.selectedProvider, 'source-b');
+      expect(bridge.albumRequestCount, 2);
     },
   );
 
@@ -526,6 +759,7 @@ class _ArtistBridge implements MashinCoreBridgeApi {
   final albumRequests = <String, Completer<List<Album>>>{};
   final trackRequests = <String, Completer<List<Track>>>{};
   final similarRequests = <String, Completer<List<Artist>>>{};
+  final canceledRequests = <String>[];
 
   @override
   Stream<Map<String, dynamic>> get events => updates.stream;
@@ -616,15 +850,24 @@ class _ArtistBridge implements MashinCoreBridgeApi {
   }) {
     albumRequestCount++;
     if (deferSections) {
-      return (albumRequests[provider] = Completer<List<Album>>()).future;
+      return _defer(
+        'albums',
+        provider,
+        albumRequests[provider] = Completer<List<Album>>(),
+      );
     }
     return Future.value([]);
   }
 
   @override
   Future<List<Track>> getArtistTopTracks(String itemId, String provider) {
-    if (deferSections)
-      return (trackRequests[provider] = Completer<List<Track>>()).future;
+    if (deferSections) {
+      return _defer(
+        'tracks',
+        provider,
+        trackRequests[provider] = Completer<List<Track>>(),
+      );
+    }
     return Future.value([
       Track(
         itemId: 'track',
@@ -642,10 +885,21 @@ class _ArtistBridge implements MashinCoreBridgeApi {
     String provider, {
     int limit = 25,
   }) {
-    if (deferSections)
-      return (similarRequests[provider] = Completer<List<Artist>>()).future;
+    if (deferSections) {
+      return _defer(
+        'similar',
+        provider,
+        similarRequests[provider] = Completer<List<Artist>>(),
+      );
+    }
     return Future.value([]);
   }
+
+  Future<T> _defer<T>(String kind, String provider, Completer<T> request) =>
+      CoreQueryScope.current!.execute(
+        () => request.future,
+        onCancel: () => canceledRequests.add('$kind:$provider'),
+      );
 
   @override
   void log(LogLevelPreference level, String category, String message) {}

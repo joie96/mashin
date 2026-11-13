@@ -12,6 +12,7 @@ import '../shared/widgets/media_row_section_mobile.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
+import 'artist_detail_section.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
 import '../shared/widgets/detail_title_mobile.dart';
 import '../shared/detail_page_lifecycle.dart';
@@ -320,17 +321,22 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: MediaRowSectionMobile<Album>(
+              child: ArtistDetailSection(
+                controller: _controller,
+                kind: CatalogQueryKind.artistAlbums,
                 title: 'Veröffentlichungen',
-                isLoading: _controller.isLoadingAlbums,
-                items: _controller.albums,
-                emptyText: 'Keine Veröffentlichungen gefunden.',
-                showAlbumArtist: false,
-                coreBridge: widget.coreBridge,
-                coreEvents: widget.coreEvents,
-                onItemTap: widget.onOpenAlbum,
-                onSelectionMenuTap: (List<Album> items) =>
-                    unawaited(_showSelectionMenu(items)),
+                builder: (context) => MediaRowSectionMobile<Album>(
+                  title: 'Veröffentlichungen',
+                  isLoading: _controller.isLoadingAlbums,
+                  items: _controller.albums,
+                  emptyText: 'Keine Veröffentlichungen gefunden.',
+                  showAlbumArtist: false,
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
+                  onItemTap: widget.onOpenAlbum,
+                  onSelectionMenuTap: (List<Album> items) =>
+                      unawaited(_showSelectionMenu(items)),
+                ),
               ),
             ),
           ),
@@ -338,33 +344,44 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: MediaRowSectionMobile<Artist>(
+              child: ArtistDetailSection(
+                controller: _controller,
+                kind: CatalogQueryKind.similarArtists,
                 title: 'Ähnliche Interpreten',
-                isLoading: _controller.isLoadingSimilarArtists,
-                items: _controller.similarArtists,
-                emptyText: 'Keine ähnlichen Interpreten gefunden.',
-                coreBridge: widget.coreBridge,
-                coreEvents: widget.coreEvents,
-                onItemTap: widget.onOpenArtist,
-                onSelectionMenuTap: (List<Artist> items) =>
-                    unawaited(_showSelectionMenu(items)),
+                builder: (context) => MediaRowSectionMobile<Artist>(
+                  title: 'Ähnliche Interpreten',
+                  isLoading: _controller.isLoadingSimilarArtists,
+                  items: _controller.similarArtists,
+                  emptyText: 'Keine ähnlichen Interpreten gefunden.',
+                  coreBridge: widget.coreBridge,
+                  coreEvents: widget.coreEvents,
+                  onItemTap: widget.onOpenArtist,
+                  onSelectionMenuTap: (List<Artist> items) =>
+                      unawaited(_showSelectionMenu(items)),
+                ),
               ),
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 32)),
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
-            sliver: MediaTableSectionMobile<Track>(
+            sliver: ArtistDetailSection(
+              controller: _controller,
+              kind: CatalogQueryKind.artistTopTracks,
               title: 'Top Tracks',
-              isLoading: _controller.isLoadingTopTracks,
-              items: _controller.topTracks,
-              emptyText: 'Keine Top Tracks gefunden.',
-              maxItemsPerPage: 0,
-              coreBridge: widget.coreBridge,
-              coreEvents: widget.coreEvents,
-              onRowTap: (Track item, int index) => _showItemMenu(item),
-              onSelectionMenuTap: (List<Track> items) =>
-                  unawaited(_showSelectionMenu(items)),
+              isSliver: true,
+              builder: (context) => MediaTableSectionMobile<Track>(
+                title: 'Top Tracks',
+                isLoading: _controller.isLoadingTopTracks,
+                items: _controller.topTracks,
+                emptyText: 'Keine Top Tracks gefunden.',
+                maxItemsPerPage: 0,
+                coreBridge: widget.coreBridge,
+                coreEvents: widget.coreEvents,
+                onRowTap: (Track item, int index) => _showItemMenu(item),
+                onSelectionMenuTap: (List<Track> items) =>
+                    unawaited(_showSelectionMenu(items)),
+              ),
             ),
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 12)),
@@ -478,7 +495,7 @@ class _ArtistDetailPageMobileState extends State<ArtistDetailPageMobile>
               : DetailProviderSwitcher(
                   selection: _controller.sectionProvider,
                   item: artist,
-                  isLoading: _controller.isLoadingSections,
+                  isLoading: _controller.isSelectingProvider,
                   onSelected: _controller.selectProvider,
                 ),
         ),

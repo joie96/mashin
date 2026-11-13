@@ -13,6 +13,7 @@ import '../shared/widgets/media_row_section_desktop.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
 import '../shared/widgets/media_image.dart';
 import 'artist_detail_controller.dart';
+import 'artist_detail_section.dart';
 import '../shared/widgets/detail_provider_switcher.dart';
 import '../shared/detail_page_lifecycle.dart';
 
@@ -348,9 +349,11 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(24, 12, 24, 0),
             sliver: SliverToBoxAdapter(
-              child: ListenableBuilder(
-                listenable: _controller.albumsListenable,
-                builder: (BuildContext context, Widget? child) =>
+              child: ArtistDetailSection(
+                controller: _controller,
+                kind: CatalogQueryKind.artistAlbums,
+                title: 'Veröffentlichungen',
+                builder: (BuildContext context) =>
                     MediaRowSectionDesktop<Album>(
                       title: 'Veröffentlichungen',
                       isLoading: _controller.isLoadingAlbums,
@@ -377,9 +380,11 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 0),
             sliver: SliverToBoxAdapter(
-              child: ListenableBuilder(
-                listenable: _controller.similarArtistsListenable,
-                builder: (BuildContext context, Widget? child) =>
+              child: ArtistDetailSection(
+                controller: _controller,
+                kind: CatalogQueryKind.similarArtists,
+                title: 'Ähnliche Interpreten',
+                builder: (BuildContext context) =>
                     MediaRowSectionDesktop<Artist>(
                       title: 'Ähnliche Interpreten',
                       isLoading: _controller.isLoadingSimilarArtists,
@@ -409,9 +414,11 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
           SliverPadding(
             padding: const EdgeInsets.fromLTRB(24, 24, 24, 24),
             sliver: SliverToBoxAdapter(
-              child: ListenableBuilder(
-                listenable: _controller.topTracksListenable,
-                builder: (BuildContext context, Widget? child) =>
+              child: ArtistDetailSection(
+                controller: _controller,
+                kind: CatalogQueryKind.artistTopTracks,
+                title: 'Toplieder',
+                builder: (BuildContext context) =>
                     MediaTableSectionDesktop<Track>(
                       title: 'Toplieder',
                       isLoading: _controller.isLoadingTopTracks,
@@ -548,7 +555,8 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                                     child: DetailProviderSwitcher(
                                       selection: _controller.sectionProvider,
                                       item: artist,
-                                      isLoading: _controller.isLoadingSections,
+                                      isLoading:
+                                          _controller.isSelectingProvider,
                                       onSelected: _controller.selectProvider,
                                     ),
                                   ),

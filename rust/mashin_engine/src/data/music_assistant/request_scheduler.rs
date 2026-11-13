@@ -37,20 +37,21 @@ struct Inner {
 struct State {
     next_id: u64,
     active: usize,
-    background_active: usize,
     startup_leases: usize,
     read_groups: HashMap<u64, RequestPriority>,
+    optional_read_groups: HashSet<u64>,
     jobs: HashMap<String, Job>,
 }
 
 struct Job {
     id: u64,
     priority: RequestPriority,
+    is_optional: bool,
     queued_at: Instant,
     subscribers: BTreeMap<u64, oneshot::Sender<Response>>,
     read_groups: HashSet<u64>,
     operation: Option<Operation>,
-    running: Option<(bool, tokio::task::AbortHandle)>,
+    running: Option<tokio::task::AbortHandle>,
 }
 
 struct Subscription {
@@ -104,9 +105,48 @@ impl ReadGroup {
         self.inner.state.lock().unwrap().read_groups[&self.id]
     }
 
+    #[cfg(test)]
+    pub(crate) fn is_network_response_required(&self) -> bool {
+        !self
+            .inner
+            .state
+            .lock()
+            .unwrap()
+            .optional_read_groups
+            .contains(&self.id)
+    }
+
     // A repository refresh propagates its group through mapping and all associated technical reads.
     pub(crate) async fn scope<T>(&self, operation: impl Future<Output = T>) -> T {
         READ_GROUP_ID.scope(self.id, operation).await
+    }
+
+    // Reserve capacity before the local read races the first network request.
+    pub(crate) fn reserve_interactive_lane(&self) {
+        self.inner
+            .state
+            .lock()
+            .expect("request scheduler lock poisoned")
+            .optional_read_groups
+            .insert(self.id);
+    }
+
+    // Missing local data makes even an already queued or running refresh required.
+    pub(crate) fn require_network_response(&self) {
+        let mut state = self
+            .inner
+            .state
+            .lock()
+            .expect("request scheduler lock poisoned");
+        state.optional_read_groups.remove(&self.id);
+        for job in state
+            .jobs
+            .values_mut()
+            .filter(|job| job.read_groups.contains(&self.id))
+        {
+            job.is_optional = false;
+        }
+        dispatch(&self.inner, &mut state);
     }
 
     pub(crate) fn promote_to_current_priority(&self) {
@@ -140,6 +180,7 @@ impl Drop for ReadGroup {
             .lock()
             .expect("request scheduler lock poisoned");
         state.read_groups.remove(&self.id);
+        state.optional_read_groups.remove(&self.id);
         for job in state.jobs.values_mut() {
             job.read_groups.remove(&self.id);
         }
@@ -229,6 +270,7 @@ impl RequestScheduler {
             state.next_id += 1;
             let subscriber_id = state.next_id;
             let group_id = READ_GROUP_ID.try_with(|id| *id).ok();
+            let is_optional = group_id.is_some_and(|id| state.optional_read_groups.contains(&id));
             let priority = group_id
                 .and_then(|id| state.read_groups.get(&id).copied())
                 .unwrap_or_else(current_priority)
@@ -236,6 +278,7 @@ impl RequestScheduler {
             let job = state.jobs.entry(key.clone()).or_insert_with(|| Job {
                 id: subscriber_id,
                 priority,
+                is_optional,
                 queued_at: Instant::now(),
                 subscribers: BTreeMap::new(),
                 read_groups: HashSet::new(),
@@ -243,6 +286,7 @@ impl RequestScheduler {
                 running: None,
             });
             job.priority = job.priority.max(priority);
+            job.is_optional &= is_optional;
             if let Some(group_id) = group_id {
                 job.read_groups.insert(group_id);
             }
@@ -272,20 +316,23 @@ impl RequestScheduler {
 // Scheduling and completion keep at most one non-interactive request in flight.
 fn dispatch(inner: &Arc<Inner>, state: &mut State) {
     while state.active < 2 {
+        let has_non_interactive_read = state.jobs.values().any(|job| {
+            job.running.is_some() && (job.is_optional || job.priority < RequestPriority::Icon)
+        });
         let candidate = state
             .jobs
             .iter()
             .filter(|(_, job)| {
                 job.operation.is_some()
                     && (job.priority != RequestPriority::Background || state.startup_leases == 0)
-                    && (job.priority >= RequestPriority::Icon || state.background_active == 0)
+                    && ((!job.is_optional && job.priority >= RequestPriority::Icon)
+                        || !has_non_interactive_read)
             })
-            .max_by_key(|(_, job)| (job.priority, std::cmp::Reverse(job.id)))
+            .max_by_key(|(_, job)| (!job.is_optional, job.priority, std::cmp::Reverse(job.id)))
             .map(|(key, _)| key.clone());
         let Some(key) = candidate else { break };
         let job = state.jobs.get_mut(&key).expect("queued request exists");
         let operation = job.operation.take().expect("queued request has operation");
-        let is_background = job.priority < RequestPriority::Icon;
         let priority = job.priority;
         let queued_at = job.queued_at;
         let command = key
@@ -299,7 +346,6 @@ fn dispatch(inner: &Arc<Inner>, state: &mut State) {
             job_id: job.id,
         };
         state.active += 1;
-        state.background_active += usize::from(is_background);
         let task = tokio::spawn(async move {
             let started = Instant::now();
             let wait_ms = queued_at.elapsed().as_millis();
@@ -314,7 +360,7 @@ fn dispatch(inner: &Arc<Inner>, state: &mut State) {
             ));
             running.finish(Some(response));
         });
-        job.running = Some((is_background, task.abort_handle()));
+        job.running = Some(task.abort_handle());
     }
 }
 
@@ -323,9 +369,8 @@ fn remove_job(state: &mut State, key: &str, job_id: u64) -> Option<Job> {
         return None;
     }
     let job = state.jobs.remove(key)?;
-    if let Some((is_background, _)) = &job.running {
+    if job.running.is_some() {
         state.active -= 1;
-        state.background_active -= usize::from(*is_background);
     }
     Some(job)
 }
@@ -383,7 +428,7 @@ impl Drop for Subscription {
         job.subscribers.remove(&self.subscriber_id);
         if job.subscribers.is_empty() {
             if let Some(job) = remove_job(&mut state, &self.key, self.job_id) {
-                if let Some((_, task)) = job.running {
+                if let Some(task) = job.running {
                     task.abort();
                 }
             }
@@ -395,6 +440,250 @@ impl Drop for Subscription {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cached_refreshes_reserve_capacity_until_a_network_response_is_required() {
+        for required_group in 0..2 {
+            let scheduler = Arc::new(RequestScheduler::default());
+            let mut requests = Vec::new();
+            let mut groups = Vec::new();
+            let mut starts = Vec::new();
+            for key in ["cached-albums", "cached-top-tracks"] {
+                let group = scheduler.create_read_group();
+                group.reserve_interactive_lane();
+                let owner = scheduler.clone();
+                let request_group = group.clone();
+                let (started, start) = oneshot::channel();
+                requests.push(tokio::spawn(async move {
+                    request_group
+                        .scope(owner.execute(key.into(), async move {
+                            started.send(()).unwrap();
+                            std::future::pending::<Result<Value, HttpCommandError>>().await
+                        }))
+                        .await
+                }));
+                groups.push(group);
+                starts.push(start);
+            }
+            tokio::time::timeout(std::time::Duration::from_secs(2), &mut starts[0])
+                .await
+                .unwrap()
+                .unwrap();
+            groups[1].promote_to_current_priority();
+            tokio::task::yield_now().await;
+            assert_eq!(scheduler.inner.state.lock().unwrap().active, 1);
+            assert!(matches!(
+                starts[1].try_recv(),
+                Err(oneshot::error::TryRecvError::Empty)
+            ));
+            assert_eq!(
+                tokio::time::timeout(
+                    std::time::Duration::from_secs(2),
+                    scheduler.execute_bytes("visible-cover".into(), async { Ok(vec![1, 2, 3]) })
+                )
+                .await
+                .unwrap()
+                .unwrap()
+                .as_ref(),
+                &[1, 2, 3]
+            );
+            assert_eq!(scheduler.inner.state.lock().unwrap().active, 1);
+            groups[required_group].require_network_response();
+            tokio::time::timeout(std::time::Duration::from_secs(2), &mut starts[1])
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(scheduler.inner.state.lock().unwrap().active, 2);
+            for request in requests {
+                request.abort();
+                assert!(request.await.unwrap_err().is_cancelled());
+            }
+            assert_eq!(scheduler.pending_read_count(), 0);
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn required_consumer_reuses_optional_work_and_releases_the_reserved_lane() {
+        let scheduler = Arc::new(RequestScheduler::default());
+        let shared_group = scheduler.create_read_group();
+        shared_group.reserve_interactive_lane();
+        let owner = scheduler.clone();
+        let (started, start) = oneshot::channel();
+        let (release, hold) = oneshot::channel();
+        let first = tokio::spawn(async move {
+            shared_group
+                .scope(owner.execute("shared".into(), async move {
+                    started.send(()).unwrap();
+                    hold.await.unwrap();
+                    Ok(serde_json::json!(["fresh"]))
+                }))
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), start)
+            .await
+            .unwrap()
+            .unwrap();
+        let queued_group = scheduler.create_read_group();
+        queued_group.reserve_interactive_lane();
+        let owner = scheduler.clone();
+        let (started, mut start) = oneshot::channel();
+        let queued = tokio::spawn(async move {
+            queued_group
+                .scope(owner.execute("other-refresh".into(), async move {
+                    started.send(()).unwrap();
+                    std::future::pending::<Result<Value, HttpCommandError>>().await
+                }))
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert!(matches!(
+            start.try_recv(),
+            Err(oneshot::error::TryRecvError::Empty)
+        ));
+        let owner = scheduler.clone();
+        let required = tokio::spawn(async move {
+            owner
+                .execute("shared".into(), async {
+                    panic!("shared work must not restart")
+                })
+                .await
+        });
+        tokio::time::timeout(std::time::Duration::from_secs(2), start)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(scheduler.inner.state.lock().unwrap().active, 2);
+        assert_eq!(
+            scheduler.inner.state.lock().unwrap().jobs["json:shared"]
+                .subscribers
+                .len(),
+            2
+        );
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        release.send(()).unwrap();
+        assert_eq!(
+            tokio::time::timeout(std::time::Duration::from_secs(2), required)
+                .await
+                .unwrap()
+                .unwrap()
+                .unwrap(),
+            serde_json::json!(["fresh"])
+        );
+        queued.abort();
+        assert!(queued.await.unwrap_err().is_cancelled());
+        assert_eq!(scheduler.pending_read_count(), 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn canceling_hung_reads_releases_both_slots_for_another_page() {
+        struct NotifyDrop(Option<oneshot::Sender<()>>);
+        impl Drop for NotifyDrop {
+            fn drop(&mut self) {
+                let _ = self.0.take().unwrap().send(());
+            }
+        }
+
+        let scheduler = Arc::new(RequestScheduler::default());
+        let mut requests = Vec::new();
+        let mut cancellations = Vec::new();
+        for key in ["artist-albums", "artist-top-tracks"] {
+            let (started, start) = oneshot::channel();
+            let (dropped, drop_observed) = oneshot::channel();
+            let owner = scheduler.clone();
+            requests.push(tokio::spawn(async move {
+                owner
+                    .execute(key.into(), async move {
+                        let _guard = NotifyDrop(Some(dropped));
+                        started.send(()).unwrap();
+                        std::future::pending::<Result<Value, HttpCommandError>>().await
+                    })
+                    .await
+            }));
+            tokio::time::timeout(std::time::Duration::from_secs(2), start)
+                .await
+                .unwrap()
+                .unwrap();
+            cancellations.push(drop_observed);
+        }
+
+        let owner = scheduler.clone();
+        let next_page = tokio::spawn(async move {
+            owner
+                .execute("other-page".into(), async {
+                    Ok(serde_json::json!({"loaded": true}))
+                })
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(scheduler.pending_read_count(), 3);
+        assert_eq!(scheduler.inner.state.lock().unwrap().active, 2);
+        assert!(!next_page.is_finished());
+
+        for request in &requests {
+            request.abort();
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(2), async {
+            for request in requests {
+                assert!(request.await.unwrap_err().is_cancelled());
+            }
+            for cancellation in cancellations {
+                cancellation.await.unwrap();
+            }
+            assert_eq!(
+                next_page.await.unwrap().unwrap(),
+                serde_json::json!({"loaded": true})
+            );
+        })
+        .await
+        .unwrap();
+        assert_eq!(scheduler.pending_read_count(), 0);
+        assert_eq!(scheduler.inner.state.lock().unwrap().active, 0);
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn canceling_one_json_consumer_preserves_the_shared_request() {
+        let scheduler = Arc::new(RequestScheduler::default());
+        let (started, start) = oneshot::channel();
+        let (release, hold) = oneshot::channel();
+        let owner = scheduler.clone();
+        let first = tokio::spawn(async move {
+            owner
+                .execute("shared-artist".into(), async move {
+                    started.send(()).unwrap();
+                    hold.await.unwrap();
+                    Ok(serde_json::json!(["track"]))
+                })
+                .await
+        });
+        start.await.unwrap();
+        let owner = scheduler.clone();
+        let second = tokio::spawn(async move {
+            owner
+                .execute("shared-artist".into(), async {
+                    panic!("a shared JSON request must not execute twice")
+                })
+                .await
+        });
+        tokio::task::yield_now().await;
+        assert_eq!(
+            scheduler.inner.state.lock().unwrap().jobs["json:shared-artist"]
+                .subscribers
+                .len(),
+            2
+        );
+        first.abort();
+        assert!(first.await.unwrap_err().is_cancelled());
+        assert_eq!(scheduler.pending_read_count(), 1);
+        release.send(()).unwrap();
+        let response = tokio::time::timeout(std::time::Duration::from_secs(2), second)
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap();
+        assert_eq!(response, serde_json::json!(["track"]));
+        assert_eq!(scheduler.pending_read_count(), 0);
+    }
 
     #[tokio::test(flavor = "current_thread")]
     async fn byte_subscribers_share_one_buffer_and_do_not_join_json_jobs() {

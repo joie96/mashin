@@ -49,6 +49,8 @@ class ArtistDetailController extends ChangeNotifier {
   (String, String)? _sectionContext;
   CatalogReadChange? _metadataReadState;
   final Map<CatalogQueryKind, CatalogReadChange> _sectionReadStates = {};
+  final Set<CatalogQueryKind> _failedSections = {};
+  final Map<CatalogQueryKind, CoreQueryScope> _sectionQueryScopes = {};
   bool _isSelectingProvider = false;
 
   Artist? _artist;
@@ -88,7 +90,10 @@ class ArtistDetailController extends ChangeNotifier {
     final generation = ++_visibilityGeneration;
     if (!isVisible) {
       _requiresReload =
-          _loadingFuture != null || _isLoadingMetadata || isLoadingSections;
+          _loadingFuture != null ||
+          _sectionQueryScopes.isNotEmpty ||
+          _isLoadingMetadata ||
+          isLoadingSections;
       _queryScope.cancel();
       _sectionsQueryScope.cancel();
       _loadingFuture = null;
@@ -158,6 +163,7 @@ class ArtistDetailController extends ChangeNotifier {
   CatalogReadChange? get metadataReadState => _metadataReadState;
   CatalogReadChange? sectionReadState(CatalogQueryKind kind) =>
       _sectionReadStates[kind];
+  bool hasSectionError(CatalogQueryKind kind) => _failedSections.contains(kind);
   bool get isLoadingAlbums => _isLoadingAlbums;
   bool get hasObservedAlbums => _hasObservedAlbums;
   bool get isLoadingSimilarArtists => _isLoadingSimilarArtists;
@@ -169,6 +175,7 @@ class ArtistDetailController extends ChangeNotifier {
       _isLoadingAlbums ||
       _isLoadingTopTracks ||
       _isLoadingSimilarArtists;
+  bool get isSelectingProvider => _isSelectingProvider;
 
   String get artistName {
     final String trimmed = _artist?.name.trim() ?? '';
@@ -200,6 +207,13 @@ class ArtistDetailController extends ChangeNotifier {
 
   Future<void> selectProvider(ProviderMapping mapping) =>
       _queryScope.run(() => _selectProvider(mapping));
+
+  Future<void> retrySection(CatalogQueryKind kind) {
+    if (_isLoadCanceled || !_isPageVisible || _isSelectingProvider) {
+      return Future<void>.value();
+    }
+    return _loadSection(kind);
+  }
 
   // Catalog observations for the original header and selected section context.
   void _onCatalogUpdate(CatalogUpdate update) {
@@ -301,6 +315,7 @@ class ArtistDetailController extends ChangeNotifier {
     _sourceTopTracks = const [];
     _similarArtists = const [];
     _sectionContext = null;
+    _failedSections.clear();
     _hasObservedAlbums = false;
     _hasObservedTopTracks = false;
     _hasObservedSimilarArtists = false;
@@ -335,7 +350,10 @@ class ArtistDetailController extends ChangeNotifier {
       ]);
       if (_isLoadCanceled) return;
       if (originalArtist != null) {
-        await sectionProvider.initialize(originalArtist);
+        await sectionProvider.initialize(
+          originalArtist,
+          shouldPreserveSelection: true,
+        );
       }
       if (_isLoadCanceled) return;
       await _loadSections();
@@ -348,7 +366,10 @@ class ArtistDetailController extends ChangeNotifier {
           sectionProvider.selectedItemId,
           sectionProvider.selectedProvider,
         );
-        await sectionProvider.initialize(refreshedArtist);
+        await sectionProvider.initialize(
+          refreshedArtist,
+          shouldPreserveSelection: true,
+        );
         if (_isLoadCanceled) return;
         _metadataNotifier.notifyListeners();
         notifyListeners();
@@ -366,16 +387,16 @@ class ArtistDetailController extends ChangeNotifier {
   }
 
   Future<void> _selectProvider(ProviderMapping mapping) async {
-    if (_isLoadCanceled || isLoadingSections) return;
+    if (_isLoadCanceled || _isSelectingProvider) return;
     _isSelectingProvider = true;
+    _sectionsQueryScope.cancel();
     notifyListeners();
     try {
       await sectionProvider.select(mapping);
-      if (_isLoadCanceled) return;
-      await _loadSections();
     } finally {
       if (!_isLoadCanceled) {
         _isSelectingProvider = false;
+        unawaited(_loadSections());
         notifyListeners();
       }
     }
@@ -385,6 +406,8 @@ class ArtistDetailController extends ChangeNotifier {
     _sectionsQueryScope.cancel();
     final sectionScope = CoreQueryScope();
     _sectionsQueryScope = sectionScope;
+    _sectionQueryScopes.clear();
+    _failedSections.clear();
     final context = (
       sectionProvider.selectedItemId,
       sectionProvider.selectedProvider,
@@ -409,10 +432,42 @@ class ArtistDetailController extends ChangeNotifier {
     _similarArtistsNotifier.notifyListeners();
     notifyListeners();
     await sectionScope.run(
-      () =>
-          Future.wait([_loadAlbums(), _loadTopTracks(), _loadSimilarArtists()]),
+      () => Future.wait([
+        _loadSection(CatalogQueryKind.artistAlbums),
+        _loadSection(CatalogQueryKind.artistTopTracks),
+        _loadSection(CatalogQueryKind.similarArtists),
+      ]),
     );
   }
+
+  Future<void> _loadSection(CatalogQueryKind kind) {
+    final load = switch (kind) {
+      CatalogQueryKind.artistAlbums => _loadAlbums,
+      CatalogQueryKind.artistTopTracks => _loadTopTracks,
+      CatalogQueryKind.similarArtists => _loadSimilarArtists,
+      _ => throw ArgumentError.value(kind, 'kind', 'Not an artist section'),
+    };
+    _sectionQueryScopes.remove(kind)?.cancel();
+    final scope = _sectionsQueryScope.createChild();
+    _sectionQueryScopes[kind] = scope;
+    _failedSections.remove(kind);
+    _sectionReadStates.remove(kind);
+    final loading = scope.run(load);
+    _sectionNotifier(kind).notifyListeners();
+    return loading.whenComplete(() {
+      if (identical(_sectionQueryScopes[kind], scope)) {
+        _sectionQueryScopes.remove(kind);
+      }
+      scope.cancel();
+    });
+  }
+
+  ChangeNotifier _sectionNotifier(CatalogQueryKind kind) => switch (kind) {
+    CatalogQueryKind.artistAlbums => _albumsNotifier,
+    CatalogQueryKind.artistTopTracks => _topTracksNotifier,
+    CatalogQueryKind.similarArtists => _similarArtistsNotifier,
+    _ => throw ArgumentError.value(kind, 'kind', 'Not an artist section'),
+  };
 
   Future<void> _loadArtistMetadata() async {
     final timer = Stopwatch()..start();
@@ -475,6 +530,7 @@ class ArtistDetailController extends ChangeNotifier {
       );
     } catch (error) {
       if (_isLoadCanceled) return;
+      _failedSections.add(CatalogQueryKind.artistAlbums);
       _logSection(
         'albums',
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
@@ -482,7 +538,10 @@ class ArtistDetailController extends ChangeNotifier {
       );
     } finally {
       if (!_isLoadCanceled) {
-        final shouldNotify = _isLoadingAlbums || hasNewAlbums;
+        final shouldNotify =
+            _isLoadingAlbums ||
+            hasNewAlbums ||
+            hasSectionError(CatalogQueryKind.artistAlbums);
         _isLoadingAlbums = false;
         if (shouldNotify) _albumsNotifier.notifyListeners();
         notifyListeners();
@@ -520,6 +579,7 @@ class ArtistDetailController extends ChangeNotifier {
       );
     } catch (error) {
       if (_isLoadCanceled) return;
+      _failedSections.add(CatalogQueryKind.similarArtists);
       _logSection(
         'similar_artists',
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
@@ -527,7 +587,10 @@ class ArtistDetailController extends ChangeNotifier {
       );
     } finally {
       if (!_isLoadCanceled) {
-        final shouldNotify = _isLoadingSimilarArtists || hasNewArtists;
+        final shouldNotify =
+            _isLoadingSimilarArtists ||
+            hasNewArtists ||
+            hasSectionError(CatalogQueryKind.similarArtists);
         _isLoadingSimilarArtists = false;
         if (shouldNotify) _similarArtistsNotifier.notifyListeners();
         notifyListeners();
@@ -556,6 +619,7 @@ class ArtistDetailController extends ChangeNotifier {
       );
     } catch (error) {
       if (_isLoadCanceled) return;
+      _failedSections.add(CatalogQueryKind.artistTopTracks);
       _logSection(
         'top_tracks',
         'failed elapsed_ms=${timer.elapsedMilliseconds} error=$error',
@@ -563,7 +627,10 @@ class ArtistDetailController extends ChangeNotifier {
       );
     } finally {
       if (!_isLoadCanceled) {
-        final shouldNotify = _isLoadingTopTracks || hasNewTracks;
+        final shouldNotify =
+            _isLoadingTopTracks ||
+            hasNewTracks ||
+            hasSectionError(CatalogQueryKind.artistTopTracks);
         _isLoadingTopTracks = false;
         if (shouldNotify) _topTracksNotifier.notifyListeners();
         notifyListeners();

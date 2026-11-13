@@ -181,11 +181,12 @@ impl CachedCatalog {
         &self,
         query: CatalogQuery,
         force_refresh: bool,
+        requires_network_response: bool,
     ) -> BoxStream<'static, CatalogLoadSnapshot> {
         let runtime = self.inner.clone();
         Box::pin(
             futures_util::stream::once(async move {
-                let refresh = runtime.refresh(query, force_refresh);
+                let refresh = runtime.refresh(query, force_refresh, requires_network_response);
                 let receiver = refresh.updates.subscribe();
                 let initial = refresh.changes.borrow().clone();
                 Box::pin(futures_util::stream::unfold(
@@ -233,7 +234,7 @@ impl CachedCatalog {
         use crate::application::repositories::{
             ProviderRead, ProviderRefreshError, ProviderUpdate,
         };
-        let mut updates = self.observe_cached(query, false);
+        let mut updates = self.observe_cached(query, false, false);
         let first = updates
             .next()
             .await
@@ -564,7 +565,12 @@ impl CatalogRuntime {
     }
 
     // Parallel reads share one publication and one atomic persistence attempt.
-    fn refresh(self: &Arc<Self>, query: CatalogQuery, force_refresh: bool) -> Arc<Refresh> {
+    fn refresh(
+        self: &Arc<Self>,
+        query: CatalogQuery,
+        force_refresh: bool,
+        requires_network_response: bool,
+    ) -> Arc<Refresh> {
         let mut refreshes = self
             .refreshes
             .lock()
@@ -599,6 +605,9 @@ impl CatalogRuntime {
             .and_then(Weak::upgrade)
             .filter(|_| !requires_independent_refresh)
         {
+            if requires_network_response {
+                refresh.group.require_network_response();
+            }
             refresh.group.promote_to_current_priority();
             LOGGER.trace(format_args!("read_id={} query={} stage=joined", refresh.read_id, query.kind_name()));
             return refresh;
@@ -608,6 +617,9 @@ impl CatalogRuntime {
         let started = Instant::now();
         LOGGER.trace(format_args!("read_id={read_id} query={} stage=started force_refresh={force_refresh}", query.kind_name()));
         let group = self.client.create_read_group();
+        if !force_refresh && !requires_independent_refresh && !requires_network_response {
+            group.reserve_interactive_lane();
+        }
         let (changes, _) = watch::channel(CatalogLoadSnapshot {
             publication_revision: 0,
             value: None,
@@ -647,12 +659,12 @@ impl CatalogRuntime {
         let worker = tokio::spawn(async move {
             with_request_priority(
                 priority,
-                group.scope(async {
+                async {
                     let mut local = Box::pin(async {
                         tokio::time::timeout(Duration::from_secs(5), runtime.read_local(&query))
                             .await.map_err(|_| RefreshError::Failed("cache initialization/read exceeded its deadline".into()))?
                     });
-                    let mut remote = Box::pin(crate::data::music_assistant::catalog::load_catalog(&runtime.client, &query, force_refresh));
+                    let mut remote = Box::pin(group.scope(crate::data::music_assistant::catalog::load_catalog(&runtime.client, &query, force_refresh)));
                     let mut local_result = None;
                     let mut remote_result = None;
                     // A confirmed server response owns its pending persistence independently of display waiters.
@@ -662,6 +674,9 @@ impl CatalogRuntime {
                         tokio::select! {
                             result = &mut local, if local_result.is_none() => {
                                 if runtime.require_active().is_err() { break; }
+                                if !matches!(&result, Ok((_, cached)) if cached.value.is_some() && cached.knowledge == CatalogReadKnowledge::ObservedResponse) {
+                                    group.require_network_response();
+                                }
                                 let (cache, knowledge, is_used, cache_error) = match &result {
                                     Ok((_, cached)) => (
                                         if cached.value.is_some() { "hit" } else { "miss" },
@@ -809,7 +824,7 @@ impl CatalogRuntime {
                     }
                     timings.log_result(&publication, &state);
                     publication.publish(state);
-                }),
+                },
             )
             .await;
         });
@@ -1307,7 +1322,11 @@ impl CatalogClient for CachedCatalog {
         force_refresh: bool,
     ) -> futures_util::future::BoxFuture<'_, Result<CatalogValue, String>> {
         Box::pin(async move {
-            let mut updates = self.observe_catalog(query, force_refresh);
+            let mut updates = if supports_cached_read(&query) {
+                self.observe_cached(query, force_refresh, true)
+            } else {
+                self.observe_catalog(query, force_refresh)
+            };
             while let Some(state) = updates.next().await {
                 match state.phase {
                     CatalogLoadPhase::Ready => {
@@ -1333,7 +1352,7 @@ impl CatalogClient for CachedCatalog {
         force_refresh: bool,
     ) -> BoxStream<'_, CatalogLoadSnapshot> {
         if supports_cached_read(&query) {
-            self.observe_cached(query, force_refresh)
+            self.observe_cached(query, force_refresh, false)
         } else {
             LOGGER.trace(format_args!("query={} cache=bypass reason=unsupported force_refresh={force_refresh}", query.kind_name()));
             self.inner.client.observe_catalog(query, force_refresh)
@@ -4690,14 +4709,15 @@ mod tests {
             }),
         ) {
             let first = with_request_priority(RequestPriority::Background, async {
-                catalog.inner.refresh(read_query.clone(), false)
+                catalog.inner.refresh(read_query.clone(), false, false)
             })
             .await;
             assert_eq!(first.changes.borrow().phase, CatalogLoadPhase::ReadingLocal);
-            let second = catalog.inner.refresh(read_query.clone(), false);
+            let second = catalog.inner.refresh(read_query.clone(), false, false);
             assert!(Arc::ptr_eq(&first, &second));
             assert_eq!(first.group.effective_priority(), RequestPriority::Foreground);
-            let forced = catalog.inner.refresh(read_query, true);
+            let forced = catalog.inner.refresh(read_query, true, false);
+            assert!(forced.group.is_network_response_required());
             assert!(!Arc::ptr_eq(&first, &forced));
             drop(second);
             assert_eq!(first.changes.borrow().phase, CatalogLoadPhase::ReadingLocal);
@@ -4708,11 +4728,127 @@ mod tests {
             item_id: MediaId("playlist".into()),
             allow_dynamic_tracks: true,
         };
-        let first = catalog.inner.refresh(dynamic_query.clone(), false);
-        let second = catalog.inner.refresh(dynamic_query, false);
+        let first = catalog.inner.refresh(dynamic_query.clone(), false, false);
+        let second = catalog.inner.refresh(dynamic_query, false, false);
+        assert!(first.group.is_network_response_required());
         assert!(!Arc::ptr_eq(&first, &second));
         drop((first, second));
         cache.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn cached_observations_reserve_capacity_but_required_reads_promote_shared_refreshes() {
+        for (cached_value, expected_knowledge, has_read_error) in [
+            (
+                Some(value("Old")),
+                CatalogReadKnowledge::ObservedResponse,
+                false,
+            ),
+            (
+                Some(CatalogValue::Artists(Vec::new())),
+                CatalogReadKnowledge::ObservedResponse,
+                false,
+            ),
+            (Some(value("Old")), CatalogReadKnowledge::Partial, false),
+            (None, CatalogReadKnowledge::Unknown, false),
+            (None, CatalogReadKnowledge::Unknown, true),
+        ] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = ServerCache::initialize(directory.path().to_owned())
+                .await
+                .unwrap();
+            cache.activate("server".into()).await.unwrap();
+            let read_query = if matches!(cached_value, Some(CatalogValue::Artists(_))) {
+                CatalogQuery::SimilarArtists {
+                    provider: "library".into(),
+                    item_id: MediaId("007".into()),
+                    limit: 25,
+                }
+            } else {
+                query()
+            };
+            let stored_query = read_query.clone();
+            cache
+                .database()
+                .await
+                .unwrap()
+                .write_transaction(move |transaction| {
+                    if let Some(value) = cached_value {
+                        write_cached_read(
+                            transaction,
+                            &stored_query,
+                            &UserId("user".into()),
+                            &value,
+                            100,
+                        )?;
+                    }
+                    if expected_knowledge == CatalogReadKnowledge::Partial {
+                        transaction.execute("DELETE FROM artist_read_states", [])?;
+                    }
+                    if has_read_error {
+                        transaction.execute("DROP TABLE artist_read_states", [])?;
+                    }
+                    Ok(())
+                })
+                .await
+                .unwrap();
+            let entered = Arc::new(tokio::sync::Notify::new());
+            let release = Arc::new(std::sync::Barrier::new(2));
+            let signal = entered.clone();
+            let barrier = release.clone();
+            let (command, response) = if matches!(read_query, CatalogQuery::SimilarArtists { .. }) {
+                ("music/artists/similar_artists", json!([]))
+            } else {
+                (
+                    "music/artists/get",
+                    json!({"provider":"library","item_id":"007","name":"Fresh"}),
+                )
+            };
+            let (client, worker) =
+                server_with_request_handler(vec![(command, response)], move |_| {
+                    signal.notify_one();
+                    barrier.wait();
+                });
+            let catalog = CachedCatalog::new(
+                Arc::new(client),
+                cache.clone(),
+                UserId("user".into()),
+                Duration::ZERO,
+            )
+            .await
+            .unwrap();
+            let mut updates = catalog.observe_catalog(read_query.clone(), false);
+            let initial = tokio::time::timeout(Duration::from_secs(2), updates.next())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(initial.phase, CatalogLoadPhase::Refreshing);
+            assert_eq!(initial.knowledge, expected_knowledge);
+            assert_eq!(initial.cache_error.is_some(), has_read_error);
+            tokio::time::timeout(Duration::from_secs(2), entered.notified())
+                .await
+                .unwrap();
+            let refresh = catalog.inner.refresh(read_query.clone(), false, false);
+            assert_eq!(
+                refresh.group.is_network_response_required(),
+                expected_knowledge != CatalogReadKnowledge::ObservedResponse
+            );
+            let required = catalog.inner.refresh(read_query, false, true);
+            assert!(Arc::ptr_eq(&refresh, &required));
+            assert!(required.group.is_network_response_required());
+            release.wait();
+            let completed = completed_snapshot(&mut updates).await;
+            assert_eq!(completed.phase, CatalogLoadPhase::Ready);
+            assert_eq!(
+                completed.source,
+                Some(crate::domain::catalog::CatalogDataSource::Server)
+            );
+            assert_eq!(completed.cache_error.is_some(), has_read_error);
+            drop((updates, refresh, required));
+            drop(catalog);
+            cache.shutdown().await.unwrap();
+            assert_eq!(worker.join().unwrap().len(), 1);
+        }
     }
 
     #[tokio::test(flavor = "current_thread")]
@@ -4764,6 +4900,14 @@ mod tests {
         entered.notified().await;
         let refreshes = catalog.inner.refreshes.lock().unwrap();
         assert_eq!(refreshes.len(), 1);
+        assert!(!refreshes
+            .values()
+            .next()
+            .unwrap()
+            .upgrade()
+            .unwrap()
+            .group
+            .is_network_response_required());
         assert_eq!(
             refreshes
                 .values()
@@ -5015,11 +5159,11 @@ mod tests {
         );
         let catalog = CachedCatalog::new(Arc::new(client), cache.clone(), UserId("user".into()), Duration::ZERO).await.unwrap();
         let sidebar = with_request_priority(RequestPriority::Background, async {
-            catalog.inner.refresh(query.clone(), false)
+            catalog.inner.refresh(query.clone(), false, false)
         }).await;
         tokio::time::timeout(Duration::from_secs(3), entered.notified()).await.unwrap();
         let details = with_request_priority(RequestPriority::Foreground, async {
-            catalog.inner.refresh(query.clone(), false)
+            catalog.inner.refresh(query.clone(), false, false)
         }).await;
         let is_shared = Arc::ptr_eq(&sidebar, &details);
         release.send(()).unwrap();

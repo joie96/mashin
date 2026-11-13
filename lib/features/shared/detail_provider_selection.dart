@@ -32,7 +32,11 @@ class DetailProviderSelection {
       .firstOrNull;
 
   // Loading and persisting the cross-page preference.
-  Future<void> initialize(MediaItem item) async {
+  Future<void> initialize(
+    MediaItem item, {
+    bool shouldPreserveSelection = false,
+  }) async {
+    final previousSelection = _selected;
     final Set<String> instances = <String>{};
     _mappings = item.providerMappings
         .where(
@@ -49,6 +53,17 @@ class DetailProviderSelection {
         .where((mapping) => mapping.available)
         .toList(growable: false);
     if (available.isEmpty) return;
+    if (shouldPreserveSelection && previousSelection != null) {
+      _selected = available
+          .where(
+            (mapping) =>
+                mapping.providerInstance ==
+                    previousSelection.providerInstance &&
+                mapping.itemId == previousSelection.itemId,
+          )
+          .firstOrNull;
+      if (_selected != null) return;
+    }
     if (provider != 'library') {
       _selected = available
           .where(
