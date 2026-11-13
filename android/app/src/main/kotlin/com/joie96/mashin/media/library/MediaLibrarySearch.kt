@@ -23,10 +23,11 @@ internal class MediaLibrarySearch(private val queryCore: (String, String?) -> Li
         var currentValue: String? = null
         var currentResult: ListenableFuture<String> = firstValue
         var request: ListenableFuture<*>? = null
+        var error: Throwable? = null
     }
     private class SearchRead {
-        val categories = SearchMediaCategory.entries.associateWith { CategoryRead() }
-        val results: Map<SearchMediaCategory, ListenableFuture<String>> = categories.mapValues { it.value.firstValue }
+        val categories = SearchMediaCategory.entries.associateWith { CategoryRead() }.toMutableMap()
+        val results = categories.mapValues { it.value.firstValue as ListenableFuture<String> }.toMutableMap()
     }
     private val searches = LinkedHashMap<String, SearchRead>()
     private var isClosed = false
@@ -67,31 +68,31 @@ internal class MediaLibrarySearch(private val queryCore: (String, String?) -> Li
         val read = SearchRead()
         searches[query] = read
         read.categories.forEach { (category, categoryRead) ->
-            try {
-                val argument = JSONObject().put("query", query).put("mediaType", category.mediaType)
-                    .put("limit", 50).toString()
-                val response = queryCore("searchMedia", argument)
-                categoryRead.request = response
-                Futures.addCallback(response, object : FutureCallback<String> {
-                    override fun onSuccess(value: String?) {
-                        try {
-                            accept(query, read, category, JSONObject(checkNotNull(value)).getJSONArray(category.resultKey).toString())
-                        } catch (error: Exception) { fail(query, read, category, error) }
-                    }
-                    override fun onFailure(error: Throwable) {
-                        fail(query, read, category, error)
-                    }
-                }, MoreExecutors.directExecutor())
-            } catch (error: Exception) {
-                Log.w("MashinLibrarySearch", "${category.mediaType} search failed", error)
-                fail(query, read, category, error)
-            }
+            startCategory(query, read, category, categoryRead)
         }
         if (searches.size > 8) {
             val oldestQuery = searches.keys.first()
             searches.remove(oldestQuery)?.let(::cancel)
         }
         return read.results
+    }
+
+    @Synchronized
+    fun retryFailed(query: String, categoryToRetry: SearchMediaCategory? = null) {
+        check(!isClosed) { "Media library search is closed" }
+        val read = searches[query] ?: return
+        read.categories.toMap().forEach { (category, previous) ->
+            if (previous.error != null && (categoryToRetry == null || categoryToRetry == category)) {
+                val replacement = CategoryRead().apply {
+                    currentValue = previous.currentValue
+                    currentValue?.let { firstValue.set(it) }
+                }
+                read.categories[category] = replacement
+                read.results[category] = replacement.firstValue
+                previous.request?.cancel(false)
+                startCategory(query, read, category, replacement)
+            }
+        }
     }
 
     // Current results and callback ownership.
@@ -126,23 +127,50 @@ internal class MediaLibrarySearch(private val queryCore: (String, String?) -> Li
         accept(query, read, category, items.toString())
     }
 
+    // Category ownership fences late completions while independent retries keep cached results.
+    private fun startCategory(query: String, read: SearchRead, category: SearchMediaCategory, categoryRead: CategoryRead) {
+        try {
+            val argument = JSONObject().put("query", query).put("mediaType", category.mediaType).put("limit", 50).toString()
+            val response = queryCore("searchMedia", argument)
+            categoryRead.request = response
+            Futures.addCallback(response, object : FutureCallback<String> {
+                override fun onSuccess(value: String?) {
+                    try {
+                        accept(query, read, category, JSONObject(checkNotNull(value)).getJSONArray(category.resultKey).toString(), categoryRead)
+                    } catch (error: Exception) { fail(query, read, category, error, categoryRead) }
+                }
+                override fun onFailure(error: Throwable) = fail(query, read, category, error, categoryRead)
+            }, MoreExecutors.directExecutor())
+        } catch (error: Exception) {
+            Log.w("MashinLibrarySearch", "${category.mediaType} search failed", error)
+            fail(query, read, category, error, categoryRead)
+        }
+    }
+
     // Request completion cannot overwrite values owned by an evicted or closed search.
     @Synchronized
-    private fun accept(query: String, read: SearchRead, category: SearchMediaCategory, value: String) {
-        if (isClosed || searches[query] !== read) return
+    private fun accept(query: String, read: SearchRead, category: SearchMediaCategory, value: String,
+        expected: CategoryRead = read.categories.getValue(category)) {
+        if (isClosed || searches[query] !== read || read.categories[category] !== expected) return
         val categoryRead = read.categories.getValue(category)
+        categoryRead.error = null
         if (categoryRead.currentValue == value) return
         categoryRead.currentValue = value
         val wasPublished = categoryRead.firstValue.isDone
         if (wasPublished) categoryRead.currentResult = Futures.immediateFuture(value)
-        else categoryRead.firstValue.set(value)
+        else {
+            categoryRead.currentResult = categoryRead.firstValue
+            categoryRead.firstValue.set(value)
+        }
         if (wasPublished) onResultsChanged?.invoke(query, category, categoryRead.firstValue, JSONArray(value).length())
     }
 
     @Synchronized
-    private fun fail(query: String, read: SearchRead, category: SearchMediaCategory, error: Throwable) {
-        if (isClosed || searches[query] !== read) return
+    private fun fail(query: String, read: SearchRead, category: SearchMediaCategory, error: Throwable,
+        expected: CategoryRead = read.categories.getValue(category)) {
+        if (isClosed || searches[query] !== read || read.categories[category] !== expected) return
         val categoryRead = read.categories.getValue(category)
+        categoryRead.error = error
         if (categoryRead.currentValue == null) categoryRead.firstValue.setException(error)
     }
 

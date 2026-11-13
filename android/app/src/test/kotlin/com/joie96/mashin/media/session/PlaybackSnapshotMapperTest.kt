@@ -31,6 +31,20 @@ class PlaybackSnapshotMapperTest {
     }
 
     @Test
+    fun favoriteStateMatchesProviderAliasesWithoutMixingInstancesOrMediaTypes() {
+        val state = JSONObject("""{"currentQueueItemId":"queue:1"}""")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","media_item":{"media_type":"track","item_id":"remote","provider":"source-a","uri":"source-a://track/remote"}}]}""")
+        val favorite = JSONObject("""{"media_type":"track","item_id":"42","provider":"library","uri":"library://track/42","provider_mappings":[{"provider_instance":"source-a","item_id":"remote"}]}""")
+        val userData = JSONObject().put("favorites", JSONObject().put("tracks", org.json.JSONArray().put(favorite)))
+        assertTrue(PlaybackSnapshotMapper.fromPlayerState(state, queue, userData).isCurrentItemFavorite)
+        favorite.getJSONArray("provider_mappings").getJSONObject(0).put("provider_instance", "source-b")
+        assertFalse(PlaybackSnapshotMapper.fromPlayerState(state, queue, userData).isCurrentItemFavorite)
+        favorite.getJSONArray("provider_mappings").getJSONObject(0).put("provider_instance", "source-a")
+        favorite.put("media_type", "album")
+        assertFalse(PlaybackSnapshotMapper.fromPlayerState(state, queue, userData).isCurrentItemFavorite)
+    }
+
+    @Test
     fun failedSessionResultIsNotAPlayerAcknowledgement() {
         val result = androidx.media3.session.SessionResult(-1,
             android.os.Bundle().apply { putString(PlaybackSessionCommands.ERROR_KEY, "audio focus denied") })

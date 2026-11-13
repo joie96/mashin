@@ -56,6 +56,36 @@ class PlaybackSessionActionsTest {
     }
 
     @Test
+    fun pendingFavoriteRequestsToggleImmediatelyAndPreserveTheLatestWish() {
+        val snapshot = PlaybackSnapshot.empty().copy(serializedCurrentMediaItem = mediaItem)
+        val first = PlaybackSessionActions.request(PlaybackSessionActions.toggleCurrentItemFavorite, snapshot)!!
+        val added = PlaybackSessionActions.projectFavoriteRequests(snapshot, listOf(first))
+        assertTrue(added.isCurrentItemFavorite)
+        assertFalse(snapshot.isCurrentItemFavorite)
+        assertEquals(CommandButton.ICON_HEART_FILLED, PlaybackSessionActions.buttons(added).first().icon)
+        val second = PlaybackSessionActions.request(PlaybackSessionActions.toggleCurrentItemFavorite, added)!!
+        assertFalse(JSONObject(second.arguments).getBoolean("favorite"))
+        val removed = PlaybackSessionActions.projectFavoriteRequests(snapshot, listOf(first, second))
+        assertFalse(removed.isCurrentItemFavorite)
+        assertFalse(PlaybackSessionActions.projectFavoriteRequests(snapshot.copy(isCurrentItemFavorite = true), listOf(second)).isCurrentItemFavorite)
+        assertFalse(PlaybackSessionActions.projectFavoriteRequests(snapshot, emptyList()).isCurrentItemFavorite)
+        assertEquals(CommandButton.ICON_HEART_UNFILLED, PlaybackSessionActions.buttons(removed).first().icon)
+    }
+
+    @Test
+    fun pendingFavoriteRequestsFollowAliasesButNeverAnotherTrack() {
+        val snapshot = PlaybackSnapshot.empty().copy(serializedCurrentMediaItem = mediaItem)
+        val alias = JSONObject(mediaItem).put("provider_mappings", org.json.JSONArray()
+            .put(JSONObject().put("provider_instance", "source-a").put("item_id", "remote")))
+        val request = PlaybackRequest(PlaybackCommandKind.SetUserDataFavorites,
+            """{"mediaItems":[{"media_type":"track","provider":"source-a","item_id":"remote"}],"favorite":true}""")
+        assertTrue(PlaybackSessionActions.projectFavoriteRequests(snapshot.copy(serializedCurrentMediaItem = alias.toString()), listOf(request)).isCurrentItemFavorite)
+        assertFalse(PlaybackSessionActions.projectFavoriteRequests(snapshot, listOf(request)).isCurrentItemFavorite)
+        val invalid = request.copy(arguments = "not-json")
+        assertEquals(snapshot, PlaybackSessionActions.projectFavoriteRequests(snapshot, listOf(invalid)))
+    }
+
+    @Test
     fun repeatCyclesOffAllOneOff() {
         for ((currentMode, nextMode) in listOf(Player.REPEAT_MODE_OFF to Player.REPEAT_MODE_ALL,
             Player.REPEAT_MODE_ALL to Player.REPEAT_MODE_ONE, Player.REPEAT_MODE_ONE to Player.REPEAT_MODE_OFF)) {

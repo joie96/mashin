@@ -198,6 +198,7 @@ internal class MediaLibraryBrowser(
         if (catalogEvent != null) queryRequests.onCoreEvent(catalogEvent)
         if (catalogEvent != null) search.onCatalogEvent(catalogEvent)
         if (catalogEvent != null) catalogReads.onCoreEvent(catalogEvent)
+        if (eventType == "recommendations_changed") catalogReads.refreshRecommendations()
         if ((eventType == "cache_cleared" && artworkRevision == null) || eventType in setOf("provider_instances_changed", "session_changed")) {
             readRevision.incrementAndGet()
             activeRequests.keys.toList().forEach { it.cancel(false) }
@@ -317,13 +318,19 @@ internal class MediaLibraryBrowser(
             return Futures.immediateFuture(LibraryResult.ofItemList(pageItems(items, page, pageSize), params))
         }
         if (parentId.startsWith("search:")) {
+            SearchMediaCategory.entries.firstOrNull {
+                it.resultKey == parentId.substringAfter(':').substringBefore('?')
+            }?.let { search.retryFailed(parentId.substringAfter('?', ""), it) }
             return trackRequest(browser, parentId, searchCategoryItems(parentId, page, pageSize, params))
         }
         val result = SettableFuture.create<LibraryResult<ImmutableList<MediaItem>>>()
         val request = PendingBrowse(parentId, page, pageSize, params, result)
         pendingBrowses.add(request)
         result.addListener({ pendingBrowses.remove(request) }, MoreExecutors.directExecutor())
-        browseExecutor.execute { completeBrowse(request) }
+        browseExecutor.execute {
+            parentReads[parentId]?.let(catalogReads::retryFailed)
+            completeBrowse(request)
+        }
         return trackRequest(browser, parentId, result)
     }
 
@@ -353,6 +360,7 @@ internal class MediaLibraryBrowser(
             }
             releaseSearchIfUnused(previous)
         }
+        search.retryFailed(query)
         val results = search.start(query)
         session.notifySearchResultChanged(browser, query, results.size, params)
         results.forEach { (category, result) ->
@@ -552,7 +560,7 @@ internal class MediaLibraryBrowser(
         "favorites:albums" -> userDataItems("albums", "album")
         "favorites:playlists" -> userDataItems("playlists", "playlist")
         "favorites:artists" -> userDataItems("artists", "artist")
-        else -> dynamicLibraryChildren(parentId)
+        else -> dynamicChildren(parentId)
     }
 
     private fun homeItems(): List<MediaItem> = listOf(
@@ -659,28 +667,7 @@ internal class MediaLibraryBrowser(
         return isLoading && (hasMatchingFolder || !catalogReads.hasObservedFolders(read))
     }
 
-    // Private playlist tracks share the session snapshot instead of triggering a second download.
-    private fun dynamicLibraryChildren(parentId: String): LibraryChildren {
-        if (parentId.startsWith("browse:playlist:")) {
-            val reference = serializedMediaItems[parentId]?.let(::JSONObject)
-            if (reference?.optString("provider") == "library") {
-                val data = userDataSnapshot()
-                val playlists = data.optJSONArray("playlists") ?: JSONArray()
-                val playlist = (0 until playlists.length()).mapNotNull(playlists::optJSONObject).firstOrNull {
-                    it.optString("item_id") == reference.optString("item_id")
-                }
-                if (playlist != null) {
-                    return LibraryChildren(
-                        mediaItemsFromJson(parentId, playlist.optJSONArray("items")?.toString(), true, mediaType = "track"),
-                        playlist.optBoolean("is_loading_tracks"),
-                    )
-                }
-                if (data.optBoolean("is_loading_playlists")) return LibraryChildren(emptyList(), true)
-            }
-        }
-        return dynamicChildren(parentId)
-    }
-
+    // Private and provider playlist contents share the native cache/online observation.
     private fun dynamicChildren(parentId: String): LibraryChildren = when {
         parentId.startsWith("browse:album:") -> referencedItems(parentId, parentId, LibraryReadKind.AlbumTracks)
         parentId.startsWith("browse:playlist:") -> referencedItems(parentId, parentId, LibraryReadKind.PlaylistTracks)

@@ -214,7 +214,7 @@ class MediaLibraryBrowserTest {
     }
 
     @Test
-    fun privatePlaylistsExposeMetadataBeforeTheirTracksFinishLoading() {
+    fun privatePlaylistsExposeMetadataAndReadTracksThroughTheSharedCatalog() {
         userData = JSONObject().put("is_loading_playlists", true)
         val metadata = browser.onGetChildren(session, controller, "node:playlists", 0, Int.MAX_VALUE, null)
         assertThrows(TimeoutException::class.java) { metadata.get(100, TimeUnit.MILLISECONDS) }
@@ -223,14 +223,37 @@ class MediaLibraryBrowserTest {
         userData = JSONObject().put("is_loading_playlists", false).put("playlists", JSONArray().put(playlist))
         browser.onCoreEvent("user_data_metadata_changed")
         val mediaId = checkNotNull(metadata.get(5, TimeUnit.SECONDS).value).single().mediaId
+        results["playlistTracks:private"] = JSONArray().put(item("private-track", "track"))
         val tracks = browser.onGetChildren(session, controller, mediaId, 0, Int.MAX_VALUE, null)
-        assertThrows(TimeoutException::class.java) { tracks.get(100, TimeUnit.MILLISECONDS) }
-
-        playlist.put("is_loading_tracks", false).put("items", JSONArray().put(item("private-track", "track")))
-        browser.onCoreEvent("user_data_changed")
         assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "private-track"),
             checkNotNull(tracks.get(5, TimeUnit.SECONDS).value).map { it.mediaMetadata.title.toString() })
-        assertTrue(references.isEmpty())
+        assertEquals("playlistTracks", references.single().first)
+        assertEquals("library", references.single().second.getString("provider"))
+    }
+
+    @Test
+    fun privatePlaylistMissReportsFailureAndExplicitReopenStartsOneRetry() {
+        val started = java.util.concurrent.LinkedBlockingQueue<com.google.common.util.concurrent.SettableFuture<String>>()
+        val snapshot = JSONObject().put("playlists", JSONArray().put(
+            item("private", "playlist").put("provider", "library").put("is_loading_tracks", true)))
+        val scoped = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), query = { _, _ -> snapshot.toString() },
+            catalogQuery = { command, _ ->
+                assertEquals("playlistTracks", command)
+                com.google.common.util.concurrent.SettableFuture.create<String>().also(started::add)
+            }) { Futures.immediateVoidFuture() }
+        try {
+            val parent = checkNotNull(scoped.onGetChildren(session, controller, "node:playlists", 0, 10, null)
+                .get(5, TimeUnit.SECONDS).value).single().mediaId
+            val failed = scoped.onGetChildren(session, controller, parent, 0, 10, null)
+            checkNotNull(started.poll(5, TimeUnit.SECONDS)).setException(IllegalStateException("offline"))
+            assertEquals(LibraryResult.RESULT_ERROR_UNKNOWN, failed.get(5, TimeUnit.SECONDS).resultCode)
+            val retry = scoped.onGetChildren(session, controller, parent, 0, 10, null)
+            val remote = checkNotNull(started.poll(5, TimeUnit.SECONDS))
+            assertFalse(retry.isDone)
+            remote.set(JSONArray().put(item("online-track", "track")).toString())
+            assertEquals("online-track", checkNotNull(retry.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
+            assertTrue(started.isEmpty())
+        } finally { scoped.close() }
     }
 
     @Test
@@ -296,6 +319,16 @@ class MediaLibraryBrowserTest {
         assertEquals(MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
             sections[3].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
         assertTrue(references.isEmpty())
+    }
+
+    @Test
+    fun recommendationChangeReloadsCompletedViewInsteadOfReusingItsOldSnapshot() {
+        folders.put(folder("user_recommendations", item("cached", "track")))
+        assertEquals("cached", children("home:recommendations").last().mediaMetadata.title)
+        folders.put(0, folder("user_recommendations", item("online", "track")))
+        browser.onCoreEvent("recommendations_changed")
+        assertEquals("online", children("home:recommendations").last().mediaMetadata.title)
+        assertEquals(listOf("home", "home"), recommendationViews)
     }
 
     @Test
@@ -401,8 +434,9 @@ class MediaLibraryBrowserTest {
             .put("items", JSONArray().put(item("cached-track", "track")))
         userData.put("playlists", JSONArray().put(playlist)).put("is_loading_playlists", true)
         val parent = children("node:playlists").single().mediaId
+        results["playlistTracks:private"] = JSONArray().put(item("cached-track", "track"))
         assertEquals("cached-track", children(parent).last().mediaMetadata.title)
-        assertTrue(references.isEmpty())
+        assertEquals("playlistTracks", references.single().first)
     }
 
     @Test
@@ -505,6 +539,9 @@ class MediaLibraryBrowserTest {
                 remote.setException(IllegalStateException("offline"))
                 assertTrue(checkNotNull(scoped.onGetChildren(session, controller, parent, 0, 10, null)
                     .get(5, TimeUnit.SECONDS).value).isEmpty())
+                val (retryCommand, retry) = checkNotNull(started.poll(5, TimeUnit.SECONDS))
+                assertEquals(kind.command, retryCommand)
+                assertFalse(retry.isDone)
             }
         } finally { scoped.close() }
     }

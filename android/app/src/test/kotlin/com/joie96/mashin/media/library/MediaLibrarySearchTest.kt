@@ -26,6 +26,51 @@ class MediaLibrarySearchTest {
     fun closeFixture() = queryFixture.close()
 
     @Test
+    fun explicitRetryRestartsOnlyFailedCategoryAndRetainsItsCachedValue() {
+        val requests = mutableListOf<Pair<String, com.google.common.util.concurrent.SettableFuture<String>>>()
+        val search = MediaLibrarySearch { _, arguments ->
+            com.google.common.util.concurrent.SettableFuture.create<String>().also {
+                requests.add(JSONObject(arguments!!).getString("mediaType") to it)
+            }
+        }
+        try {
+            search.start("jazz")
+            search.onCatalogEvent(catalogEvent(SearchMediaCategory.Tracks,
+                items = org.json.JSONArray().put(JSONObject().put("name", "Cached"))))
+            requests.first().second.setException(IllegalStateException("offline"))
+            search.retryFailed("jazz", SearchMediaCategory.Albums)
+            assertEquals(4, requests.size)
+            search.retryFailed("jazz")
+            search.retryFailed("jazz")
+            assertEquals(5, requests.size)
+            assertEquals("track", requests.last().first)
+            assertEquals("Cached", org.json.JSONArray(search.results("jazz", SearchMediaCategory.Tracks).get()).getJSONObject(0).getString("name"))
+            requests.last().second.set("""{"tracks":[]}""")
+            assertEquals("[]", search.results("jazz", SearchMediaCategory.Tracks).get())
+        } finally { search.close() }
+    }
+
+    @Test
+    fun failedSearchMissRetriesWithoutRestartingOtherCategories() {
+        val requests = mutableListOf<com.google.common.util.concurrent.SettableFuture<String>>()
+        val search = MediaLibrarySearch { _, _ ->
+            com.google.common.util.concurrent.SettableFuture.create<String>().also(requests::add)
+        }
+        try {
+            val first = search.start("jazz").getValue(SearchMediaCategory.Tracks)
+            requests.first().setException(IllegalStateException("offline"))
+            assertThrows(ExecutionException::class.java) { first.get() }
+            search.retryFailed("jazz")
+            assertEquals(5, requests.size)
+            val retry = search.results("jazz", SearchMediaCategory.Tracks)
+            assertFalse(retry.isDone)
+            requests.last().set("""{"tracks":[]}""")
+            assertEquals("[]", retry.get())
+            assertFalse(requests[1].isDone)
+        } finally { search.close() }
+    }
+
+    @Test
     fun newSearchDispatchesBeforeOldRequestsCompleteAndCloseCancelsAll() {
         val requests = mutableListOf<com.google.common.util.concurrent.SettableFuture<String>>()
         val search = MediaLibrarySearch { _, _ ->

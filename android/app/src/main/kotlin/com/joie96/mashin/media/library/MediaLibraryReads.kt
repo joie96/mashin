@@ -31,6 +31,7 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
         var hasObservedFolders = false
         var recommendation: JSONObject? = null
         var recommendationSequence = 0L
+        var requiresRefresh = false
     }
     private val observations = mutableMapOf<LibraryRead, Observation>()
     private var isClosed = false
@@ -58,36 +59,27 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
         observation.request?.cancel(false)
     }
 
+    // Explicit retries and change signals never restart a failed read from its own callback.
+    @Synchronized
+    fun retryFailed(read: LibraryRead) {
+        if (observations[read]?.error != null) restart(read)
+    }
+
+    @Synchronized
+    fun refreshRecommendations() {
+        observations.toMap().forEach { (read, observation) ->
+            if (read.kind.command == "recommendations") {
+                if (observation.request?.isDone == true) restart(read)
+                else observation.requiresRefresh = true
+            }
+        }
+    }
+
     // Current values are independent of the still-running native refresh.
     @Synchronized
     fun results(read: LibraryRead): ListenableFuture<String> {
         check(!isClosed) { "Library reads are closed" }
-        val observation = observations[read] ?: Observation().also { created ->
-            observations[read] = created
-            val argument = JSONObject().apply {
-                if (read.kind.command == "recommendations") put("view", read.kind.mediaType)
-                if (read.kind == LibraryReadKind.Recent || read.kind == LibraryReadKind.SimilarArtists) put("limit", 50)
-                read.itemId?.let { put("itemId", it) }
-                read.provider?.let { put("provider", it) }
-            }
-            try {
-                val request = query(read.kind.command, argument.toString())
-                created.request = request
-                Futures.addCallback(request, object : FutureCallback<String> {
-                    override fun onSuccess(value: String?) {
-                        try {
-                            if (read.kind.command == "recommendations") {
-                                acceptRecommendation(read, created, JSONObject(checkNotNull(value)))
-                            } else {
-                                accept(read, created, JSONArray(checkNotNull(value)).toString())
-                            }
-                        }
-                        catch (error: Exception) { fail(read, created, error) }
-                    }
-                    override fun onFailure(error: Throwable) = fail(read, created, error)
-                }, MoreExecutors.directExecutor())
-            } catch (error: Exception) { fail(read, created, error) }
-        }
+        val observation = observations[read] ?: start(read, Observation())
         return observation.currentValue?.let(Futures::immediateFuture) ?: observation.firstValue
     }
 
@@ -144,6 +136,49 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
                 event.optJSONObject("value")?.optJSONArray(read.kind.value)?.let { accept(read, observation, it.toString()) }
             }
         }
+    }
+
+    // Replacement retains visible data but revokes callbacks from the previous request.
+    private fun restart(read: LibraryRead) {
+        val previous = observations.remove(read) ?: return
+        previous.request?.cancel(false)
+        previous.firstValue.cancel(false)
+        start(read, Observation().apply {
+            currentValue = previous.currentValue
+            recommendation = previous.recommendation
+            recommendationSequence = previous.recommendationSequence
+            hasObservedFolders = previous.hasObservedFolders
+        })
+    }
+
+    private fun start(read: LibraryRead, created: Observation): Observation {
+        observations[read] = created
+        val argument = JSONObject().apply {
+            if (read.kind.command == "recommendations") put("view", read.kind.mediaType)
+            if (read.kind == LibraryReadKind.Recent || read.kind == LibraryReadKind.SimilarArtists) put("limit", 50)
+            read.itemId?.let { put("itemId", it) }
+            read.provider?.let { put("provider", it) }
+        }
+        try {
+            val request = query(read.kind.command, argument.toString())
+            created.request = request
+            Futures.addCallback(request, object : FutureCallback<String> {
+                override fun onSuccess(value: String?) {
+                    try {
+                        if (read.kind.command == "recommendations") {
+                            acceptRecommendation(read, created, JSONObject(checkNotNull(value)))
+                        } else {
+                            accept(read, created, JSONArray(checkNotNull(value)).toString())
+                        }
+                    } catch (error: Exception) { fail(read, created, error) }
+                }
+                override fun onFailure(error: Throwable) = fail(read, created, error)
+            }, MoreExecutors.directExecutor())
+        } catch (error: Exception) { fail(read, created, error) }
+        created.request?.addListener({ synchronized(this) {
+            if (!isClosed && observations[read] === created && created.requiresRefresh) restart(read)
+        } }, MoreExecutors.directExecutor())
+        return created
     }
 
     // Owner identity rejects terminal results from canceled or replaced requests.

@@ -35,6 +35,22 @@ internal object PlaybackSessionActions {
         else -> null
     }
 
+    // Queued commands project only the current item; the core snapshot remains unchanged.
+    fun projectFavoriteRequests(snapshot: PlaybackSnapshot, requests: List<PlaybackRequest>): PlaybackSnapshot {
+        val currentItem = snapshot.serializedCurrentMediaItem?.let(::JSONObject) ?: return snapshot
+        var isFavorite = snapshot.isCurrentItemFavorite
+        for (request in requests) {
+            if (request.kind != PlaybackCommandKind.SetUserDataFavorites) continue
+            val arguments = try { JSONObject(request.arguments) } catch (_: org.json.JSONException) { continue }
+            val items = arguments.optJSONArray("mediaItems") ?: continue
+            if (arguments.opt("favorite") !is Boolean) continue
+            if ((0 until items.length()).any { index ->
+                items.optJSONObject(index)?.let { PlaybackSnapshotMapper.hasSameMediaIdentity(currentItem, it) } == true
+            }) isFavorite = arguments.getBoolean("favorite")
+        }
+        return snapshot.copy(isCurrentItemFavorite = isFavorite)
+    }
+
     // Secondary slots preserve previous/next; overflow remains available on smaller surfaces.
     fun buttons(snapshot: PlaybackSnapshot): List<CommandButton> = listOf(
         CommandButton.Builder(if (snapshot.isCurrentItemFavorite) CommandButton.ICON_HEART_FILLED else CommandButton.ICON_HEART_UNFILLED)

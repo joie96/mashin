@@ -13,6 +13,47 @@ import org.robolectric.annotation.Config
 @Config(sdk = [35])
 class MediaLibraryReadsTest {
     @Test
+    fun explicitRetryPreservesCacheAndCoalescesConsumers() {
+        val requests = mutableListOf<SettableFuture<String>>()
+        val reads = MediaLibraryReads { _, _ -> SettableFuture.create<String>().also(requests::add) }
+        val read = LibraryRead(LibraryReadKind.AlbumTracks, "id", "provider")
+        val first = reads.results(read)
+        requests.single().setException(IllegalStateException("offline"))
+        assertThrows(java.util.concurrent.ExecutionException::class.java) { first.get() }
+        reads.retryFailed(read)
+        val retry = reads.results(read)
+        reads.retryFailed(read)
+        assertEquals(2, requests.size)
+        assertFalse(retry.isDone)
+        reads.onCoreEvent(event(read, JSONArray().put(JSONObject().put("name", "cached"))))
+        requests.last().setException(IllegalStateException("offline again"))
+        reads.retryFailed(read)
+        assertEquals("cached", JSONArray(reads.results(read).get()).getJSONObject(0).getString("name"))
+        assertEquals(3, requests.size)
+        requests.last().set("[]")
+        assertEquals("[]", reads.results(read).get())
+        reads.close()
+    }
+
+    @Test
+    fun recommendationChangesCoalesceBehindActiveReadAndRetainVisibleFolders() {
+        val requests = mutableListOf<SettableFuture<String>>()
+        val reads = MediaLibraryReads { _, _ -> SettableFuture.create<String>().also(requests::add) }
+        val read = LibraryRead(LibraryReadKind.HomeRecommendations)
+        reads.results(read)
+        reads.refreshRecommendations()
+        reads.refreshRecommendations()
+        assertEquals(1, requests.size)
+        requests.first().set("""{"revision":1,"folders":[],"is_loading":false}""")
+        assertEquals(2, requests.size)
+        assertEquals(1, JSONObject(reads.results(read).get()).getLong("revision"))
+        requests.last().set("""{"revision":2,"folders":[],"is_loading":false}""")
+        assertEquals(2, JSONObject(reads.results(read).get()).getLong("revision"))
+        assertEquals(2, requests.size)
+        reads.close()
+    }
+
+    @Test
     fun payloadFreeStatusRetainsCachedValueUntilInvalidation() {
         val request = SettableFuture.create<String>()
         val read = LibraryRead(LibraryReadKind.PlaylistTracks, "id", "provider")

@@ -30,7 +30,7 @@ internal object PlaybackSnapshotMapper {
         }
         val favorites = favoriteCategory?.let { userData?.optJSONObject("favorites")?.optJSONArray(it) }
         val isCurrentItemFavorite = currentUri != null && favorites != null && (0 until favorites.length()).any { index ->
-            favorites.optJSONObject(index)?.optString("uri")?.trim()?.equals(currentUri, ignoreCase = true) == true
+            favorites.optJSONObject(index)?.let { hasSameMediaIdentity(currentMediaItem, it) } == true
         }
         val durationMillis = values.optLong("durationMillis", -1L).takeIf { it > 0 }
             ?: currentQueueItem?.optLong("duration")?.takeIf { it > 0 }?.times(1_000L)
@@ -83,7 +83,39 @@ internal object PlaybackSnapshotMapper {
         )
     }
 
+    // Identity projection preserves native provider-instance boundaries.
+    fun hasSameMediaIdentity(left: JSONObject, right: JSONObject): Boolean {
+        val leftType = left.optString("media_type")
+        val rightType = right.optString("media_type")
+        if (leftType.isNotBlank() && rightType.isNotBlank() && leftType != rightType) return false
+        val leftUri = left.optString("uri").trim()
+        val rightUri = right.optString("uri").trim()
+        if (leftUri.isNotEmpty() && leftUri != "null" && leftUri.equals(rightUri, ignoreCase = true)) return true
+        val leftProvider = left.optString("provider")
+        val rightProvider = right.optString("provider")
+        val leftId = left.optString("item_id")
+        val rightId = right.optString("item_id")
+        if (leftProvider.isNotBlank() && leftId.isNotBlank() && leftProvider == rightProvider && leftId == rightId) return true
+        val leftMappings = left.providerMappings()
+        val rightMappings = right.providerMappings()
+        return leftMappings.any { mapping ->
+            val instance = mapping.optString("provider_instance")
+            val itemId = mapping.optString("item_id")
+            instance.isNotBlank() && itemId.isNotBlank() && (
+                (instance == rightProvider && itemId == rightId) || rightMappings.any { other ->
+                    instance == other.optString("provider_instance") && itemId == other.optString("item_id")
+                })
+        } || rightMappings.any { mapping ->
+            leftProvider.isNotBlank() && leftId.isNotBlank() &&
+                mapping.optString("provider_instance") == leftProvider && mapping.optString("item_id") == leftId
+        }
+    }
+
     // Boundary metadata mapping.
+    private fun JSONObject.providerMappings(): List<JSONObject> = optJSONArray("provider_mappings")
+        ?.let { mappings -> (0 until mappings.length()).mapNotNull(mappings::optJSONObject) }
+        ?: emptyList()
+
     private fun JSONObject.artistNames(): String? = optJSONArray("artists")
         ?.let { artists -> (0 until artists.length()).mapNotNull(artists::optJSONObject) }
         ?.map { artist -> artist.optString("name") }

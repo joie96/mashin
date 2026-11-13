@@ -49,7 +49,8 @@ class PlaybackService : MediaLibraryService() {
     private var browser: MediaLibraryBrowser? = null
     private lateinit var notificationProvider: PlaybackNotificationProvider
     private lateinit var audioFocus: PlaybackAudioFocus
-    private var snapshot = PlaybackSnapshot.empty()
+    private var coreSnapshot = PlaybackSnapshot.empty()
+    private var snapshot = coreSnapshot
     private var artworkRevision = 0L
     @Volatile private var isDestroyed = false
     private var hasRestoredSession = false
@@ -59,6 +60,7 @@ class PlaybackService : MediaLibraryService() {
     private var isCoreReady = false
     private var isProcessingCommand = false
     private var isProcessingPlaybackStart = false
+    private var executingRequest: PlaybackRequest? = null
     private var initializationError: String? = null
     private data class PendingCommand(val request: PlaybackRequest, val completion: SettableFuture<SessionResult>)
     private val pendingCommands = ArrayDeque<PendingCommand>()
@@ -177,6 +179,8 @@ class PlaybackService : MediaLibraryService() {
             return completion
         }
         pendingCommands.addLast(PendingCommand(request, completion))
+        applySnapshot(coreSnapshot)
+        triggerNotificationUpdate()
         updatePlaybackLifecycle()
         executeNextCommand()
         return completion
@@ -189,6 +193,7 @@ class PlaybackService : MediaLibraryService() {
         val request = pending.request
         val completion = pending.completion
         isProcessingCommand = true
+        executingRequest = request
         isProcessingPlaybackStart = request.canStartPlayback
         var requiresPlaybackStartup = false
         try {
@@ -200,7 +205,8 @@ class PlaybackService : MediaLibraryService() {
                 pendingPlaybackStarts++
             }
         } catch (error: Exception) {
-            applySnapshot(snapshot)
+            executingRequest = null
+            applySnapshot(coreSnapshot)
             triggerNotificationUpdate()
             completion.set(failedResult(error.message ?: "Playback startup failed"))
             isProcessingCommand = false
@@ -234,11 +240,12 @@ class PlaybackService : MediaLibraryService() {
             else failedResult(commandError.message ?: "Playback command failed")
             mainHandler.post {
                 if (requiresPlaybackStartup) pendingPlaybackStarts--
+                executingRequest = null
                 if (isDestroyed) {
                     completion.set(failedResult("Playback service disconnected"))
                 } else {
                     if (request.kind == PlaybackCommandKind.Login && result.resultCode == SessionResult.RESULT_SUCCESS) initializationError = null
-                    nextSnapshot?.let(::applySnapshot)
+                    applySnapshot(nextSnapshot ?: coreSnapshot)
                     triggerNotificationUpdate()
                     completion.set(result)
                 }
@@ -288,16 +295,19 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun applySnapshot(nextSnapshot: PlaybackSnapshot) {
+        coreSnapshot = nextSnapshot
+        val pendingSnapshot = PlaybackSessionActions.projectFavoriteRequests(nextSnapshot,
+            listOfNotNull(executingRequest) + pendingCommands.map { it.request })
         val previousItems = snapshot.mediaItems.associateBy { it.mediaId }
-        val projected = nextSnapshot.copy(mediaItems = nextSnapshot.mediaItems.map { item ->
+        val projected = pendingSnapshot.copy(mediaItems = pendingSnapshot.mediaItems.map { item ->
             val previousUri = previousItems[item.mediaId]?.mediaMetadata?.artworkUri
             val artwork = MediaArtworkContentProvider.retainRevision(previousUri, item.mediaMetadata.artworkUri)
             item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build()
         })
         snapshot = projected
         sessionPlayer?.updateState(projected)
-        mediaLibrarySession?.setMediaButtonPreferences(PlaybackSessionActions.buttons(nextSnapshot))
-        if (nextSnapshot.hasPlaybackIntent && nextSnapshot.isLocalPlayback) {
+        mediaLibrarySession?.setMediaButtonPreferences(PlaybackSessionActions.buttons(projected))
+        if (projected.hasPlaybackIntent && projected.isLocalPlayback) {
             if (!wakeLock.isHeld) wakeLock.acquire()
         } else if (pendingPlaybackStarts == 0) {
             audioFocus.release()
