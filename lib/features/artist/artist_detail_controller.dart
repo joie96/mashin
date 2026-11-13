@@ -32,6 +32,7 @@ class ArtistDetailController extends ChangeNotifier {
          itemId: itemId,
          provider: providerInstanceIdOrDomain,
        ) {
+    userDataController?.favoritesChanges.addListener(_onFavoritesChanged);
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
     _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
       _onMediaReadInvalidated,
@@ -68,8 +69,6 @@ class ArtistDetailController extends ChangeNotifier {
   bool _hasObservedTopTracks = false;
   bool _hasObservedSimilarArtists = false;
 
-  bool _isArtistFavorite = false;
-  final Map<String, bool> _favoriteOverrides = <String, bool>{};
   bool _isDescriptionExpanded = false;
   bool _isControllerDisposed = false;
   bool _isPageVisible = true;
@@ -140,6 +139,7 @@ class ArtistDetailController extends ChangeNotifier {
   @override
   void dispose() {
     _isControllerDisposed = true;
+    userDataController?.favoritesChanges.removeListener(_onFavoritesChanged);
     unawaited(_catalogSubscription?.cancel());
     unawaited(_cacheSubscription?.cancel());
     unawaited(_readSubscription?.cancel());
@@ -192,7 +192,7 @@ class ArtistDetailController extends ChangeNotifier {
   }
 
   bool get hasDescription => description != null;
-  bool get isArtistFavorite => _isArtistFavorite;
+  bool get isArtistFavorite => _artist != null && isItemFavorite(_artist!);
   bool get isDescriptionExpanded => _isDescriptionExpanded;
   int get descriptionMaxLines =>
       _isDescriptionExpanded ? 1000 : descriptionCollapsedMaxLines;
@@ -228,7 +228,6 @@ class ArtistDetailController extends ChangeNotifier {
       final incoming = userDataController?.withFavoriteStatus(artist) ?? artist;
       if (hasSameMediaContent(_artist, incoming) && !_isLoadingMetadata) return;
       _artist = incoming;
-      _isArtistFavorite = isItemFavorite(_artist!);
       _isLoadingMetadata = false;
       if (_firstMetadata case final pending? when !pending.isCompleted) {
         pending.complete(_artist);
@@ -309,7 +308,6 @@ class ArtistDetailController extends ChangeNotifier {
     _sectionsQueryScope.cancel();
     _requiresReload = true;
     _artist = null;
-    _isArtistFavorite = false;
     _albums = const [];
     _topTracks = const [];
     _sourceTopTracks = const [];
@@ -484,8 +482,6 @@ class ArtistDetailController extends ChangeNotifier {
       final incoming = userDataController?.withFavoriteStatus(loaded) ?? loaded;
       hasNewMetadata = !hasSameMediaContent(_artist, incoming);
       if (hasNewMetadata) _artist = incoming;
-      final Artist? artist = _artist;
-      _isArtistFavorite = artist != null && isItemFavorite(artist);
       if (_isLoadCanceled) return;
       _logSection('metadata', 'loaded elapsed_ms=${timer.elapsedMilliseconds}');
     } catch (error) {
@@ -745,32 +741,22 @@ class ArtistDetailController extends ChangeNotifier {
   }
 
   // Favorites
-  String _favoriteKey(MediaItem item) =>
-      '${item.mediaType.name}:${item.provider}:${item.itemId}';
+  void _onFavoritesChanged() {
+    if (_isControllerDisposed) return;
+    _metadataNotifier.notifyListeners();
+    _notifyContentSections();
+    notifyListeners();
+  }
 
   bool isItemFavorite(MediaItem item) {
-    return _favoriteOverrides[_favoriteKey(item)] ?? item.favorite;
+    return userDataController?.isFavorite(item) ?? item.favorite;
   }
 
   Future<void> toggleItemFavorite(MediaItem item) async {
-    final String key = _favoriteKey(item);
     final bool nextFavorite = !isItemFavorite(item);
-    _favoriteOverrides[key] = nextFavorite;
-    _notifyContentSections();
-
     try {
-      final UserData? controller = userDataController;
-      if (controller == null) {
-        _favoriteOverrides.remove(key);
-        _notifyContentSections();
-        return;
-      }
-      await controller.setFavorite(<MediaItem>[item], nextFavorite);
-    } catch (_) {
-      // Revert the optimistic update on failure.
-      _favoriteOverrides[key] = !nextFavorite;
-      _notifyContentSections();
-    }
+      await userDataController?.setFavorite(<MediaItem>[item], nextFavorite);
+    } catch (_) {}
   }
 
   Future<void> toggleArtistFavorite() async {
@@ -779,22 +765,7 @@ class ArtistDetailController extends ChangeNotifier {
       return;
     }
 
-    final bool nextFavorite = !_isArtistFavorite;
-    _isArtistFavorite = nextFavorite;
-    _metadataNotifier.notifyListeners();
-
-    try {
-      final UserData? controller = userDataController;
-      if (controller == null) {
-        _isArtistFavorite = !nextFavorite;
-        _metadataNotifier.notifyListeners();
-        return;
-      }
-      await controller.setFavorite(<MediaItem>[current], nextFavorite);
-    } catch (_) {
-      _isArtistFavorite = !nextFavorite;
-      _metadataNotifier.notifyListeners();
-    }
+    await toggleItemFavorite(current);
   }
 
   // Description

@@ -2,8 +2,11 @@
 import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
+import 'package:flutter/material.dart' hide Radio;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/core/core_userdata.dart';
 import 'package:mashin/features/artist/artist_detail_controller.dart';
@@ -11,6 +14,7 @@ import 'package:mashin/features/album/album_detail_controller.dart';
 import 'package:mashin/features/playlist/playlist_detail_controller.dart';
 import 'package:mashin/features/home/home_controller.dart';
 import 'package:mashin/features/explore/explore_controller.dart';
+import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
 
 class _CatalogEventBridge extends _UnusedCoreBridge {
   final updates = StreamController<Map<String, dynamic>>.broadcast(sync: true);
@@ -25,6 +29,9 @@ class _CatalogEventBridge extends _UnusedCoreBridge {
 class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {
   @override
   Stream<Map<String, dynamic>> get events => const Stream.empty();
+
+  @override
+  Stream<PlayerState> get playerStateChanges => const Stream.empty();
 }
 
 class _UnreadMediaItem extends Fake implements MediaItem {}
@@ -393,6 +400,237 @@ void main() {
       await loading;
       expect(bridge.refreshes, [true, false]);
       expect(explore.weeklyExploration.single.name, 'Recovered');
+    },
+  );
+
+  test(
+    'favorite status notifies synchronously before command completion',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      bridge.initial.complete(
+        bridge.createSnapshot(hasItems: false, revision: 1),
+      );
+      await userData.loadLibraryData();
+      final gate = Completer<void>();
+      bridge.mutation = () => gate.future;
+      final track = Track.fromJson(_mediaJson('track'));
+      final statuses = <bool>[];
+      userData.favoritesChanges.addListener(
+        () => statuses.add(userData.isFavorite(track)),
+      );
+      final mutation = userData.setFavorite([track], true);
+      expect(userData.isFavorite(track), isTrue);
+      expect(statuses, [true]);
+      expect(userData.favoriteTracks.single.favorite, isTrue);
+      final alias = Track.fromJson(
+        _mediaJson('track')
+          ..['provider'] = 'source--one'
+          ..['item_id'] = 'source-id'
+          ..['provider_mappings'] = [],
+      );
+      expect(userData.isFavorite(alias), isTrue);
+      final refreshing = userData.refreshLibrarySnapshot();
+      await Future<void>.delayed(Duration.zero);
+      bridge.snapshots.single.complete(
+        bridge.createSnapshot(hasItems: false, revision: 2),
+      );
+      await refreshing;
+      expect(userData.isFavorite(track), isTrue);
+      gate.complete();
+      await mutation;
+      expect(userData.isFavorite(track), isFalse);
+    },
+  );
+
+  test(
+    'failed favorite command rolls back local membership and notifies',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      bridge.initial.complete(bridge.createSnapshot(revision: 1));
+      await userData.loadLibraryData();
+      final track = userData.favoriteTracks.single;
+      final gate = Completer<void>();
+      bridge.mutation = () => gate.future;
+      final statuses = <bool>[];
+      userData.favoritesChanges.addListener(
+        () => statuses.add(userData.isFavorite(track)),
+      );
+      final mutation = userData.setFavorite([track], false);
+      final failure = expectLater(mutation, throwsStateError);
+      expect(userData.favoriteTracks, isEmpty);
+      expect(userData.isFavorite(track), isFalse);
+      gate.completeError(StateError('Server rejected favorite'));
+      await failure;
+      expect(userData.favoriteTracks.single, same(track));
+      expect(statuses, [false, true]);
+    },
+  );
+
+  test(
+    'newer completed favorite wish survives an older pending command',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      addTearDown(() async {
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      bridge.initial.complete(
+        bridge.createSnapshot(hasItems: false, revision: 1),
+      );
+      await userData.loadLibraryData();
+      final track = Track.fromJson(_mediaJson('track'));
+      final firstGate = Completer<void>();
+      final secondGate = Completer<void>();
+      bridge.mutation = () => firstGate.future;
+      final first = userData.setFavorite([track], true);
+      bridge.mutation = () => secondGate.future;
+      final second = userData.setFavorite([track], false);
+      expect(userData.isFavorite(track), isFalse);
+      secondGate.complete();
+      await Future<void>.delayed(Duration.zero);
+      bridge.snapshots.single.complete(
+        bridge.createSnapshot(hasItems: false, revision: 2),
+      );
+      await second;
+      expect(userData.isFavorite(track), isFalse);
+      expect(userData.favoriteTracks, isEmpty);
+      firstGate.complete();
+      await first;
+      expect(bridge.snapshots, hasLength(1));
+      expect(userData.isFavorite(track), isFalse);
+    },
+  );
+
+  test(
+    'open detail views share immediate favorite changes and rollback',
+    () async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      bridge.initial.complete(
+        bridge.createSnapshot(hasItems: false, revision: 1),
+      );
+      await userData.loadLibraryData();
+      final album = AlbumDetailController(
+        coreBridge: bridge,
+        itemId: 'album-id',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      final artist = ArtistDetailController(
+        coreBridge: bridge,
+        itemId: 'artist-id',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      final playlist = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: 'playlist-id',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      addTearDown(() async {
+        album.dispose();
+        artist.dispose();
+        playlist.dispose();
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      var albumChanges = 0;
+      var artistChanges = 0;
+      var playlistChanges = 0;
+      album.tracksListenable.addListener(() => albumChanges++);
+      artist.topTracksListenable.addListener(() => artistChanges++);
+      playlist.addListener(() => playlistChanges++);
+      final track = Track.fromJson(_mediaJson('track'));
+      final gate = Completer<void>();
+      bridge.mutation = () => gate.future;
+      final mutation = userData.setFavorite([track], true);
+      final failure = expectLater(mutation, throwsStateError);
+      expect([
+        album.isItemFavorite(track),
+        artist.isItemFavorite(track),
+        playlist.isItemFavorite(track),
+      ], everyElement(isTrue));
+      expect([albumChanges, artistChanges, playlistChanges], [1, 1, 1]);
+      expect(bridge.snapshots, isEmpty);
+      gate.completeError(StateError('Server rejected favorite'));
+      await failure;
+      expect([
+        album.isItemFavorite(track),
+        artist.isItemFavorite(track),
+        playlist.isItemFavorite(track),
+      ], everyElement(isFalse));
+      expect([albumChanges, artistChanges, playlistChanges], [2, 2, 2]);
+    },
+  );
+
+  testWidgets(
+    'favorite button changes in the next frame before server completion',
+    (tester) async {
+      final bridge = _PendingUserDataBridge();
+      final userData = UserData(coreBridge: bridge);
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      addTearDown(() async {
+        events.dispose();
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      final track = Track.fromJson({
+        'provider': 'library',
+        'item_id': 'track',
+        'name': 'Visible track',
+      });
+      final gate = Completer<void>();
+      bridge.mutation = () => gate.future;
+      Future<void>? mutation;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: AppTheme.dark(),
+          home: Scaffold(
+            body: ListenableBuilder(
+              listenable: userData.favoritesChanges,
+              builder: (context, child) => MediaTableSectionDesktop<Track>(
+                title: 'Tracks',
+                items: [track],
+                isLoading: false,
+                emptyText: '',
+                coreBridge: bridge,
+                coreEvents: events,
+                isRowFavorite: (item, index) => userData.isFavorite(item),
+                onRowFavoriteTap: (item, index) {
+                  mutation = userData.setFavorite([
+                    item,
+                  ], !userData.isFavorite(item));
+                },
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byIcon(Icons.favorite_border_outlined).last);
+      await tester.pump();
+      expect(gate.isCompleted, isFalse);
+      expect(find.byIcon(Icons.favorite_outlined), findsOneWidget);
+      expect(find.byIcon(Icons.favorite_border_outlined), findsOneWidget);
+      final failure = expectLater(mutation!, throwsStateError);
+      gate.completeError(StateError('Server rejected favorite'));
+      await tester.pump();
+      await failure;
+      await tester.pump();
+      expect(find.byIcon(Icons.favorite_border_outlined), findsNWidgets(2));
+      await tester.pumpWidget(const SizedBox.shrink());
+      await tester.pump(const Duration(milliseconds: 400));
     },
   );
 

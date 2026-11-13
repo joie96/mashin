@@ -6,6 +6,14 @@ import '../shared/item_provider_selection.dart';
 import 'core_bridge.dart';
 import 'core_models.dart';
 
+class _PendingFavoriteChange {
+  _PendingFavoriteChange(this.items, this.isFavorite);
+
+  final List<MediaItem> items;
+  final bool isFavorite;
+  bool hasCompleted = false;
+}
+
 /// Projects native favorites and private playlists for Flutter views.
 class UserData extends ChangeNotifier {
   UserData({required MashinCoreBridgeApi coreBridge})
@@ -30,6 +38,7 @@ class UserData extends ChangeNotifier {
   bool _isLoadingFavorites = false;
   bool _hasLoadedFavorites = false;
   Map<(MediaType, String, String), bool> _favoriteOverrides = {};
+  final List<_PendingFavoriteChange> _pendingFavorites = [];
   bool _isLoadingPlaylists = false;
   Set<String> _loadingPlaylistIds = <String>{};
   bool _isDisposed = false;
@@ -48,10 +57,12 @@ class UserData extends ChangeNotifier {
   bool get isLoadingPlaylists => _isLoadingPlaylists;
   bool isLoadingPlaylistTracks(String playlistId) =>
       _loadingPlaylistIds.contains(playlistId);
-  List<Track> get favoriteTracks => _favoriteTracks;
-  List<Album> get favoriteAlbums => _favoriteAlbums;
-  List<Playlist> get favoritePlaylists => _favoritePlaylists;
-  List<Artist> get favoriteArtists => _favoriteArtists;
+  List<Track> get favoriteTracks => _projectPendingFavorites(_favoriteTracks);
+  List<Album> get favoriteAlbums => _projectPendingFavorites(_favoriteAlbums);
+  List<Playlist> get favoritePlaylists =>
+      _projectPendingFavorites(_favoritePlaylists);
+  List<Artist> get favoriteArtists =>
+      _projectPendingFavorites(_favoriteArtists);
   List<Playlist> get playlists => _playlists;
   Listenable get favoritesChanges => _favoritesChanges;
   Listenable get playlistsChanges => _playlistsChanges;
@@ -99,6 +110,13 @@ class UserData extends ChangeNotifier {
   Future<void> refreshLibrarySnapshot() => _refreshSnapshot();
 
   bool isFavorite(MediaItem item) {
+    for (final change in _pendingFavorites.reversed) {
+      if (change.items.any(
+        (candidate) => _isSameFavoriteItem(candidate, item),
+      )) {
+        return change.isFavorite;
+      }
+    }
     for (final key in _itemIdentityKeys(item)) {
       if (_favoriteOverrides[key] case final known?) return known;
     }
@@ -120,12 +138,31 @@ class UserData extends ChangeNotifier {
   }
 
   Future<void> setFavorite(Iterable<MediaItem> items, bool favorite) async {
-    await _mutateUserData(
-      () => _coreBridge.setUserDataFavorites(
-        items.toList(growable: false),
-        favorite,
-      ),
-    );
+    if (_isDisposed) return;
+    final values = items.toList(growable: false);
+    if (values.isEmpty) return;
+    final change = _PendingFavoriteChange(values, favorite);
+    _pendingFavorites.add(change);
+    _favoritesChanges.notifyListeners();
+    notifyListeners();
+    try {
+      await _mutateUserData(
+        () => _coreBridge.setUserDataFavorites(values, favorite),
+      );
+    } catch (_) {
+      _pendingFavorites.remove(change);
+      rethrow;
+    } finally {
+      change.hasCompleted = true;
+      while (_pendingFavorites.isNotEmpty &&
+          _pendingFavorites.first.hasCompleted) {
+        _pendingFavorites.removeAt(0);
+      }
+      if (!_isDisposed) {
+        _favoritesChanges.notifyListeners();
+        notifyListeners();
+      }
+    }
   }
 
   Future<Playlist?> createPrivatePlaylist(String name) async {
@@ -575,6 +612,31 @@ class UserData extends ChangeNotifier {
     return sortComparison != 0
         ? sortComparison
         : left.name.toLowerCase().compareTo(right.name.toLowerCase());
+  }
+
+  // Pending UI wishes never change the confirmed native snapshot.
+  bool _isSameFavoriteItem(MediaItem left, MediaItem right) {
+    if (left.mediaType != right.mediaType) return false;
+    final uri = left.uri?.trim() ?? '';
+    if (uri.isNotEmpty && uri == right.uri?.trim()) return true;
+    final keys = _itemIdentityKeys(left).toSet();
+    return _itemIdentityKeys(right).any(keys.contains);
+  }
+
+  List<T> _projectPendingFavorites<T extends MediaItem>(List<T> confirmed) {
+    if (_pendingFavorites.isEmpty) return confirmed;
+    final projected = confirmed.where(isFavorite).toList();
+    for (final change in _pendingFavorites) {
+      for (final item in change.items.whereType<T>()) {
+        if (isFavorite(item) &&
+            !projected.any(
+              (candidate) => _isSameFavoriteItem(candidate, item),
+            )) {
+          projected.add(withFavoriteStatus(item));
+        }
+      }
+    }
+    return List<T>.unmodifiable(projected);
   }
 
   // Favorite projection changes membership only, never playback or provider data.

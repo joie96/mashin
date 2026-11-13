@@ -74,7 +74,10 @@ impl Application {
                 return Err(error);
             }
         }
-        events.publish(ApplicationEvent::UserDataChanged { playlist: None, revision: None });
+        events.publish(ApplicationEvent::UserDataChanged {
+            playlist: None,
+            revision: None,
+        });
         self.read_user_data_sync()
     }
     // Mutation success and authoritative rating must both hold before publication.
@@ -98,6 +101,7 @@ impl Application {
             data.favorite_changes.clone()
         };
         loop {
+            tokio::time::sleep(std::time::Duration::from_millis(120)).await;
             let notified = changes.notified();
             tokio::pin!(notified);
             notified.as_mut().enable();
@@ -157,13 +161,13 @@ impl Application {
                             .record_favorite_state(confirmed.clone(), is_favorite);
                         data.intents.finish(&identity, is_favorite, Some(confirmed))
                     }
-                    Err(_) => {
-                        data.intents.mark_uncertain(&identity);
-                        true
-                    }
+                    Err(_) => data.intents.fail_work(&identity),
                 }
             };
-            events.publish(ApplicationEvent::UserDataChanged { playlist: None, revision: None });
+            events.publish(ApplicationEvent::UserDataChanged {
+                playlist: None,
+                revision: None,
+            });
             changes.notify_waiters();
             if let Err(error) = outcome {
                 events.publish(ApplicationEvent::Error {
@@ -296,6 +300,156 @@ pub(in crate::application) mod tests {
         coordinator.user_data = Some(data);
         drop(coordinator);
         (application, identity)
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn favorite_worker_coalesces_wishes_before_sending_to_server() {
+        use crate::data::music_assistant::client::tests::server;
+        let (client, server_worker) = server(vec![
+            ("music/favorites/set_item", Value::Null),
+            (
+                "music/get_library_item",
+                json!({
+                    "media_type":"track","provider":"library","item_id":"007",
+                    "name":"Confirmed","favorite":null,
+                    "provider_mappings":[{"provider_domain":"source","provider_instance":"source-a","item_id":"remote"}]
+                }),
+            ),
+        ]);
+        let client = Arc::new(client);
+        let catalog = Arc::new(RecordingCatalog {
+            online: client.clone(),
+            writes: Default::default(),
+            entered: Default::default(),
+            release: None,
+            should_fail_commit: false,
+        });
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (application, identity) = application(
+            client.clone(),
+            catalog.clone(),
+            events,
+            MediaType::Track,
+            true,
+        );
+        let publisher = application.coordinator.lock().unwrap().session_events();
+        let task = tokio::spawn(application.clone().run_favorite_worker(
+            client,
+            0,
+            identity.clone(),
+            publisher,
+        ));
+        tokio::task::yield_now().await;
+        {
+            let mut coordinator = application.coordinator.lock().unwrap();
+            let data = coordinator.user_data.as_mut().unwrap();
+            let FavoriteWork::Write { item, .. } = data.intents.work(&identity) else {
+                panic!("expected pending favorite")
+            };
+            for is_favorite in [false, true, false] {
+                data.intents
+                    .submit(&data.snapshot.favorites, item.clone(), is_favorite);
+                assert_eq!(
+                    data.project_snapshot().favorites.tracks.len(),
+                    usize::from(is_favorite)
+                );
+            }
+        }
+        tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let requests = server_worker.join().unwrap();
+        assert_eq!(requests.len(), 2);
+        assert_eq!(requests[0]["args"]["favorite"], Value::Null);
+        assert_eq!(catalog.writes.lock().unwrap().len(), 1);
+        assert!(application
+            .coordinator
+            .lock()
+            .unwrap()
+            .user_data
+            .as_ref()
+            .unwrap()
+            .project_snapshot()
+            .favorites
+            .tracks
+            .is_empty());
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn favorite_worker_sends_latest_wish_after_older_request_fails() {
+        use crate::data::music_assistant::client::tests::server_with_request_handler;
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let signal = entered.clone();
+        let barrier = release.clone();
+        let mut has_blocked = false;
+        let (client, server_worker) = server_with_request_handler(
+            vec![
+                ("music/favorites/set_item", json!({"test_http_status":503})),
+                ("music/favorites/set_item", Value::Null),
+                (
+                    "music/get_library_item",
+                    json!({
+                        "media_type":"track","provider":"library","item_id":"007",
+                        "name":"Confirmed","favorite":null,
+                        "provider_mappings":[{"provider_domain":"source","provider_instance":"source-a","item_id":"remote"}]
+                    }),
+                ),
+            ],
+            move |_| {
+                if !has_blocked {
+                    has_blocked = true;
+                    signal.notify_one();
+                    barrier.wait();
+                }
+            },
+        );
+        let client = Arc::new(client);
+        let catalog = Arc::new(RecordingCatalog {
+            online: client.clone(),
+            writes: Default::default(),
+            entered: Default::default(),
+            release: None,
+            should_fail_commit: false,
+        });
+        let events = Arc::new(Mutex::new(Vec::new()));
+        let (application, identity) = application(
+            client.clone(),
+            catalog.clone(),
+            events,
+            MediaType::Track,
+            true,
+        );
+        let publisher = application.coordinator.lock().unwrap().session_events();
+        let task = tokio::spawn(application.clone().run_favorite_worker(
+            client,
+            0,
+            identity.clone(),
+            publisher,
+        ));
+        tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+            .await
+            .unwrap();
+        {
+            let mut coordinator = application.coordinator.lock().unwrap();
+            let data = coordinator.user_data.as_mut().unwrap();
+            let FavoriteWork::Write { item, .. } = data.intents.work(&identity) else {
+                panic!("expected pending favorite")
+            };
+            data.intents.submit(&data.snapshot.favorites, item, false);
+            assert!(data.project_snapshot().favorites.tracks.is_empty());
+        }
+        release.wait();
+        tokio::time::timeout(std::time::Duration::from_secs(5), task)
+            .await
+            .unwrap()
+            .unwrap();
+        let requests = server_worker.join().unwrap();
+        assert_eq!(requests.len(), 3);
+        assert_eq!(requests[0]["args"]["favorite"], json!(true));
+        assert_eq!(requests[1]["args"]["favorite"], Value::Null);
+        assert_eq!(catalog.writes.lock().unwrap().len(), 1);
     }
 
     // Server failures and incomplete or contradictory readbacks cannot reach the writer.

@@ -17,6 +17,7 @@ struct FavoriteIntent {
     is_favorite: bool,
     is_uncertain: bool,
     has_inflight_write: bool,
+    inflight_revision: u64,
     revision: u64,
 }
 
@@ -67,6 +68,7 @@ impl FavoriteIntents {
                 is_favorite,
                 is_uncertain: false,
                 has_inflight_write: false,
+                inflight_revision: 0,
                 revision: self.revision,
             },
         );
@@ -144,6 +146,7 @@ impl FavoriteIntents {
         if matches!(work, FavoriteWork::Write { .. }) {
             if let Some(pending) = self.pending.get_mut(identity) {
                 pending.has_inflight_write = true;
+                pending.inflight_revision = pending.revision;
             }
         }
         work
@@ -197,6 +200,18 @@ impl FavoriteIntents {
             .map(|pending| pending.is_favorite)
     }
 
+    // A failed older write must not discard a wish submitted after it started.
+    pub(crate) fn fail_work(&mut self, identity: &str) -> bool {
+        if let Some(pending) = self.pending.get_mut(identity) {
+            pending.has_inflight_write = false;
+            if pending.revision > pending.inflight_revision {
+                return false;
+            }
+        }
+        self.mark_uncertain(identity);
+        true
+    }
+
     // Unknown write outcomes stay distinct from both server confirmation and the user's wish.
     pub(crate) fn mark_uncertain(&mut self, identity: &str) {
         if let Some(survivor) = self.retired_workers.remove(identity) {
@@ -233,7 +248,11 @@ impl FavoriteIntents {
 
     pub(crate) fn project(&self, confirmed: &UserDataSnapshot) -> UserDataSnapshot {
         let mut projection = confirmed.clone();
-        for pending in self.pending.values() {
+        for pending in self
+            .pending
+            .values()
+            .filter(|pending| !pending.is_uncertain)
+        {
             projection.record_favorite_state(pending.item.clone(), pending.is_favorite);
         }
         projection
@@ -323,6 +342,55 @@ mod tests {
         assert_eq!(intents.desired_state(&identity), Some(false));
         assert!(intents.finish(&identity, false, None));
         assert_eq!(intents.project(&refreshed), refreshed);
+    }
+
+    #[test]
+    fn failed_favorite_wish_rolls_back_to_confirmed_state() {
+        for is_favorite in [true, false] {
+            let mut intents = FavoriteIntents::default();
+            let item = track("source-one", "source-id", serde_json::json!([]));
+            let mut confirmed = UserDataSnapshot::default();
+            confirmed.record_favorite_state(item.clone(), !is_favorite);
+            let (identity, _, _) = intents.submit(&confirmed.favorites, item, is_favorite);
+            intents.begin_work(&identity);
+            assert_ne!(intents.project(&confirmed), confirmed);
+            intents.mark_uncertain(&identity);
+            assert_eq!(intents.project(&confirmed), confirmed);
+            assert_eq!(intents.work(&identity), FavoriteWork::Finished);
+        }
+    }
+
+    #[test]
+    fn failed_older_write_preserves_the_latest_wish() {
+        let mut intents = FavoriteIntents::default();
+        let item = track("source-one", "source-id", serde_json::json!([]));
+        let confirmed = UserDataSnapshot::default();
+        let (identity, _, _) = intents.submit(&confirmed.favorites, item.clone(), true);
+        intents.begin_work(&identity);
+        intents.submit(&confirmed.favorites, item, false);
+        assert!(!intents.fail_work(&identity));
+        assert_eq!(intents.desired_state(&identity), Some(false));
+        assert!(matches!(
+            intents.begin_work(&identity),
+            FavoriteWork::Write {
+                is_favorite: false,
+                ..
+            }
+        ));
+        intents.submit(
+            &confirmed.favorites,
+            track("source-one", "source-id", serde_json::json!([])),
+            true,
+        );
+        intents.submit(
+            &confirmed.favorites,
+            track("source-one", "source-id", serde_json::json!([])),
+            false,
+        );
+        assert!(!intents.fail_work(&identity));
+        intents.begin_work(&identity);
+        assert!(intents.fail_work(&identity));
+        assert_eq!(intents.project(&confirmed), confirmed);
     }
 
     #[test]

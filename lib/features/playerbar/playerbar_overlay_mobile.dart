@@ -87,9 +87,26 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
   Duration _dragOffsetAnimationDuration = Duration.zero;
   bool _isDragging = false;
 
+  // The favorite indicator changes independently of playback snapshots.
+  @override
+  void initState() {
+    super.initState();
+    widget.userDataController?.favoritesChanges.addListener(
+      _onFavoritesChanged,
+    );
+  }
+
   @override
   void didUpdateWidget(covariant PlayerBarOverlayMobile oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.userDataController != widget.userDataController) {
+      oldWidget.userDataController?.favoritesChanges.removeListener(
+        _onFavoritesChanged,
+      );
+      widget.userDataController?.favoritesChanges.addListener(
+        _onFavoritesChanged,
+      );
+    }
     if (!widget.isOpen && _dragOffset != 0) {
       _dragOffsetAnimationDuration = Duration.zero;
     }
@@ -127,8 +144,20 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
       return;
     }
 
-    final bool isFavorite = controller.isFavorite(track) || track.favorite;
+    final bool isFavorite = controller.isFavorite(track);
     controller.setFavorite(<Track>[track], !isFavorite);
+  }
+
+  @override
+  void dispose() {
+    widget.userDataController?.favoritesChanges.removeListener(
+      _onFavoritesChanged,
+    );
+    super.dispose();
+  }
+
+  void _onFavoritesChanged() {
+    setState(() {});
   }
 
   void _handleDragUpdate(DragUpdateDetails details) {

@@ -22,7 +22,7 @@ class PlaylistDetailController extends ChangeNotifier {
          itemId: itemId,
          provider: providerInstanceIdOrDomain,
        ) {
-    userDataController?.favoritesChanges.addListener(_onUserDataChanged);
+    userDataController?.favoritesChanges.addListener(_onFavoritesChanged);
     userDataController?.playlistsChanges.addListener(_onUserDataChanged);
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
     _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
@@ -61,12 +61,10 @@ class PlaylistDetailController extends ChangeNotifier {
   final collection.Queue<((String, String), CoreQueryScope)>
   _queuedArtistAlbums = collection.Queue();
   Timer? _artistAlbumsAdmission;
-  final Map<String, bool> _favoriteOverrides = <String, bool>{};
 
   bool _isLoadingMetadata = true;
   bool _isLoadingTracks = true;
   bool _isLoadingTrackAlbums = false;
-  bool _isPlaylistFavorite = false;
   bool _hasLoadedPrivatePlaylist = false;
   bool _isPlaylistDeleted = false;
   bool _isDisposed = false;
@@ -137,7 +135,7 @@ class PlaylistDetailController extends ChangeNotifier {
     _readStatusNotifier.dispose();
     _queryScope.cancel();
     _loadGeneration++;
-    userDataController?.favoritesChanges.removeListener(_onUserDataChanged);
+    userDataController?.favoritesChanges.removeListener(_onFavoritesChanged);
     userDataController?.playlistsChanges.removeListener(_onUserDataChanged);
     final playlistId = _observedPrivatePlaylistId;
     if (playlistId != null) {
@@ -156,7 +154,8 @@ class PlaylistDetailController extends ChangeNotifier {
   bool get isLoadingMetadata => _isLoadingMetadata;
   bool get isLoadingTracks => _isLoadingTracks;
   bool get isLoadingSections => _isSelectingProvider || _isLoadingTracks;
-  bool get isPlaylistFavorite => _isPlaylistFavorite;
+  bool get isPlaylistFavorite =>
+      _playlist != null && isItemFavorite(_playlist!);
   bool get isPlaylistDeleted => _isPlaylistDeleted;
   bool get isEditable => _playlist?.isEditable ?? false;
   bool get isPrivatePlaylist =>
@@ -217,7 +216,6 @@ class PlaylistDetailController extends ChangeNotifier {
           userDataController?.withFavoriteStatus(playlist) ?? playlist;
       final hasChangedMetadata = !hasSameMediaContent(_playlist, incoming);
       if (hasChangedMetadata) _playlist = incoming;
-      _isPlaylistFavorite = isItemFavorite(_playlist!);
       final firstMetadata = _firstMetadata;
       if (firstMetadata != null && !firstMetadata.isCompleted) {
         firstMetadata.complete(_playlist);
@@ -492,8 +490,6 @@ class PlaylistDetailController extends ChangeNotifier {
       _isPlaylistDeleted = true;
       _playlist = null;
       _tracks = const <Track>[];
-      _favoriteOverrides.clear();
-      _isPlaylistFavorite = false;
       _isLoadingMetadata = false;
       _isLoadingTracks = false;
       notifyListeners();
@@ -537,14 +533,11 @@ class PlaylistDetailController extends ChangeNotifier {
             .map((Track track) {
               final Track withFavorite =
                   userDataController?.withFavoriteStatus(track) ?? track;
-              _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
               return withFavorite;
             })
             .toList(growable: false),
       ),
     );
-
-    _isPlaylistFavorite = _playlist?.favorite ?? false;
   }
 
   Future<void> _loadMetadata() async {
@@ -556,7 +549,6 @@ class PlaylistDetailController extends ChangeNotifier {
       if (_isLoadCanceled) return;
       final incoming = userDataController?.withFavoriteStatus(online) ?? online;
       if (!hasSameMediaContent(_playlist, incoming)) _playlist = incoming;
-      _isPlaylistFavorite = _playlist?.favorite ?? false;
     } catch (_) {
     } finally {
       if (!_isLoadCanceled) {
@@ -587,7 +579,6 @@ class PlaylistDetailController extends ChangeNotifier {
             .map((Track track) {
               final Track withFavorite =
                   userDataController?.withFavoriteStatus(track) ?? track;
-              _favoriteOverrides[_favoriteKey(track)] = withFavorite.favorite;
               return withFavorite;
             })
             .toList(growable: false),
@@ -827,26 +818,19 @@ class PlaylistDetailController extends ChangeNotifier {
   }
 
   // Favorites
+  void _onFavoritesChanged() {
+    if (_isDisposed) return;
+    notifyListeners();
+  }
+
   bool isItemFavorite(MediaItem item) =>
-      _favoriteOverrides[_favoriteKey(item)] ?? item.favorite;
+      userDataController?.isFavorite(item) ?? item.favorite;
 
   Future<void> toggleItemFavorite(MediaItem item) async {
-    final String key = _favoriteKey(item);
     final bool next = !isItemFavorite(item);
-    _favoriteOverrides[key] = next;
-    notifyListeners();
     try {
-      final UserData? controller = userDataController;
-      if (controller == null) {
-        _favoriteOverrides.remove(key);
-        notifyListeners();
-        return;
-      }
-      await controller.setFavorite(<MediaItem>[item], next);
-    } catch (_) {
-      _favoriteOverrides[key] = !next;
-      notifyListeners();
-    }
+      await userDataController?.setFavorite(<MediaItem>[item], next);
+    } catch (_) {}
   }
 
   Future<void> togglePlaylistFavorite() async {
@@ -854,21 +838,7 @@ class PlaylistDetailController extends ChangeNotifier {
     if (current == null) {
       return;
     }
-    final bool next = !_isPlaylistFavorite;
-    _isPlaylistFavorite = next;
-    notifyListeners();
-    try {
-      final UserData? controller = userDataController;
-      if (controller == null) {
-        _isPlaylistFavorite = !next;
-        notifyListeners();
-        return;
-      }
-      await controller.setFavorite(<MediaItem>[current], next);
-    } catch (_) {
-      _isPlaylistFavorite = !next;
-      notifyListeners();
-    }
+    await toggleItemFavorite(current);
   }
 
   // Editing
@@ -967,7 +937,4 @@ class PlaylistDetailController extends ChangeNotifier {
 
     return null;
   }
-
-  String _favoriteKey(MediaItem item) =>
-      '${item.mediaType.name}|${item.provider}|${item.itemId}';
 }

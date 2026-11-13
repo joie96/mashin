@@ -18,6 +18,7 @@ class AlbumDetailController extends ChangeNotifier {
          itemId: itemId,
          provider: providerInstanceIdOrDomain,
        ) {
+    userDataController?.favoritesChanges.addListener(_onFavoritesChanged);
     _catalogSubscription = coreBridge.catalogUpdates.listen(_onCatalogUpdate);
     _cacheSubscription = coreBridge.mediaReadInvalidations.listen(
       _onMediaReadInvalidated,
@@ -51,13 +52,11 @@ class AlbumDetailController extends ChangeNotifier {
   List<Track> _tracks = const <Track>[];
   List<Album> _otherAlbums = const <Album>[];
   List<Artist> _similarArtists = const <Artist>[];
-  final Map<String, bool> _favoriteOverrides = <String, bool>{};
 
   bool _isLoadingMetadata = true;
   bool _isLoadingTracks = true;
   bool _isLoadingOtherAlbums = true;
   bool _isLoadingSimilarArtists = true;
-  bool _isAlbumFavorite = false;
   bool _isDescriptionExpanded = false;
   bool _isControllerDisposed = false;
   bool _isPageVisible = true;
@@ -125,6 +124,7 @@ class AlbumDetailController extends ChangeNotifier {
   @override
   void dispose() {
     _isControllerDisposed = true;
+    userDataController?.favoritesChanges.removeListener(_onFavoritesChanged);
     unawaited(_catalogSubscription?.cancel());
     unawaited(_cacheSubscription?.cancel());
     unawaited(_readSubscription?.cancel());
@@ -154,7 +154,6 @@ class AlbumDetailController extends ChangeNotifier {
       final incoming = userDataController?.withFavoriteStatus(album) ?? album;
       if (hasSameMediaContent(_album, incoming) && !_isLoadingMetadata) return;
       _album = incoming;
-      _isAlbumFavorite = isItemFavorite(_album!);
       _isLoadingMetadata = false;
       if (_firstMetadata case final pending? when !pending.isCompleted) {
         pending.complete(_album);
@@ -218,10 +217,8 @@ class AlbumDetailController extends ChangeNotifier {
     _tracks = const [];
     _otherAlbums = const [];
     _similarArtists = const [];
-    _favoriteOverrides.clear();
     _sectionContext = null;
     _hasObservedTracks = false;
-    _isAlbumFavorite = false;
     _isLoadingMetadata = false;
     _isLoadingTracks = false;
     _isLoadingOtherAlbums = false;
@@ -249,7 +246,7 @@ class AlbumDetailController extends ChangeNotifier {
       _isLoadingTracks ||
       _isLoadingOtherAlbums ||
       _isLoadingSimilarArtists;
-  bool get isAlbumFavorite => _isAlbumFavorite;
+  bool get isAlbumFavorite => _album != null && isItemFavorite(_album!);
   bool get isDescriptionExpanded => _isDescriptionExpanded;
   Listenable get metadataListenable => _metadataNotifier;
   Listenable get readStatusListenable => _readStatusNotifier;
@@ -437,8 +434,6 @@ class AlbumDetailController extends ChangeNotifier {
       final incoming = userDataController?.withFavoriteStatus(loaded) ?? loaded;
       hasNewMetadata = !hasSameMediaContent(_album, incoming);
       if (hasNewMetadata) _album = incoming;
-      final Album? album = _album;
-      _isAlbumFavorite = album != null && isItemFavorite(album);
       _logSection('metadata', 'loaded elapsed_ms=${timer.elapsedMilliseconds}');
     } catch (error) {
       if (_isLoadCanceled) return;
@@ -844,29 +839,23 @@ class AlbumDetailController extends ChangeNotifier {
     );
   }
 
-  bool isItemFavorite(MediaItem item) =>
-      _favoriteOverrides[_favoriteKey(item)] ?? item.favorite;
-
-  Future<void> toggleItemFavorite(MediaItem item) async {
-    final String key = _favoriteKey(item);
-    final bool next = !isItemFavorite(item);
-    _favoriteOverrides[key] = next;
+  // Favorite changes share one session-owned status across all open views.
+  void _onFavoritesChanged() {
+    if (_isControllerDisposed) return;
+    _metadataNotifier.notifyListeners();
     _tracksNotifier.notifyListeners();
     _relatedNotifier.notifyListeners();
+    notifyListeners();
+  }
+
+  bool isItemFavorite(MediaItem item) =>
+      userDataController?.isFavorite(item) ?? item.favorite;
+
+  Future<void> toggleItemFavorite(MediaItem item) async {
+    final bool next = !isItemFavorite(item);
     try {
-      final UserData? controller = userDataController;
-      if (controller == null) {
-        _favoriteOverrides.remove(key);
-        _tracksNotifier.notifyListeners();
-        _relatedNotifier.notifyListeners();
-        return;
-      }
-      await controller.setFavorite(<MediaItem>[item], next);
-    } catch (_) {
-      _favoriteOverrides[key] = !next;
-      _tracksNotifier.notifyListeners();
-      _relatedNotifier.notifyListeners();
-    }
+      await userDataController?.setFavorite(<MediaItem>[item], next);
+    } catch (_) {}
   }
 
   Future<void> toggleAlbumFavorite() async {
@@ -874,21 +863,7 @@ class AlbumDetailController extends ChangeNotifier {
     if (current == null) {
       return;
     }
-    final bool next = !_isAlbumFavorite;
-    _isAlbumFavorite = next;
-    _metadataNotifier.notifyListeners();
-    try {
-      final UserData? controller = userDataController;
-      if (controller == null) {
-        _isAlbumFavorite = !next;
-        _metadataNotifier.notifyListeners();
-        return;
-      }
-      await controller.setFavorite(<MediaItem>[current], next);
-    } catch (_) {
-      _isAlbumFavorite = !next;
-      _metadataNotifier.notifyListeners();
-    }
+    await toggleItemFavorite(current);
   }
 
   void toggleDescription() {
@@ -942,7 +917,4 @@ class AlbumDetailController extends ChangeNotifier {
             .toList(growable: false)
           ..sort((left, right) => (right.year ?? 0).compareTo(left.year ?? 0)),
       );
-
-  String _favoriteKey(MediaItem item) =>
-      '${item.mediaType.name}|${item.provider}|${item.itemId}';
 }
