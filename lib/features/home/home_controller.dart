@@ -19,7 +19,12 @@ class HomeController extends ChangeNotifier {
     required this.coreBridge,
     this.userDataController,
     math.Random? random,
-  }) : _random = random ?? math.Random() {
+    DateTime Function()? now,
+  }) : _random = random ?? math.Random(),
+       _now = now ?? DateTime.now {
+    _playerStateSubscription = coreBridge.playerStateChanges.listen(
+      _handlePlaybackChanged,
+    );
     _eventSubscription = coreBridge.events.listen((event) {
       if (!_isDisposed &&
           _hasStartedLoading &&
@@ -74,6 +79,8 @@ class HomeController extends ChangeNotifier {
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
   final math.Random _random;
+  final DateTime Function() _now;
+  StreamSubscription<PlayerState>? _playerStateSubscription;
   StreamSubscription<Map<String, dynamic>>? _eventSubscription;
   StreamSubscription<CatalogUpdate>? _catalogSubscription;
   bool _hasStartedLoading = false;
@@ -108,6 +115,12 @@ class HomeController extends ChangeNotifier {
   bool _isReadingRecentListens = false;
   bool _hasRecentListensLoadError = false;
   int _recentListensRecoveryAttempts = 0;
+  static const _recentListensRefreshInterval = Duration(seconds: 30);
+  PlayerState? _previousPlaybackState;
+  DateTime? _previousPlaybackObservedAt;
+  DateTime? _lastRecentListensReadAt;
+  Duration _currentTrackPlayedDuration = Duration.zero;
+  bool _shouldRefreshRecentListens = false;
 
   List<Track> _recommendationItems = const <Track>[];
   List<Playlist> _genrePlaylists = const <Playlist>[];
@@ -509,9 +522,64 @@ class HomeController extends ChangeNotifier {
     );
   }
 
+  // Playback observation and history refresh.
+  void _handlePlaybackChanged(PlayerState state) {
+    if (_isDisposed || !_hasStartedLoading) return;
+    final now = _now();
+    final previous = _previousPlaybackState;
+    final observedAt = _previousPlaybackObservedAt;
+    if (state.connectionState != CoreConnectionState.online) {
+      _previousPlaybackState = null;
+      _previousPlaybackObservedAt = null;
+      _currentTrackPlayedDuration = Duration.zero;
+      return;
+    }
+    if (previous?.playbackState == PlayState.playing &&
+        previous?.currentQueueItemId != null &&
+        observedAt != null &&
+        !now.isBefore(observedAt)) {
+      _currentTrackPlayedDuration += now.difference(observedAt);
+    }
+    final hasChangedTrack =
+        previous?.currentQueueItemId != null &&
+        previous!.currentQueueItemId != state.currentQueueItemId;
+    final hasEndedPlayback =
+        previous?.currentQueueItemId != null &&
+        previous!.playbackState != PlayState.idle &&
+        state.playbackState == PlayState.idle;
+    final hasRepeatedTrack =
+        previous?.currentQueueItemId != null &&
+        previous!.currentQueueItemId == state.currentQueueItemId &&
+        previous.playbackState == PlayState.playing &&
+        state.playbackState == PlayState.playing &&
+        (previous.durationMillis ?? 0) > 0 &&
+        (previous.positionMillis ?? 0) >= previous.durationMillis! - 1500 &&
+        (state.positionMillis ?? 1501) <= 1500;
+    final hasFinishedTrack =
+        hasChangedTrack || hasEndedPlayback || hasRepeatedTrack;
+    final hasPlayedLongEnough =
+        _currentTrackPlayedDuration >= _recentListensRefreshInterval;
+    _previousPlaybackState = state;
+    _previousPlaybackObservedAt = now;
+    if (hasFinishedTrack) _currentTrackPlayedDuration = Duration.zero;
+    if (!hasFinishedTrack || !hasPlayedLongEnough) return;
+    final lastReadAt = _lastRecentListensReadAt;
+    if (lastReadAt != null &&
+        now.difference(lastReadAt) < _recentListensRefreshInterval) {
+      return;
+    }
+    if (_isReadingRecentListens) {
+      _shouldRefreshRecentListens = true;
+    } else {
+      unawaited(_loadRecentListens());
+    }
+  }
+
   Future<void> _loadRecentListens() async {
     if (_isDisposed || _isReadingRecentListens) return;
     _isReadingRecentListens = true;
+    _shouldRefreshRecentListens = false;
+    _lastRecentListensReadAt = _now();
     _hasRecentListensLoadError = false;
     _isLoadingRecentListens = _recentListens.isEmpty;
     _notifySection(_recentListensNotifier);
@@ -530,6 +598,9 @@ class HomeController extends ChangeNotifier {
       _isLoadingRecentListens = false;
       _notifySection(_recentListensNotifier);
       notifyListeners();
+      if (_shouldRefreshRecentListens) {
+        unawaited(_loadRecentListens());
+      }
     }
   }
 
@@ -691,6 +762,7 @@ class HomeController extends ChangeNotifier {
   @override
   void dispose() {
     _isDisposed = true;
+    unawaited(_playerStateSubscription?.cancel());
     unawaited(_eventSubscription?.cancel());
     unawaited(_catalogSubscription?.cancel());
     _recommendationsNotifier.dispose();

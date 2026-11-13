@@ -245,7 +245,7 @@ pub(super) fn read_catalog_section(
             .collect::<Result<Vec<_>, CacheError>>()?;
         return Ok(CatalogValue::Albums(albums));
     }
-    let tracks = occurrences
+    let mut tracks = occurrences
         .into_iter()
         .map(|occurrence| {
             let mut track = snapshot.read_track(
@@ -342,6 +342,9 @@ pub(super) fn read_catalog_section(
             Ok(track)
         })
         .collect::<Result<Vec<_>, CacheError>>()?;
+    if matches!(query, CatalogQuery::RecentlyPlayed { .. }) {
+        super::track_reads::hydrate_recent_tracks(transaction, &mut tracks, user_id)?;
+    }
     Ok(
         if matches!(
             query,

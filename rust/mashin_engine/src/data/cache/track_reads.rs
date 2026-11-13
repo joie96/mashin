@@ -316,6 +316,36 @@ pub(crate) fn read_partial_track(
         .map(|track| track_value(query, track)))
 }
 
+// History membership stays authoritative while canonical details fill missing fields.
+pub(super) fn hydrate_recent_tracks(
+    transaction: &Transaction<'_>,
+    tracks: &mut [Track],
+    user_id: &UserId,
+) -> Result<(), CacheError> {
+    for track in tracks {
+        let query = CatalogQuery::Track {
+            provider: track.media.provider.as_str().to_owned(),
+            item_id: track.media.item_id.clone(),
+        };
+        if let Some(CatalogValue::Track(known)) = read_partial_track(transaction, &query, user_id)?
+        {
+            *track = merge_recent_track(known, track);
+        }
+    }
+    Ok(())
+}
+
+pub(super) fn merge_recent_track(mut known: Track, reference: &Track) -> Track {
+    known.media.provider = reference.media.provider.clone();
+    known.media.item_id = reference.media.item_id.clone();
+    let mut merged = MediaItem::Track(known);
+    merged.merge_known(MediaItem::Track(reference.clone()));
+    let MediaItem::Track(hydrated) = merged else {
+        unreachable!()
+    };
+    hydrated
+}
+
 // Private list coverage, typed reference decoding and catalog projection.
 fn write_track_list(
     transaction: &Transaction<'_>,
@@ -635,6 +665,24 @@ mod tests {
         let transaction = connection.transaction().unwrap();
         let user = UserId("user".into());
         write_track_observation(&transaction, &track("album-a", 4), &user).unwrap();
+        let mut references: Vec<Track> = serde_json::from_value(json!([
+            {"provider":"source-b","item_id":"remote","name":"Unknown"},
+            {"provider":"source-a","item_id":"remote","name":"History alias","image":null},
+            {"provider":"library","item_id":"007","name":"History library"},
+            {"provider":"source-a","item_id":"remote","name":"Repeated alias"}
+        ])).unwrap();
+        hydrate_recent_tracks(&transaction, &mut references, &user).unwrap();
+        assert!(!references[0].knowledge.duration);
+        for index in [1, 2, 3] {
+            assert_eq!(references[index].duration, 240);
+            assert!(references[index].knowledge.duration);
+        }
+        assert_eq!(references[1].media.provider.as_str(), "source-a");
+        assert_eq!(references[1].media.item_id.as_str(), "remote");
+        assert_eq!(references[1].media.name, "History alias");
+        assert_eq!(references[3].media.name, "Repeated alias");
+        assert_eq!(references[1].image, None);
+        assert!(references[1].knowledge.image);
         let query = CatalogQuery::RecentlyPlayed { limit: 2 };
         let value = CatalogValue::Tracks(serde_json::from_value(json!([
             {"media_type":"track","provider":"source-b","item_id":"007","name":"Provider recent","image":null,"available":true},

@@ -764,6 +764,10 @@ impl CatalogRuntime {
                             return;
                         }
                     };
+                    let history_references = match &value {
+                        CatalogValue::Tracks(tracks) if matches!(query, CatalogQuery::RecentlyPlayed { .. }) => tracks.clone(),
+                        _ => Vec::new(),
+                    };
                     let persistence_started = Instant::now();
                     let persistence = match local_result {
                         Ok((context, _)) => {
@@ -822,8 +826,19 @@ impl CatalogRuntime {
                             }
                         }
                     }
-                    timings.log_result(&publication, &state);
-                    publication.publish(state);
+                    if matches!(query, CatalogQuery::RecentlyPlayed { .. })
+                        && state.phase == CatalogLoadPhase::Ready
+                    {
+                        state.phase = CatalogLoadPhase::Refreshing;
+                        publication.publish(state.clone());
+                        let observer = Arc::downgrade(&publication);
+                        drop(publication);
+                        drop(_persistence_owner);
+                        runtime.hydrate_recently_played(observer, state, history_references, expected_revision, timings).await;
+                    } else {
+                        timings.log_result(&publication, &state);
+                        publication.publish(state);
+                    }
                 },
             )
             .await;
@@ -833,6 +848,116 @@ impl CatalogRuntime {
             .lock()
             .unwrap_or_else(|error| error.into_inner()) = Some(worker.abort_handle());
         refresh
+    }
+
+    // Optional details belong to the history observer, not its retained persistence owner.
+    fn hydrate_recently_played(
+        self: &Arc<Self>,
+        observer: Weak<Refresh>,
+        mut state: CatalogLoadSnapshot,
+        references: Vec<crate::domain::media::Track>,
+        expected_revision: u64,
+        timings: RefreshTimings,
+    ) -> futures_util::future::BoxFuture<'static, ()> {
+        let runtime = self.clone();
+        Box::pin(async move {
+            let Some(CatalogValue::Tracks(mut tracks)) = state.value.take().map(Arc::unwrap_or_clone)
+            else {
+                return;
+            };
+            if let Ok(context) = runtime.cache_context().await {
+                let mut local_tracks = tracks.clone();
+                let user_id = context.user_id.clone();
+                match context
+                    .database
+                    .read_snapshot(move |snapshot| {
+                        super::track_reads::hydrate_recent_tracks(
+                            snapshot,
+                            &mut local_tracks,
+                            &user_id,
+                        )?;
+                        Ok(local_tracks)
+                    })
+                    .await
+                {
+                    Ok(hydrated) => tracks = hydrated,
+                    Err(error) => state.cache_error = Some(error.to_string()),
+                }
+            }
+            let catalog = CachedCatalog {
+                inner: runtime.clone(),
+            };
+            let mut identities = std::collections::HashSet::new();
+            let mut details = futures_util::stream::SelectAll::new();
+            for track in &tracks {
+                let identity = (track.media.provider.clone(), track.media.item_id.clone());
+                if !track.knowledge.duration && identities.insert(identity.clone()) {
+                    let query = CatalogQuery::ProviderItem {
+                        media_type: crate::domain::media::MediaType::Track,
+                        provider: identity.0.as_str().to_owned(),
+                        item_id: identity.1.clone(),
+                    };
+                    details.push(
+                        catalog
+                            .observe_cached(query, false, false)
+                            .map(move |snapshot| (identity.clone(), snapshot))
+                            .boxed(),
+                    );
+                }
+            }
+            loop {
+                if runtime.require_active().is_err()
+                    || runtime
+                        .confirmed_revision
+                        .load(std::sync::atomic::Ordering::Acquire)
+                        != expected_revision
+                {
+                    state.phase = CatalogLoadPhase::Invalidated;
+                    state.value = None;
+                    state.error = Some("history hydration invalidated".into());
+                    state.knowledge = CatalogReadKnowledge::Unknown;
+                } else {
+                    state.value = Some(Arc::new(CatalogValue::Tracks(tracks.clone())));
+                    state.phase = if details.is_empty() {
+                        CatalogLoadPhase::Ready
+                    } else {
+                        CatalogLoadPhase::Refreshing
+                    };
+                }
+                let Some(publication) = observer.upgrade() else {
+                    return;
+                };
+                let is_done = matches!(
+                    state.phase,
+                    CatalogLoadPhase::Ready | CatalogLoadPhase::Invalidated
+                );
+                if is_done {
+                    timings.log_result(&publication, &state);
+                }
+                publication.publish(state.clone());
+                drop(publication);
+                if is_done {
+                    return;
+                }
+                let Some((identity, snapshot)) = details.next().await else {
+                    continue;
+                };
+                if let Some(error) = snapshot.cache_error {
+                    state.cache_error = Some(error);
+                }
+                if let Some(CatalogValue::Item(crate::domain::media::MediaItem::Track(known))) =
+                    snapshot.value.as_deref()
+                {
+                    for (track, reference) in tracks.iter_mut().zip(&references) {
+                        if reference.media.provider == identity.0
+                            && reference.media.item_id == identity.1
+                        {
+                            *track = super::track_reads::merge_recent_track(known.clone(), reference);
+                        }
+                    }
+                }
+            }
+        })
     }
 
     // Local observations never decide whether the online operation is needed.
@@ -3280,6 +3405,223 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn recently_played_hydrates_cache_aliases_and_online_details_without_losing_occurrences() {
+        for succeeds in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let cache = cache(directory.path()).await;
+            cache.database().await.unwrap().write_transaction(|transaction| {
+                    for value in [
+                        json!({"provider":"library","item_id":"007","name":"Cached","duration":240,
+                            "provider_mappings":[{"provider_domain":"source","provider_instance":"source-a","item_id":"remote"}]}),
+                        json!({"provider":"source-a","item_id":"zero","name":"Zero","duration":0}),
+                        json!({"provider":"library","item_id":"008","name":"Partial detail",
+                            "artists":[{"provider":"library","item_id":"old-artist","name":"Old artist"}],
+                            "provider_mappings":[{"provider_domain":"source","provider_instance":"source-b","item_id":"new"}]}),
+                    ] {
+                        super::super::tracks::write_track_observation(transaction,
+                            &serde_json::from_value(value).unwrap(), &UserId("user".into()))?;
+                    }
+                    Ok(())
+                }).await.unwrap();
+            let detail = if succeeds {
+                json!({"media_type":"track","provider":"library","item_id":"008","name":"Detail name","duration":181,
+                        "artists":[],"album":null,
+                        "provider_mappings":[{"provider_domain":"source","provider_instance":"source-b","item_id":"new"}]})
+            } else {
+                json!({"test_http_status":503})
+            };
+            let (client, worker) = server(vec![
+                (
+                    "music/recently_played_items",
+                    json!([
+                        {"media_type":"track","provider":"source-b","item_id":"new","name":"New history"},
+                        {"media_type":"track","provider":"source-a","item_id":"remote","name":"Alias history"},
+                        {"media_type":"track","provider":"source-b","item_id":"new","name":"Repeated history"},
+                        {"media_type":"track","provider":"source-a","item_id":"zero","name":"Zero history"}
+                    ]),
+                ),
+                ("music/item", detail),
+            ]);
+            let catalog = CachedCatalog::new(
+                Arc::new(client),
+                cache.clone(),
+                UserId("user".into()),
+                Duration::from_secs(60),
+            )
+            .await
+            .unwrap();
+            let query = CatalogQuery::RecentlyPlayed { limit: 4 };
+            let mut observed = catalog.observe_catalog(query.clone(), false);
+            let mut saw_sparse_server = false;
+            let mut saw_cache_details = false;
+            let final_tracks = tokio::time::timeout(Duration::from_secs(5), async {
+                while let Some(snapshot) = observed.next().await {
+                    if let Some(CatalogValue::Tracks(tracks)) = snapshot.value.as_deref() {
+                        saw_sparse_server |= snapshot.source
+                            == Some(crate::domain::catalog::CatalogDataSource::Server)
+                            && !tracks[0].knowledge.duration;
+                        saw_cache_details |= tracks[1].duration == 240 && tracks[3].knowledge.duration;
+                        if snapshot.phase == CatalogLoadPhase::Ready {
+                            return tracks.clone();
+                        }
+                    }
+                }
+                panic!("history did not complete")
+            })
+            .await
+            .unwrap();
+            assert!(saw_sparse_server);
+            assert!(saw_cache_details);
+            assert_eq!(final_tracks.len(), 4);
+            assert_eq!(final_tracks[0].media.name, "New history");
+            assert_eq!(final_tracks[1].duration, 240);
+            assert_eq!(final_tracks[2].media.name, "Repeated history");
+            assert_eq!(final_tracks[3].duration, 0);
+            for index in [0, 2] {
+                assert_eq!(final_tracks[index].knowledge.duration, succeeds);
+                assert_eq!(final_tracks[index].duration, if succeeds { 181 } else { 0 });
+                assert_eq!(final_tracks[index].artists.is_empty(), succeeds);
+                assert_eq!(final_tracks[index].media.provider.as_str(), "source-b");
+                assert_eq!(final_tracks[index].media.item_id.as_str(), "new");
+            }
+            let requests = worker.join().unwrap();
+            assert_eq!(requests.len(), 2);
+            assert_eq!(
+                requests[1]["args"],
+                json!({"item_id":"new",
+                    "media_type":"track","provider_instance_id_or_domain":"source-b","allow_update_metadata":false})
+            );
+            drop(observed);
+            drop(catalog);
+            let cached = cache
+                .database()
+                .await
+                .unwrap()
+                .read_snapshot(move |snapshot| {
+                    Ok(read_cached_read(snapshot, &query, &UserId("user".into()))?
+                        .unwrap()
+                        .value)
+                })
+                .await
+                .unwrap();
+            let CatalogValue::Tracks(cached) = cached else {
+                panic!("cached history missing")
+            };
+            assert_eq!(cached[0].knowledge.duration, succeeds);
+            assert_eq!(cached[2].duration, if succeeds { 181 } else { 0 });
+            assert_eq!(cached[1].duration, 240);
+            cache.shutdown().await.unwrap();
+            let reopened = ServerCache::initialize(directory.path().to_owned())
+                .await
+                .unwrap();
+            reopened.activate("server".into()).await.unwrap();
+            let restored = reopened
+                .database()
+                .await
+                .unwrap()
+                .read_snapshot(|snapshot| {
+                    Ok(read_cached_read(
+                        snapshot,
+                        &CatalogQuery::RecentlyPlayed { limit: 4 },
+                        &UserId("user".into()),
+                    )?
+                    .unwrap()
+                    .value)
+                })
+                .await
+                .unwrap();
+            assert_eq!(restored, CatalogValue::Tracks(cached));
+            reopened.shutdown().await.unwrap();
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recently_played_last_consumer_cancels_pending_hydration() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = cache(directory.path()).await;
+        let entered = Arc::new(tokio::sync::Notify::new());
+        let release = Arc::new(std::sync::Barrier::new(2));
+        let signal = entered.clone();
+        let barrier = release.clone();
+        let (client, worker) = server_with_request_handler(
+            vec![
+                (
+                    "music/recently_played_items",
+                    json!([
+                        {"media_type":"track","provider":"source","item_id":"pending","name":"History"}
+                    ]),
+                ),
+                (
+                    "music/item",
+                    json!({"media_type":"track","provider":"source","item_id":"pending","name":"Late","duration":123}),
+                ),
+            ],
+            move |request| {
+                if request["command"] == "music/item" {
+                    signal.notify_one();
+                    barrier.wait();
+                }
+            },
+        );
+        let client = Arc::new(client);
+        let catalog = CachedCatalog::new(
+            client.clone(),
+            cache.clone(),
+            UserId("user".into()),
+            Duration::ZERO,
+        )
+        .await
+        .unwrap();
+        let query = CatalogQuery::RecentlyPlayed { limit: 1 };
+        let mut first = catalog.observe_catalog(query.clone(), false);
+        let mut second = catalog.observe_catalog(query.clone(), false);
+        first.next().await.unwrap();
+        second.next().await.unwrap();
+        tokio::time::timeout(Duration::from_secs(5), async {
+                loop {
+                    let snapshot = first.next().await.unwrap();
+                    if snapshot.value.as_ref().is_some_and(|value| matches!(value.as_ref(), CatalogValue::Tracks(tracks) if !tracks.is_empty())) {
+                        break;
+                    }
+                }
+                entered.notified().await;
+            }).await.unwrap();
+        assert_eq!(client.pending_read_count(), 1);
+        drop(first);
+        assert_eq!(client.pending_read_count(), 1);
+        drop(second);
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while client.pending_read_count() != 0 {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .unwrap();
+        release.wait();
+        let _ = worker.join();
+        cache
+            .database()
+            .await
+            .unwrap()
+            .read_snapshot(move |snapshot| {
+                let CatalogValue::Tracks(tracks) =
+                    read_cached_read(snapshot, &query, &UserId("user".into()))?
+                        .unwrap()
+                        .value
+                else {
+                    panic!("history missing")
+                };
+                assert_eq!(tracks[0].media.name, "History");
+                assert!(!tracks[0].knowledge.duration);
+                Ok(())
+            })
+            .await
+            .unwrap();
+        drop(catalog);
+        cache.shutdown().await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn track_lists_share_refresh_retain_failure_and_reject_preconfirmation_response_after_reopen(
     ) {
         use crate::domain::media::{FieldKnowledge, MediaItem};
@@ -3358,8 +3700,7 @@ mod tests {
                     {"provider":"source-b","item_id":"version","name":"Other","album":null,"image":null}
                 ])
             };
-            let (client, worker) = server_with_request_handler(
-                vec![
+            let mut responses = vec![
                     (command, updated_response),
                     (command, json!({"test_http_status":503})),
                     (command, json!([])),
@@ -3367,8 +3708,18 @@ mod tests {
                         command,
                         json!([{"media_type":"track","provider":"source-a","item_id":"version","name":"Before confirmation"}]),
                     ),
-                ],
+                ];
+            if is_recently_played {
+                responses.push(("music/item", json!({"test_http_status":503})));
+            }
+            let (client, worker) = server_with_request_handler(
+                responses,
                 move |request| {
+                    if request["command"] == "music/item" {
+                        assert_eq!(request["args"], json!({"item_id":"version",
+                            "media_type":"track","provider_instance_id_or_domain":"source-b","allow_update_metadata":false}));
+                        return;
+                    }
                     assert_eq!(request["args"], expected_arguments);
                     if matches!(
                         requests_seen.fetch_add(1, std::sync::atomic::Ordering::SeqCst),
@@ -3440,7 +3791,7 @@ mod tests {
             drop(stale_second);
             drop(catalog);
             cache.shutdown().await.unwrap();
-            assert_eq!(worker.join().unwrap().len(), 4);
+            assert_eq!(worker.join().unwrap().len(), if is_recently_played { 5 } else { 4 });
             let reopened = ServerCache::initialize(directory.path().to_owned())
                 .await
                 .unwrap();
