@@ -466,7 +466,7 @@ class _AppShellState extends State<AppShell> {
               mediaSessionChanges: _coreEvents,
               child: _QueueUiScope(
                 mediaSessionChanges: _coreEvents,
-                builder: (BuildContext context) => _DesktopCurrentTrackInfo(
+                builder: (BuildContext context) => DesktopCurrentTrackInfo(
                   trackTitle: _currentTrackTitle,
                   trackSubtitle: _currentTrackSubtitle,
                   currentTrackArtist: _currentTrackPrimaryArtist,
@@ -2134,8 +2134,9 @@ class _AudioProfileOption extends StatelessWidget {
   }
 }
 
-class _DesktopCurrentTrackInfo extends StatelessWidget {
-  const _DesktopCurrentTrackInfo({
+class DesktopCurrentTrackInfo extends StatelessWidget {
+  const DesktopCurrentTrackInfo({
+    super.key,
     required this.trackTitle,
     required this.trackSubtitle,
     required this.currentTrackArtist,
@@ -2233,8 +2234,11 @@ class _DesktopCurrentTrackInfo extends StatelessWidget {
               ],
             ),
           ),
-          Builder(
-            builder: (BuildContext buttonContext) {
+          ListenableBuilder(
+            listenable: Listenable.merge([
+              userDataController?.favoritesChanges,
+            ]),
+            builder: (BuildContext buttonContext, Widget? child) {
               final Track? track = currentTrack;
               final bool isFavorite =
                   track != null &&

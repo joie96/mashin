@@ -76,12 +76,19 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
   @override
   void initState() {
     super.initState();
+    userDataController?.favoritesChanges.addListener(_onFavoritesChanged);
     _scrollToCurrentItem();
   }
 
   @override
   void didUpdateWidget(covariant QueueOverlayDesktop oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (oldWidget.userDataController != userDataController) {
+      oldWidget.userDataController?.favoritesChanges.removeListener(
+        _onFavoritesChanged,
+      );
+      userDataController?.favoritesChanges.addListener(_onFavoritesChanged);
+    }
     if (oldWidget.currentQueueIndex != widget.currentQueueIndex ||
         oldWidget.queueItems.length != widget.queueItems.length) {
       _scrollToCurrentItem();
@@ -90,8 +97,14 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
 
   @override
   void dispose() {
+    userDataController?.favoritesChanges.removeListener(_onFavoritesChanged);
     _queueScrollController.dispose();
     super.dispose();
+  }
+
+  // Favorite changes do not require a new playback or queue snapshot.
+  void _onFavoritesChanged() {
+    setState(() {});
   }
 
   void _scrollToCurrentItem() {
@@ -458,6 +471,24 @@ class _QueueOverlayDesktopState extends State<QueueOverlayDesktop> {
                         enableSelection: true,
                         coreBridge: widget.coreBridge,
                         coreEvents: coreEvents,
+                        isRowFavorite: (QueueItem item, int _) =>
+                            userDataController?.isFavorite(item.mediaItem) ??
+                            item.mediaItem.favorite,
+                        onRowFavoriteTap: userDataController == null
+                            ? null
+                            : (QueueItem item, int _) {
+                                final mediaItem = item.mediaItem;
+                                if (mediaItem is Track) {
+                                  unawaited(
+                                    userDataController!.setFavorite(
+                                      <Track>[mediaItem],
+                                      !userDataController!.isFavorite(
+                                        mediaItem,
+                                      ),
+                                    ),
+                                  );
+                                }
+                              },
                         onSelectionChanged: (List<QueueItem> items) {
                           setState(() {
                             _selectedItems = items;
