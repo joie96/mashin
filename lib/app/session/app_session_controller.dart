@@ -48,6 +48,7 @@ class AppSessionController extends ChangeNotifier {
   late final StreamSubscription<Map<String, dynamic>> _cacheSubscription;
 
   UserData? _userDataController;
+  Future<void>? _settingsInitialization;
   Future<void>? _initialization;
   Future<void>? _pendingLogout;
   String _baseUrl = '';
@@ -72,10 +73,20 @@ class AppSessionController extends ChangeNotifier {
   PreferredProvider? get preferredProvider =>
       PreferredProviderController.instance.preferredProvider;
 
+  // Load local presentation settings before the first frame, without authentication.
+  Future<void> initializeSettings() =>
+      _settingsInitialization ??= _runStartupTask(
+        'session settings',
+        _refreshSessionSettings,
+        _startupTimeout,
+      );
+
   Future<void> initialize() => _initialization ??= _initialize();
 
   Future<void> _initialize() async {
     try {
+      await initializeSettings();
+      if (_isDisposed) return;
       await _restoreSession();
       if (_isDisposed) return;
       await _refreshSessionSettings();

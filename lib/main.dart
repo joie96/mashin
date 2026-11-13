@@ -8,6 +8,7 @@ import 'app/shell/app_shell.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   final session = AppSessionController();
+  await session.initializeSettings();
   runApp(MashinApp(session: session));
   unawaited(session.initialize());
 }

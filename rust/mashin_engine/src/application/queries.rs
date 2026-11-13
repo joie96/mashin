@@ -235,7 +235,14 @@ impl Application {
             .coordinator
             .lock()
             .map_err(|_| ApplicationError::internal("core coordinator lock poisoned"))?;
-        Ok(session_settings(coordinator.session_configuration.as_ref()))
+        if let Some(session) = coordinator.session_configuration.as_ref() {
+            return Ok(session_settings(Some(session)));
+        }
+        let persisted_session = coordinator
+            .session_storage
+            .load_session()
+            .map_err(ApplicationError::command_failed)?;
+        Ok(session_settings(persisted_session.as_ref()))
     }
 
     pub(crate) fn read_player_state(&self) -> Result<PlayerState, ApplicationError> {

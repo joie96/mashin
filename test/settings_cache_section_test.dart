@@ -2,10 +2,46 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:mashin/app/session/app_session_controller.dart';
 import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/settings/settings_screen.dart';
+
+class _StartupBridge extends Fake implements MashinCoreBridge {
+  final settings = Completer<SessionSettings>();
+  final restoration = Completer<bool>();
+  int settingsReads = 0;
+  bool hasStartedRestoration = false;
+
+  // Local settings and session restoration remain independent.
+  @override
+  Stream<Map<String, dynamic>> get events => const Stream.empty();
+
+  @override
+  bool get isServiceOwnedPlayback => true;
+
+  @override
+  Future<SessionSettings> getSessionSettings() {
+    settingsReads++;
+    return settings.future;
+  }
+
+  @override
+  Future<bool> restorePersistedSession() {
+    hasStartedRestoration = true;
+    return restoration.future;
+  }
+
+  // Settings persistence and bridge cleanup.
+  @override
+  Future<void> setPreferredProvider(
+    PreferredProvider? preferredProvider,
+  ) async {}
+
+  @override
+  Future<void> dispose() async {}
+}
 
 class _CacheBridge extends Fake implements MashinCoreBridgeApi {
   CacheUsage usage = const CacheUsage(metadataBytes: 2048, imageBytes: 3145728);
@@ -57,6 +93,66 @@ Widget _settings(_CacheBridge bridge) => SettingsEditor(
 );
 
 void main() {
+  for (final preference in ThemePreference.values) {
+    for (final brightness in Brightness.values) {
+      testWidgets('$preference uses $brightness on the first startup frame', (
+        tester,
+      ) async {
+        tester.platformDispatcher.platformBrightnessTestValue = brightness;
+        addTearDown(tester.platformDispatcher.clearPlatformBrightnessTestValue);
+        final bridge = _StartupBridge();
+        final session = AppSessionController(coreBridge: bridge);
+        addTearDown(session.dispose);
+        final settingsInitialization = session.initializeSettings();
+        expect(session.initializeSettings(), same(settingsInitialization));
+        expect(bridge.settingsReads, 1);
+        expect(bridge.hasStartedRestoration, isFalse);
+
+        bridge.settings.complete(
+          SessionSettings(
+            musicAssistantUrl: '',
+            username: null,
+            audioProfile: '',
+            themePreference: preference,
+            logLevel: LogLevelPreference.info,
+          ),
+        );
+        await settingsInitialization;
+        expect(session.themePreference, preference);
+        final initialization = session.initialize();
+        final observed = <Brightness>[];
+        await tester.pumpWidget(
+          MaterialApp(
+            themeMode: AppTheme.modeFor(session.themePreference),
+            theme: AppTheme.light(),
+            darkTheme: AppTheme.dark(),
+            home: Builder(
+              builder: (context) {
+                observed.add(Theme.of(context).brightness);
+                return const SizedBox.shrink();
+              },
+            ),
+          ),
+        );
+        expect(bridge.hasStartedRestoration, isTrue);
+        expect(session.isLoading, isTrue);
+        expect(bridge.settingsReads, 1);
+        expect(observed, isNotEmpty);
+        expect(
+          observed,
+          everyElement(switch (preference) {
+            ThemePreference.dark => Brightness.dark,
+            ThemePreference.light => Brightness.light,
+            ThemePreference.system => brightness,
+          }),
+        );
+        bridge.restoration.complete(false);
+        await initialization;
+        expect(session.isLoading, isFalse);
+      });
+    }
+  }
+
   for (final platform in [TargetPlatform.android, TargetPlatform.windows]) {
     for (final preference in ThemePreference.values) {
       testWidgets('$platform $preference handles system brightness changes', (

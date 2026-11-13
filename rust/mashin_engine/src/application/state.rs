@@ -282,6 +282,55 @@ pub(super) mod tests {
         )
     }
 
+    #[test]
+    fn startup_settings_read_persisted_theme_without_activating_session() {
+        for theme in [
+            ThemePreference::Dark,
+            ThemePreference::Light,
+            ThemePreference::System,
+        ] {
+            let application = test_application();
+            let mut persisted = session_config();
+            persisted.theme = theme;
+            persisted.should_show_multi_device_button = false;
+            {
+                let coordinator = application.coordinator.lock().unwrap();
+                coordinator
+                    .session_storage
+                    .save_session(persisted.clone())
+                    .unwrap();
+            }
+
+            let settings = application.read_session_settings().unwrap();
+            assert_eq!(settings.theme, theme);
+            assert_eq!(
+                settings.username.as_deref(),
+                Some(persisted.username.as_str())
+            );
+            assert!(!settings.should_show_multi_device_button);
+            let mut coordinator = application.coordinator.lock().unwrap();
+            assert!(coordinator.session_configuration.is_none());
+            assert!(coordinator.connection.is_none());
+            assert!(coordinator.repositories.is_none());
+            assert_eq!(coordinator.session_generation, 0);
+
+            let mut active = persisted;
+            active.theme = ThemePreference::Light;
+            coordinator.session_configuration = Some(active);
+            drop(coordinator);
+            assert_eq!(
+                application.read_session_settings().unwrap().theme,
+                ThemePreference::Light
+            );
+        }
+
+        let application = test_application();
+        assert_eq!(
+            application.read_session_settings().unwrap().theme,
+            ThemePreference::Dark
+        );
+    }
+
     fn settings_update() -> crate::domain::settings::SessionSettingsUpdate {
         crate::domain::settings::SessionSettingsUpdate {
             theme: ThemePreference::Light,
