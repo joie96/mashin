@@ -72,6 +72,8 @@ struct ConfigurationDocument {
     session: Option<SessionPreferences>,
     #[serde(default)]
     update_channel: Option<UpdateChannel>,
+    #[serde(default)]
+    cache_app_version: Option<String>,
 }
 
 impl Default for ConfigurationDocument {
@@ -80,6 +82,7 @@ impl Default for ConfigurationDocument {
             format_version: CONFIGURATION_VERSION,
             session: None,
             update_channel: None,
+            cache_app_version: None,
         }
     }
 }
@@ -91,7 +94,6 @@ pub(crate) struct ConfigurationFile {
 
 #[derive(Clone)]
 enum ConfigurationLocation {
-    #[cfg(test)]
     Fixed(PathBuf),
     Resolver(fn() -> Result<PathBuf, String>),
 }
@@ -113,8 +115,7 @@ impl ConfigurationFile {
         }
     }
 
-    // Explicit paths isolate tests from the user's installed configuration.
-    #[cfg(test)]
+    // Explicit paths share the configuration with cache initialization and isolate tests.
     pub(crate) fn with_path(path: PathBuf) -> Self {
         Self {
             location: ConfigurationLocation::Fixed(path),
@@ -152,13 +153,24 @@ impl ConfigurationFile {
         self.write_document(&document)
     }
 
+    // Cache reset bookkeeping survives session replacement and logout.
+    pub(crate) fn cache_app_version(&self) -> Result<Option<String>, String> {
+        Ok(self.read_document()?.cache_app_version)
+    }
+
+    pub(crate) fn save_cache_app_version(&self, version: &str) -> Result<(), String> {
+        let mut document = self.read_document()?;
+        document.cache_app_version = Some(version.to_owned());
+        self.write_document(&document)
+    }
+
     // A failed secure-store update restores only session preferences.
     pub(crate) fn restore(&self, previous: Option<&SessionPreferences>) -> Result<(), String> {
         if let Some(previous) = previous {
             return self.save(previous);
         }
         let mut document = self.read_document()?;
-        if document.update_channel.is_some() {
+        if document.update_channel.is_some() || document.cache_app_version.is_some() {
             document.session = None;
             return self.write_document(&document);
         }
@@ -216,7 +228,6 @@ impl ConfigurationFile {
     // Platform paths are resolved lazily after Android supplies its application context.
     fn path(&self) -> Result<PathBuf, String> {
         match &self.location {
-            #[cfg(test)]
             ConfigurationLocation::Fixed(path) => Ok(path.clone()),
             ConfigurationLocation::Resolver(resolve_path) => resolve_path(),
         }
@@ -226,6 +237,22 @@ impl ConfigurationFile {
 #[cfg(test)]
 pub(crate) mod tests {
     use super::*;
+
+    #[test]
+    fn cache_app_version_survives_session_save_and_logout() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("config.json");
+        let configuration = ConfigurationFile::with_path(path.clone());
+        assert_eq!(configuration.cache_app_version().unwrap(), None);
+        configuration.save_cache_app_version("0.0.2-beta.3").unwrap();
+        let preferences = SessionPreferences::from(&session_config());
+        configuration.save(&preferences).unwrap();
+        assert_eq!(configuration.load().unwrap(), Some(preferences));
+        configuration.restore(None).unwrap();
+        let reopened = ConfigurationFile::with_path(path);
+        assert!(reopened.load().unwrap().is_none());
+        assert_eq!(reopened.cache_app_version().unwrap().as_deref(), Some("0.0.2-beta.3"));
+    }
 
     #[test]
     fn theme_preferences_survive_configuration_reopen() {

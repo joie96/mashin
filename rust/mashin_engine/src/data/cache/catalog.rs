@@ -1190,12 +1190,8 @@ impl CatalogClient for CachedCatalog {
         Box::pin(async move {
             match &self.inner.access {
                 CacheAccess::Session(session) => {
-                    let mut owner = session.owner.cache.lock().await;
-                    session.owner.require_generation(session.generation)?;
-                    if owner.is_none() {
-                        *owner = Some(ServerCache::initialize((session.owner.directory)()?).await.map_err(|error| error.to_string())?);
-                    }
-                    owner.as_ref().unwrap().usage().await.map_err(|error| error.to_string())
+                    session.owner.cache_for_generation(session.generation).await?
+                        .usage().await.map_err(|error| error.to_string())
                 }
                 CacheAccess::Active(context) => context.cache.usage().await.map_err(|error| error.to_string()),
             }
@@ -1605,8 +1601,12 @@ impl SessionCacheOwner {
         let mut owner = self.cache.lock().await;
         self.require_generation(generation)?;
         if owner.is_none() {
+            let directory = self.directory.clone();
+            let directory = tokio::task::spawn_blocking(move || directory())
+                .await
+                .map_err(|_| "cache directory initialization panicked".to_owned())??;
             *owner = Some(
-                ServerCache::initialize((self.directory)()?)
+                ServerCache::initialize(directory)
                     .await
                     .map_err(|error| error.to_string())?,
             );

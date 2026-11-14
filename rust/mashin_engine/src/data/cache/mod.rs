@@ -2,6 +2,8 @@
 //! Database connections belong on blocking workers, never on the async executor or UI thread.
 //! Session catalogs expose migrated media observations before their shared MA refresh completes.
 
+pub(crate) use storage::prepare_for_app_version;
+
 pub(super) mod album_artist_relations;
 pub(super) mod album_candidates;
 pub(crate) mod album_reads;

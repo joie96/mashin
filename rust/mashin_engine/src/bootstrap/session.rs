@@ -9,7 +9,7 @@ use std::path::PathBuf;
 // Session configuration and online capability composition.
 pub(crate) fn environment() -> crate::application::session::SessionEnvironment {
     let cache_owner = std::sync::Arc::new(crate::data::cache::catalog::SessionCacheOwner::new(
-        application_data_directory,
+        prepare_application_cache_directory,
     ));
     let shutdown_owner = cache_owner.clone();
     crate::application::session::SessionEnvironment {
@@ -83,6 +83,23 @@ pub(crate) fn create_session_storage() -> Box<dyn SessionStorage> {
 
 fn configuration_path() -> Result<PathBuf, String> {
     application_data_directory().map(|directory| directory.join("config.json"))
+}
+
+// Clear the previous release's cache before opening any database or image handles.
+fn prepare_application_cache_directory() -> Result<PathBuf, String> {
+    #[derive(serde::Deserialize)]
+    struct AppRelease {
+        version: String,
+    }
+
+    let release: AppRelease = serde_json::from_str(include_str!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../../release.json"
+    )))
+    .map_err(|error| format!("read bundled app version failed: {error}"))?;
+    let directory = application_data_directory()?;
+    crate::data::cache::prepare_for_app_version(&directory, &release.version)?;
+    Ok(directory)
 }
 
 fn local_client_name() -> String {

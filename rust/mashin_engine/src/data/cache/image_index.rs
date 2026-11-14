@@ -1,5 +1,5 @@
 //! Blocking source/variant index and file publication, independent of the media writer.
-//! The caller must retain exclusive cache ownership and quiesce this owner before clearing.
+//! The caller must quiesce image workers and file leases before clearing their files.
 //! No network work or productive activation belongs here; files precede atomic SQL commits.
 
 use std::collections::HashMap;

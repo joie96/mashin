@@ -1,6 +1,6 @@
 //! Blocking SQLite connection setup for the media writer and independent WAL readers.
 //! Opening validates the cache format and server identity before modifying existing files.
-//! Incompatible owned development caches are reset; foreign or unidentified files stay untouched.
+//! Incompatible Mashin cache schemas are reset; foreign or unidentified files stay untouched.
 //! This module neither creates application directories nor deletes existing files.
 
 use std::path::{Path, PathBuf};
@@ -140,10 +140,8 @@ pub(crate) enum CacheError {
     ShuttingDown,
     WorkerUnavailable,
     WorkerPanicked,
-    InvalidCacheOwnership(PathBuf),
     ForeignCacheFile(PathBuf),
     Json(Arc<serde_json::Error>),
-    CacheAlreadyOwned,
     CacheInactive,
     Invalidated,
     SupersededObservation,
@@ -169,14 +167,10 @@ impl std::fmt::Display for CacheError {
             Self::ShuttingDown => formatter.write_str("Cache database is shutting down"),
             Self::WorkerUnavailable => formatter.write_str("Cache database worker is unavailable"),
             Self::WorkerPanicked => formatter.write_str("Cache database worker operation panicked"),
-            Self::InvalidCacheOwnership(path) => {
-                write!(formatter, "Unverified cache ownership: {}", path.display())
-            }
             Self::ForeignCacheFile(path) => {
                 write!(formatter, "Unexpected file in cache: {}", path.display())
             }
             Self::Json(error) => write!(formatter, "Invalid cache metadata: {error}"),
-            Self::CacheAlreadyOwned => formatter.write_str("Cache already has an active owner"),
             Self::CacheInactive => formatter.write_str("No database cache is active"),
             Self::Invalidated => {
                 formatter.write_str("Cache operation belongs to an old generation")
@@ -241,7 +235,7 @@ pub(super) struct WorkerConnections {
 }
 
 impl MediaDatabase {
-    // Connection initialization and ownership.
+    // Connection initialization and lifecycle.
     /// Blocking setup for the dedicated writer; the directory must already exist.
     pub(crate) fn open(cache_directory: &Path, server_id: &str) -> Result<Self, CacheError> {
         if server_id.trim().is_empty() {
@@ -668,7 +662,7 @@ mod tests {
     }
 
     #[test]
-    fn unsupported_unowned_schema_is_not_cleared() {
+    fn unsupported_schema_without_server_manifest_is_not_cleared() {
         let directory = tempfile::tempdir().unwrap();
         let database = MediaDatabase::open(directory.path(), "server-one").unwrap();
         database

@@ -54,7 +54,6 @@ struct CacheState {
 
 struct CacheRuntime {
     storage: Arc<CacheStorage>,
-    owner_lock: Option<Arc<std::fs::File>>,
     database: Option<DatabaseLease>,
     images: Option<ImageLease>,
     snapshot: CacheLifecycleSnapshot,
@@ -82,11 +81,10 @@ impl ServerCache {
     pub(crate) async fn initialize(
         application_data_directory: PathBuf,
     ) -> Result<Self, CacheError> {
-        let (storage, owner_lock, server_id) = tokio::task::spawn_blocking(move || {
+        let (storage, server_id) = tokio::task::spawn_blocking(move || {
             let storage = CacheStorage::open(&application_data_directory)?;
-            let owner_lock = storage.lock_owner()?;
             let server_id = storage.read_server_id()?;
-            Ok::<_, CacheError>((storage, owner_lock, server_id))
+            Ok::<_, CacheError>((storage, server_id))
         })
         .await
         .map_err(|_| CacheError::WorkerPanicked)??;
@@ -107,7 +105,6 @@ impl ServerCache {
             state: Arc::new(CacheState {
                 runtime: Mutex::new(CacheRuntime {
                     storage: Arc::new(storage),
-                    owner_lock: Some(Arc::new(owner_lock)),
                     database: None,
                     images: None,
                     published_database: published_database.clone(),
@@ -465,9 +462,7 @@ impl CacheRuntime {
             }
             CacheMaintenance::Shutdown => {
                 self.snapshot.is_shutdown = true;
-                let result = self.stop_caches(changes).await;
-                self.owner_lock.take();
-                result
+                self.stop_caches(changes).await
             }
         }
     }
@@ -623,8 +618,6 @@ impl Drop for CacheState {
         if database.is_none() && images.is_none() {
             return;
         }
-        let owner_lock = runtime.owner_lock.take();
-        let fallback_lock = owner_lock.clone();
         let storage = runtime.storage.clone();
         let changes = self.changes.clone();
         let mut snapshot = runtime.snapshot.clone();
@@ -633,7 +626,7 @@ impl Drop for CacheState {
         snapshot.is_shutdown = true;
         snapshot.database_generation += 1;
         snapshot.image_generation += 1;
-        if std::thread::Builder::new()
+        let _ = std::thread::Builder::new()
             .name("mashin-cache-drop".to_owned())
             .spawn(move || {
                 let database_result = database
@@ -643,22 +636,9 @@ impl Drop for CacheState {
                     .map(|images| images.workers.shutdown_blocking())
                     .unwrap_or(Ok(()));
                 snapshot.last_error = database_result.and(image_result).err();
-                if let Some(file) = owner_lock.as_ref() {
-                    if let Err(error) = file.unlock() {
-                        if snapshot.last_error.is_none() {
-                            snapshot.last_error = Some(error.into());
-                        }
-                    }
-                }
-                drop(owner_lock);
                 drop(storage);
                 changes.send_replace(snapshot);
-            })
-            .is_err()
-        {
-            // Fail closed if cleanup cannot start: never release ownership over running SQL.
-            std::mem::forget(fallback_lock);
-        }
+            });
     }
 }
 
@@ -732,7 +712,7 @@ mod tests {
         let cache = ServerCache::initialize(directory.path().to_owned()).await.unwrap();
         let usage = cache.usage().await.unwrap();
         assert_eq!(usage.metadata_bytes, 0);
-        assert!(usage.image_bytes > 0);
+        assert_eq!(usage.image_bytes, 0);
         let snapshot = cache.observe().borrow().clone();
         assert!(!snapshot.is_database_active);
         assert!(!snapshot.is_image_active);
@@ -824,6 +804,7 @@ mod tests {
     async fn images_survive_database_clear_and_restart_but_not_server_switch() {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
+        cache.bind_server_address("server-a".into(), "http://localhost:8095".into()).await.unwrap();
         let images = cache.images().await.unwrap();
         let bytes = super::super::image_files::tests::bitmap(5);
         images
@@ -845,6 +826,7 @@ mod tests {
             Err(CacheError::Invalidated)
         ));
         let cache = initialize(directory.path(), "server-a").await;
+        assert_eq!(cache.server_id_for_address("http://localhost:8095".into()).await.unwrap().as_deref(), Some("server-a"));
         let images = cache.images().await.unwrap();
         let leased = images.read_variant(image_key()).await.unwrap().unwrap();
         assert_eq!(leased.read.payload.bytes, bytes);
@@ -898,7 +880,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn owner_drop_retains_exclusive_lock_until_image_leases_are_released() {
+    async fn dropping_cache_drains_image_leases() {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
         let images = cache.images().await.unwrap();
@@ -925,9 +907,9 @@ mod tests {
             images.require_active(),
             Err(CacheError::Invalidated)
         ));
-        assert!(ServerCache::initialize(directory.path().to_owned())
-            .await
-            .is_err());
+        let another = ServerCache::initialize(directory.path().to_owned()).await.unwrap();
+        another.shutdown().await.unwrap();
+        drop(another);
         assert!(!changes.borrow().is_shutdown);
         drop(leased);
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -953,7 +935,7 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn shutdown_invalidates_both_areas_and_retains_ownership_until_image_release() {
+    async fn shutdown_invalidates_both_areas_and_drains_image_leases() {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
         let database = cache.database().await.unwrap();
@@ -985,9 +967,9 @@ mod tests {
             cache.images().await,
             Err(CacheError::ShuttingDown)
         ));
-        assert!(ServerCache::initialize(directory.path().to_owned())
-            .await
-            .is_err());
+        let another = ServerCache::initialize(directory.path().to_owned()).await.unwrap();
+        another.shutdown().await.unwrap();
+        drop(another);
         assert!(!shutdown.is_finished());
         shutdown.abort();
         assert!(shutdown.await.unwrap_err().is_cancelled());
@@ -1153,15 +1135,13 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
-    async fn ownership_is_exclusive_and_dropping_owner_drains_handles() {
+    async fn initialization_preserves_data_and_dropping_cache_drains_handles() {
         let directory = tempfile::tempdir().unwrap();
         let cache = initialize(directory.path(), "server-a").await;
         let old = cache.database().await.unwrap();
         let mut changes = cache.observe();
-        assert!(matches!(
-            ServerCache::initialize(directory.path().to_owned()).await,
-            Err(CacheError::CacheAlreadyOwned)
-        ));
+        let another = ServerCache::initialize(directory.path().to_owned()).await.unwrap();
+        another.shutdown().await.unwrap();
         let (started, start) = tokio::sync::oneshot::channel();
         let (release, hold) = std::sync::mpsc::channel();
         let writing = old.clone();
@@ -1178,10 +1158,6 @@ mod tests {
         start.await.unwrap();
         drop(cache);
         assert!(matches!(old.metadata().await, Err(CacheError::Invalidated)));
-        assert!(matches!(
-            ServerCache::initialize(directory.path().to_owned()).await,
-            Err(CacheError::CacheAlreadyOwned)
-        ));
         release.send(()).unwrap();
         assert!(matches!(write.await.unwrap(), Err(CacheError::Invalidated)));
         tokio::time::timeout(Duration::from_secs(2), async {
@@ -1269,10 +1245,8 @@ mod tests {
         let storage = CacheStorage::open(directory.path()).unwrap();
         let image = image_path(&storage);
         std::fs::write(&image, b"unidentified image").unwrap();
-        assert!(matches!(
-            ServerCache::initialize(directory.path().to_owned()).await,
-            Err(CacheError::InvalidCacheOwnership(_))
-        ));
+        let reopened = ServerCache::initialize(directory.path().to_owned()).await.unwrap();
+        reopened.shutdown().await.unwrap();
         assert_eq!(std::fs::read(image).unwrap(), b"unidentified image");
         let empty = tempfile::tempdir().unwrap();
         let cache = ServerCache::initialize(empty.path().to_owned())

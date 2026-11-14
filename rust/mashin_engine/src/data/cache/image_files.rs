@@ -433,7 +433,7 @@ pub(super) mod tests {
             .unwrap()
             .map(|entry| entry.unwrap().file_name().to_string_lossy().into_owned())
             .collect::<Vec<_>>();
-        assert_eq!(names.len(), 2);
+        assert_eq!(names.len(), 1);
         assert!(names.contains(&record.content_hash[..2].to_owned()));
         let path = storage.image_directory().join(
             image_file_name(&record.content_hash, &record.mime_type).unwrap(),

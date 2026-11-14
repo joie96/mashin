@@ -1,11 +1,11 @@
-//! Blocking ownership checks and handle-relative deletion for cache files only.
+//! Blocking cache initialization and handle-relative deletion for cache files only.
 //! Media files live at Cache root, image files in two-character hash shards below images.
 //! Application data, credentials and logs are never deletion targets;
-//! directories, redirects and unknown names are rejected before any cache file is removed.
+//! Unexpected directories and redirects are rejected; unrelated regular files stay untouched.
 //! Callers must quiesce workers, downloads and leases before using the deletion primitives.
+//! Server bindings persist independently in server.json and survive database replacement.
 
 use std::ffi::{OsStr, OsString};
-use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 use cap_std::fs::{Dir, OpenOptions};
@@ -14,13 +14,9 @@ use crate::application::repositories::CacheUsage;
 use super::database::{validate_directory, validate_file, CacheError, DATABASE_FILE_NAME};
 
 const CACHE_DIRECTORY_NAME: &str = "Cache";
-const FORMAT_FILE_NAME: &str = ".format";
-const ROOT_FORMAT: &[u8] = b"MASHIN_CACHE_ROOT\n2\n";
-const IMAGE_FORMAT: &[u8] = b"MASHIN_CACHE_IMAGE_FILES\n1\n";
 pub(super) const IMAGE_DATABASE_FILE_NAME: &str = "index.sqlite3";
 const SERVER_FILE_NAME: &str = "server.json";
 const SERVER_TEMP_FILE_NAME: &str = "server.json.tmp";
-const OWNER_LOCK_FILE_NAME: &str = "owner.lock";
 
 #[derive(serde::Serialize, serde::Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -42,9 +38,36 @@ enum CacheArea {
     Images,
 }
 
+// Runs before opening cache handles; a failed reset must be retried on the next initialization.
+pub(crate) fn prepare_for_app_version(
+    application_data_directory: &Path,
+    app_version: &str,
+) -> Result<(), String> {
+    if app_version.trim().is_empty() {
+        return Err("cache reset requires an app version".into());
+    }
+    let configuration = crate::configuration::ConfigurationFile::with_path(
+        application_data_directory.join("config.json"),
+    );
+    if configuration.cache_app_version()?.as_deref() == Some(app_version) {
+        return Ok(());
+    }
+    let cache_directory = application_data_directory.join(CACHE_DIRECTORY_NAME);
+    match std::fs::symlink_metadata(&cache_directory) {
+        Ok(_) => {
+            validate_directory(&cache_directory).map_err(|error| error.to_string())?;
+            std::fs::remove_dir_all(&cache_directory)
+                .map_err(|error| format!("reset cache for app version failed: {error}"))?;
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+        Err(error) => return Err(format!("inspect cache for app version failed: {error}")),
+    }
+    configuration.save_cache_app_version(app_version)
+}
+
 impl CacheStorage {
-    // Verified storage initialization.
-    /// Blocking setup below an existing application-data directory; never adopts unmarked data.
+    // Storage initialization.
+    /// Creates missing application and cache directories and opens their file handles.
     pub(crate) fn open(application_data_directory: &Path) -> Result<Self, CacheError> {
         if application_data_directory.as_os_str().is_empty() {
             return Err(CacheError::UnsafePath(
@@ -56,18 +79,15 @@ impl CacheStorage {
         } else {
             std::env::current_dir()?.join(application_data_directory)
         };
+        std::fs::create_dir_all(&application_path)?;
         validate_directory(&application_path)?;
         let application_path = application_path.canonicalize()?;
         let application_directory =
             Dir::open_ambient_dir(&application_path, cap_std::ambient_authority())?;
         let path = application_path.join(CACHE_DIRECTORY_NAME);
-        let is_new = create_directory(&application_directory, CACHE_DIRECTORY_NAME)?;
+        create_directory(&application_directory, CACHE_DIRECTORY_NAME)?;
         validate_directory(&path)?;
         let directory = application_directory.open_dir(CACHE_DIRECTORY_NAME)?;
-        if is_new {
-            create_format(&directory, ROOT_FORMAT)?;
-        }
-        verify_format(&directory, &path, ROOT_FORMAT)?;
         let storage = Self { directory, path };
         storage.verify_root_entries()?;
         storage.initialize_area(CacheArea::Database)?;
@@ -75,34 +95,17 @@ impl CacheStorage {
         Ok(storage)
     }
 
-    /// Reopens only a marked existing cache; the caller must keep its runtime ownership quiescent.
+    /// Reopens an existing cache while its database workers are quiescent.
     pub(super) fn open_existing_cache_directory(path: &Path) -> Result<Self, CacheError> {
         validate_directory(path)?;
         let path = path.canonicalize()?;
         let directory = Dir::open_ambient_dir(&path, cap_std::ambient_authority())?;
-        verify_format(&directory, &path, ROOT_FORMAT)?;
         let storage = Self { directory, path };
         storage.verify_root_entries()?;
         Ok(storage)
     }
 
-    // Runtime ownership and server-selection publication.
-    /// Keeps exclusive runtime ownership until explicit unlock or final handle close.
-    pub(super) fn lock_owner(&self) -> Result<std::fs::File, CacheError> {
-        validate_file(&self.path.join(OWNER_LOCK_FILE_NAME))?;
-        let mut options = OpenOptions::new();
-        options.read(true).write(true).create(true);
-        let file = self
-            .directory
-            .open_with(OWNER_LOCK_FILE_NAME, &options)?
-            .into_std();
-        match file.try_lock() {
-            Ok(()) => Ok(file),
-            Err(std::fs::TryLockError::WouldBlock) => Err(CacheError::CacheAlreadyOwned),
-            Err(std::fs::TryLockError::Error(error)) => Err(error.into()),
-        }
-    }
-
+    // Server-selection publication.
     pub(super) fn write_server_id(&self, server_id: &str) -> Result<(), CacheError> {
         if server_id.trim().is_empty() {
             return Err(CacheError::InvalidServerId);
@@ -152,7 +155,6 @@ impl CacheStorage {
     // Atomic manifest publication; the lifecycle owner serializes writers.
     fn write_server_identity(&self, identity: &StoredServerIdentity) -> Result<(), CacheError> {
         validate_directory(&self.path)?;
-        verify_format(&self.directory, &self.path, ROOT_FORMAT)?;
         validate_file(&self.path.join(SERVER_FILE_NAME))?;
         validate_file(&self.path.join(SERVER_TEMP_FILE_NAME))?;
         match self.directory.remove_file(SERVER_TEMP_FILE_NAME) {
@@ -210,10 +212,9 @@ impl CacheStorage {
         self.path.join(CacheArea::Images.directory_name())
     }
 
-    /// Blocking capability access after checking root and image-area ownership.
+    /// Opens the image directory without following directory redirects.
     pub(super) fn open_image_directory(&self) -> Result<Dir, CacheError> {
         validate_directory(&self.path)?;
-        verify_format(&self.directory, &self.path, ROOT_FORMAT)?;
         self.verify_root_entries()?;
         self.initialize_area(CacheArea::Images)
     }
@@ -230,55 +231,30 @@ impl CacheStorage {
             Ok(file) => {
                 let identity: StoredServerIdentity = serde_json::from_reader(file)?;
                 if identity.format_version != 1 || identity.server_id.trim().is_empty() {
-                    return Err(CacheError::InvalidCacheOwnership(self.path.clone()));
+                    return Err(CacheError::InvalidServerId);
                 }
                 Ok(Some(identity))
             }
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-                for area in [CacheArea::Database, CacheArea::Images] {
-                    for entry in self.initialize_area(area)?.entries()? {
-                        let name = entry?.file_name();
-                        if name != FORMAT_FILE_NAME
-                            && !(matches!(area, CacheArea::Database)
-                                && is_preserved_root_entry(&name))
-                        {
-                            return Err(CacheError::InvalidCacheOwnership(self.path.clone()));
-                        }
-                    }
-                }
-                Ok(None)
-            }
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(error) => Err(error.into()),
         }
     }
 
-    // Ownership validation and deletion plans.
+    // Path validation and deletion plans.
     fn initialize_area(&self, area: CacheArea) -> Result<Dir, CacheError> {
         if matches!(area, CacheArea::Database) {
-            verify_format(&self.directory, &self.path, ROOT_FORMAT)?;
             return Ok(self.directory.try_clone()?);
         }
-        let is_new = create_directory(&self.directory, area.directory_name())?;
+        create_directory(&self.directory, area.directory_name())?;
         let path = self.path.join(area.directory_name());
         validate_directory(&path)?;
         let directory = self.directory.open_dir(area.directory_name())?;
-        if is_new {
-            create_format(&directory, area.format())?;
-        }
-        verify_format(&directory, &path, area.format())?;
         Ok(directory)
     }
 
     fn verify_root_entries(&self) -> Result<(), CacheError> {
         for entry in self.directory.entries()? {
             let name = entry?.file_name();
-            if !is_preserved_root_entry(&name)
-                && !name
-                    .to_str()
-                    .is_some_and(|name| CacheArea::Database.owns_file(name))
-            {
-                return Err(CacheError::ForeignCacheFile(self.path.join(name)));
-            }
             let path = self.path.join(&name);
             if name == "images" {
                 validate_directory(&path)?;
@@ -294,7 +270,6 @@ impl CacheStorage {
 
     fn clear_files(&self, area: CacheArea) -> Result<(), CacheError> {
         validate_directory(&self.path)?;
-        verify_format(&self.directory, &self.path, ROOT_FORMAT)?;
         self.verify_root_entries()?;
         let directory = self.initialize_area(area)?;
         let area_path = self.path.join(area.directory_name());
@@ -335,11 +310,8 @@ impl CacheStorage {
             if !metadata.is_file() || metadata.file_type().is_symlink() {
                 return Err(CacheError::UnsafePath(path));
             }
-            if name == FORMAT_FILE_NAME {
-                continue;
-            }
             if !name.to_str().is_some_and(|name| area.owns_file(name)) {
-                return Err(CacheError::ForeignCacheFile(path));
+                continue;
             }
             deletion_plan.push(name);
         }
@@ -353,18 +325,11 @@ impl CacheStorage {
 }
 
 impl CacheArea {
-    // File-format identity and reserved cache names.
+    // Reserved database and image cache names.
     fn directory_name(self) -> &'static str {
         match self {
             Self::Database => ".",
             Self::Images => "images",
-        }
-    }
-
-    fn format(self) -> &'static [u8] {
-        match self {
-            Self::Database => ROOT_FORMAT,
-            Self::Images => IMAGE_FORMAT,
         }
     }
 
@@ -417,7 +382,7 @@ fn directory_bytes(directory: &Dir) -> Result<u64, CacheError> {
     Ok(bytes)
 }
 
-// Cache-format publication and validation.
+// Cache file-name validation.
 fn is_image_shard(name: &str) -> bool {
     name.len() == 2
         && name.bytes().all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
@@ -433,11 +398,9 @@ fn is_image_file(name: &str) -> bool {
 
 fn is_preserved_root_entry(name: &OsStr) -> bool {
     [
-        FORMAT_FILE_NAME,
         "images",
         SERVER_FILE_NAME,
         SERVER_TEMP_FILE_NAME,
-        OWNER_LOCK_FILE_NAME,
     ]
     .iter()
     .any(|entry| name == OsStr::new(entry))
@@ -447,36 +410,6 @@ fn create_directory(parent: &Dir, name: &str) -> Result<bool, CacheError> {
     match parent.create_dir(name) {
         Ok(()) => Ok(true),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Ok(false),
-        Err(error) => Err(error.into()),
-    }
-}
-
-fn create_format(directory: &Dir, format: &[u8]) -> Result<(), CacheError> {
-    let mut options = OpenOptions::new();
-    options.write(true).create_new(true);
-    let mut file = directory.open_with(FORMAT_FILE_NAME, &options)?;
-    file.write_all(format)?;
-    file.sync_all()?;
-    Ok(())
-}
-
-fn verify_format(directory: &Dir, path: &Path, format: &[u8]) -> Result<(), CacheError> {
-    let marker_path = path.join(FORMAT_FILE_NAME);
-    validate_file(&marker_path)?;
-    match directory.open(FORMAT_FILE_NAME) {
-        Ok(file) => {
-            let mut content = Vec::with_capacity(format.len() + 1);
-            file.take((format.len() + 1) as u64)
-                .read_to_end(&mut content)?;
-            if content == format {
-                Ok(())
-            } else {
-                Err(CacheError::InvalidCacheOwnership(path.to_owned()))
-            }
-        }
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
-            Err(CacheError::InvalidCacheOwnership(path.to_owned()))
-        }
         Err(error) => Err(error.into()),
     }
 }
@@ -514,6 +447,61 @@ mod tests {
     use super::super::workers::DatabaseWorkers;
     use super::*;
 
+    #[test]
+    fn app_version_change_clears_entire_cache_once_and_preserves_application_data() {
+        let application = tempfile::tempdir().unwrap();
+        let configuration = crate::configuration::ConfigurationFile::with_path(
+            application.path().join("config.json"),
+        );
+        let preferences = crate::configuration::SessionPreferences::from(
+            &crate::configuration::tests::session_config(),
+        );
+        configuration.save(&preferences).unwrap();
+        configuration.save_cache_app_version("0.0.2-beta.2").unwrap();
+        let cache = application.path().join(CACHE_DIRECTORY_NAME);
+        std::fs::create_dir_all(cache.join("images")).unwrap();
+        for path in [cache.join(DATABASE_FILE_NAME), cache.join(SERVER_FILE_NAME), cache.join("images/index.sqlite3"), cache.join("images/image.png")] {
+            std::fs::write(path, b"cached content").unwrap();
+        }
+        std::fs::create_dir(application.path().join("Logs")).unwrap();
+        std::fs::write(application.path().join("Logs/current.log"), b"preserved log").unwrap();
+        std::fs::write(application.path().join("credentials.json"), b"preserved credentials").unwrap();
+        prepare_for_app_version(application.path(), "0.0.2-beta.3").unwrap();
+        assert!(!cache.exists());
+        assert_eq!(configuration.load().unwrap(), Some(preferences));
+        assert_eq!(std::fs::read(application.path().join("Logs/current.log")).unwrap(), b"preserved log");
+        assert_eq!(std::fs::read(application.path().join("credentials.json")).unwrap(), b"preserved credentials");
+        let storage = CacheStorage::open(application.path()).unwrap();
+        std::fs::write(storage.database_directory().join(DATABASE_FILE_NAME), b"new cache").unwrap();
+        drop(storage);
+        prepare_for_app_version(application.path(), "0.0.2-beta.3").unwrap();
+        assert_eq!(std::fs::read(cache.join(DATABASE_FILE_NAME)).unwrap(), b"new cache");
+    }
+
+    #[test]
+    fn missing_app_version_clears_existing_cache_before_recording_current_version() {
+        let application = tempfile::tempdir().unwrap();
+        let cache = application.path().join(CACHE_DIRECTORY_NAME);
+        std::fs::create_dir(&cache).unwrap();
+        std::fs::write(cache.join(DATABASE_FILE_NAME), b"existing cache").unwrap();
+        prepare_for_app_version(application.path(), "0.0.2-beta.3").unwrap();
+        assert!(!cache.exists());
+        let configuration = crate::configuration::ConfigurationFile::with_path(application.path().join("config.json"));
+        assert_eq!(configuration.cache_app_version().unwrap().as_deref(), Some("0.0.2-beta.3"));
+    }
+
+    #[test]
+    fn failed_app_version_reset_does_not_record_the_new_version() {
+        let application = tempfile::tempdir().unwrap();
+        let configuration = crate::configuration::ConfigurationFile::with_path(application.path().join("config.json"));
+        configuration.save_cache_app_version("0.0.2-beta.2").unwrap();
+        let cache = application.path().join(CACHE_DIRECTORY_NAME);
+        std::fs::write(&cache, b"not a cache directory").unwrap();
+        assert!(prepare_for_app_version(application.path(), "0.0.2-beta.3").is_err());
+        assert_eq!(configuration.cache_app_version().unwrap().as_deref(), Some("0.0.2-beta.2"));
+        assert_eq!(std::fs::read(cache).unwrap(), b"not a cache directory");
+    }
+
     fn image_name() -> String {
         format!("{}.png", "a".repeat(64))
     }
@@ -522,6 +510,28 @@ mod tests {
         let shard = storage.image_directory().join("aa");
         std::fs::create_dir_all(&shard).unwrap();
         shard.join(image_name())
+    }
+
+    #[test]
+    fn missing_application_data_directory_is_created_with_only_cache_and_images() {
+        let application = tempfile::tempdir().unwrap();
+        let root = application.path().join("missing").join("Mashin");
+        let storage = CacheStorage::open(&root).unwrap();
+        assert_eq!(storage.usage().unwrap().metadata_bytes, 0);
+        assert_eq!(storage.usage().unwrap().image_bytes, 0);
+        assert!(root.join("Cache/images").is_dir());
+        assert_eq!(std::fs::read_dir(root.join("Cache")).unwrap().count(), 1);
+    }
+
+    #[test]
+    fn existing_empty_cache_opens_without_creating_additional_files() {
+        let application = tempfile::tempdir().unwrap();
+        let cache = application.path().join(CACHE_DIRECTORY_NAME);
+        std::fs::create_dir_all(cache.join("images")).unwrap();
+        let storage = CacheStorage::open(application.path()).unwrap();
+        assert_eq!(storage.read_server_id().unwrap(), None);
+        assert_eq!(std::fs::read_dir(&cache).unwrap().count(), 1);
+        assert_eq!(std::fs::read_dir(cache.join("images")).unwrap().count(), 0);
     }
 
     #[test]
@@ -539,12 +549,12 @@ mod tests {
         std::fs::write(storage.image_directory().join(format!("{IMAGE_DATABASE_FILE_NAME}-wal")), vec![0; 37]).unwrap();
         let usage = storage.usage().unwrap();
         assert_eq!(usage.metadata_bytes, 91);
-        assert_eq!(usage.image_bytes, 23 + 29 + 37 + IMAGE_FORMAT.len() as u64);
+        assert_eq!(usage.image_bytes, 23 + 29 + 37);
         storage.clear_database_files().unwrap();
         assert_eq!(storage.usage().unwrap().metadata_bytes, 0);
         assert_eq!(storage.usage().unwrap().image_bytes, usage.image_bytes);
         storage.clear_image_files().unwrap();
-        assert_eq!(storage.usage().unwrap().image_bytes, IMAGE_FORMAT.len() as u64);
+        assert_eq!(storage.usage().unwrap().image_bytes, 0);
     }
 
     #[test]
@@ -564,8 +574,8 @@ mod tests {
         assert_eq!(storage.database_directory(), cache);
         assert_eq!(storage.image_directory(), cache.join("images"));
         assert!(!cache.join("database").exists());
-        let _owner_lock = storage.lock_owner().unwrap();
         storage.write_server_id("observed-server").unwrap();
+        storage.bind_server_address("observed-server", "http://localhost:8095").unwrap();
         let identity = std::fs::read(cache.join(SERVER_FILE_NAME)).unwrap();
         std::fs::write(cache.join(DATABASE_FILE_NAME), b"synthetic database").unwrap();
         let image = image_path(&storage);
@@ -574,15 +584,14 @@ mod tests {
         assert!(!cache.join(DATABASE_FILE_NAME).exists());
         assert_eq!(std::fs::read(&image).unwrap(), b"synthetic image");
         storage.clear_image_files().unwrap();
-        assert_eq!(
-            std::fs::read(cache.join(SERVER_FILE_NAME)).unwrap(),
-            identity
-        );
-        assert!(cache.join(OWNER_LOCK_FILE_NAME).is_file());
+        assert_eq!(std::fs::read(cache.join(SERVER_FILE_NAME)).unwrap(), identity);
+        drop(storage);
+        let storage = CacheStorage::open(application.path()).unwrap();
         assert_eq!(
             storage.read_server_id().unwrap().as_deref(),
             Some("observed-server")
         );
+        assert_eq!(storage.server_id_for_address("http://localhost:8095/").unwrap().as_deref(), Some("observed-server"));
         for name in ["App", "Logs", "mashin-cache"] {
             assert_eq!(
                 std::fs::read(application.path().join(name).join("protected.txt")).unwrap(),
@@ -592,7 +601,23 @@ mod tests {
     }
 
     #[test]
-    fn reopening_preserves_cache_and_never_adopts_an_unmarked_directory() {
+    fn server_manifest_survives_reopening_without_creating_a_database() {
+        let application = tempfile::tempdir().unwrap();
+        let cache = application.path().join(CACHE_DIRECTORY_NAME);
+        std::fs::create_dir_all(cache.join("images")).unwrap();
+        std::fs::write(cache.join(SERVER_FILE_NAME), br#"{"format_version":1,"server_id":"observed-server","addresses":["http://localhost:8095"]}"#).unwrap();
+        let manifest = std::fs::read(cache.join(SERVER_FILE_NAME)).unwrap();
+        let storage = CacheStorage::open(application.path()).unwrap();
+        assert_eq!(storage.read_server_id().unwrap().as_deref(), Some("observed-server"));
+        assert_eq!(std::fs::read(cache.join(SERVER_FILE_NAME)).unwrap(), manifest);
+        drop(storage);
+        let reopened = CacheStorage::open(application.path()).unwrap();
+        assert_eq!(reopened.server_id_for_address("http://localhost:8095").unwrap().as_deref(), Some("observed-server"));
+        assert!(!cache.join(DATABASE_FILE_NAME).exists());
+    }
+
+    #[test]
+    fn reopening_preserves_cache_and_unrelated_root_files() {
         let application = tempfile::tempdir().unwrap();
         let storage = CacheStorage::open(application.path()).unwrap();
         let image_path = image_path(&storage);
@@ -601,14 +626,12 @@ mod tests {
         let reopened = CacheStorage::open(application.path()).unwrap();
         assert_eq!(std::fs::read(image_path).unwrap(), b"synthetic image");
         drop(reopened);
-        let unmarked = tempfile::tempdir().unwrap();
-        let candidate = unmarked.path().join(CACHE_DIRECTORY_NAME);
+        let application = tempfile::tempdir().unwrap();
+        let candidate = application.path().join(CACHE_DIRECTORY_NAME);
         std::fs::create_dir(&candidate).unwrap();
         std::fs::write(candidate.join("config.json"), b"protected").unwrap();
-        assert!(matches!(
-            CacheStorage::open(unmarked.path()),
-            Err(CacheError::InvalidCacheOwnership(_))
-        ));
+        let storage = CacheStorage::open(application.path()).unwrap();
+        storage.clear_database_files().unwrap();
         assert_eq!(
             std::fs::read(candidate.join("config.json")).unwrap(),
             b"protected"
@@ -653,7 +676,7 @@ mod tests {
             std::fs::read_dir(storage.database_directory())
                 .unwrap()
                 .count(),
-            2
+            1
         );
         assert_eq!(std::fs::read(&image_path).unwrap(), b"synthetic image");
         assert_eq!(
@@ -709,7 +732,7 @@ mod tests {
             std::fs::read_dir(storage.image_directory())
                 .unwrap()
                 .count(),
-            1
+            0
         );
         assert_eq!(
             std::fs::read(database).unwrap(),
@@ -718,7 +741,7 @@ mod tests {
     }
 
     #[test]
-    fn unknown_files_and_nested_directories_prevent_any_deletion() {
+    fn unrelated_files_are_preserved_and_unexpected_directories_prevent_deletion() {
         for is_directory in [false, true] {
             let application = tempfile::tempdir().unwrap();
             let storage = CacheStorage::open(application.path()).unwrap();
@@ -730,8 +753,15 @@ mod tests {
             } else {
                 std::fs::write(&foreign, b"keep foreign file").unwrap();
             }
-            assert!(storage.clear_image_files().is_err());
-            assert_eq!(std::fs::read(image).unwrap(), b"keep valid cache file");
+            let result = storage.clear_image_files();
+            if is_directory {
+                assert!(result.is_err());
+                assert_eq!(std::fs::read(image).unwrap(), b"keep valid cache file");
+            } else {
+                result.unwrap();
+                assert!(!image.exists());
+                assert_eq!(std::fs::read(&foreign).unwrap(), b"keep foreign file");
+            }
             assert!(foreign.exists());
         }
     }
@@ -767,7 +797,6 @@ mod tests {
         for name in [
             "protected",
             SERVER_FILE_NAME,
-            OWNER_LOCK_FILE_NAME,
             DATABASE_FILE_NAME,
         ] {
             let application = tempfile::tempdir().unwrap();
@@ -788,24 +817,6 @@ mod tests {
         }
     }
 
-    #[test]
-    fn changed_area_identity_is_rejected_without_deleting_data() {
-        let application = tempfile::tempdir().unwrap();
-        let storage = CacheStorage::open(application.path()).unwrap();
-        let image = image_path(&storage);
-        std::fs::write(&image, b"keep image").unwrap();
-        std::fs::write(
-            storage.image_directory().join(FORMAT_FILE_NAME),
-            ROOT_FORMAT,
-        )
-        .unwrap();
-        assert!(matches!(
-            storage.clear_image_files(),
-            Err(CacheError::InvalidCacheOwnership(_))
-        ));
-        assert_eq!(std::fs::read(image).unwrap(), b"keep image");
-    }
-
     #[cfg(windows)]
     #[test]
     fn junction_area_cannot_redirect_deletion_outside_the_cache() {
@@ -814,11 +825,9 @@ mod tests {
         let protected = tempfile::tempdir().unwrap();
         let image = protected.path().join(image_name());
         std::fs::write(&image, b"protected external image").unwrap();
-        std::fs::write(protected.path().join(FORMAT_FILE_NAME), IMAGE_FORMAT).unwrap();
         let area = storage.image_directory();
         let media = storage.database_directory().join(DATABASE_FILE_NAME);
         std::fs::write(&media, b"keep media").unwrap();
-        std::fs::remove_file(area.join(FORMAT_FILE_NAME)).unwrap();
         std::fs::remove_dir(&area).unwrap();
         let output = std::process::Command::new("cmd")
             .args(["/C", "mklink", "/J"])
