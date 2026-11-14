@@ -47,11 +47,15 @@ and stop on failure. Do not run builds concurrently in one checkout.
 
 ## Publish
 
-`-Publish` requires all three platforms, a clean working tree, GitHub CLI
+`-Publish` requires all three platforms, GitHub CLI
 authentication (`gh auth login`) and Git push access. Existing releases/drafts and
 conflicting tags are rejected. The script tags the source commit, builds, pushes
 the tag and uploads packages/checksums to a draft before publishing. JSON metadata
 stays local. Without `-Publish`, no tags or GitHub releases are created.
+
+Uncommitted changes are allowed and included in the build. Local artifact metadata
+records them as `isDirty`; the Git tag and commit-based release notes still refer
+to the source commit and do not capture uncommitted changes.
 
 Release notes list commit subjects with links to each commit and the full comparison.
 The baseline is the most recently published release eligible for the new channel:

@@ -202,9 +202,6 @@ try {
         Assert-GitHubReleaseAbsent -Repository $repository -Tag $metadata.Tag
         $publishCommit = & git rev-parse HEAD
         if ($LASTEXITCODE -ne 0) { throw 'Could not resolve the source commit.' }
-        $changes = & git status --porcelain --untracked-files=normal
-        if ($LASTEXITCODE -ne 0) { throw 'Could not determine working tree state.' }
-        if ($changes) { throw 'Publishing requires a clean working tree. Commit the intended changes before publishing.' }
         $localTag = @(& git tag --list $metadata.Tag)
         if ($LASTEXITCODE -ne 0) { throw 'Could not inspect local tags.' }
         if ($localTag) {
@@ -304,8 +301,6 @@ try {
     if ($Publish) {
         $builtCommit = & git rev-parse HEAD
         if ($LASTEXITCODE -ne 0 -or $builtCommit -cne $publishCommit) { throw 'Source commit changed during the build. Nothing was published.' }
-        $changes = & git status --porcelain --untracked-files=normal
-        if ($LASTEXITCODE -ne 0 -or $changes) { throw 'Working tree changed during the build. Nothing was published.' }
         Assert-GitHubReleaseAbsent -Repository $repository -Tag $metadata.Tag
         $releaseNotes = Get-ReleaseNotes -Repository $repository -Tag $metadata.Tag -Commit $publishCommit -Channel $metadata.Channel
         if (-not $hasRemoteTag) {
