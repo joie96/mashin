@@ -2954,14 +2954,7 @@ class DesktopPlaybackIndicator extends StatelessWidget {
       listenable: coreEvents,
       builder: (BuildContext context, Widget? child) {
         final mediaSessionState = coreEvents.mediaSessionState;
-        final currentIndex = mediaSessionState.queue.currentIndex;
-        final queueItems = mediaSessionState.queue.items;
-        final currentItem =
-            currentIndex != null &&
-                currentIndex >= 0 &&
-                currentIndex < queueItems.length
-            ? queueItems[currentIndex].mediaItem
-            : null;
+        final currentItem = mediaSessionState.displayedMedia;
 
         if (currentItem == null ||
             !isSamePlaybackTrack(mediaItem, currentItem)) {
@@ -3024,20 +3017,28 @@ class DesktopPlaybackIndicator extends StatelessWidget {
   }
 }
 
-/// Compares two media items by uri (or item id as fallback) to determine if
-/// they refer to the same playback track.
+/// Matches playback selections through their URI or exact provider mappings.
 bool isSamePlaybackTrack(MediaItem left, MediaItem right) {
+  if (left.mediaType != right.mediaType) return false;
   final String leftUri = left.uri?.trim() ?? '';
   final String rightUri = right.uri?.trim() ?? '';
-  if (leftUri.isNotEmpty && rightUri.isNotEmpty) {
-    return leftUri.toLowerCase() == rightUri.toLowerCase();
+  if (leftUri.isNotEmpty &&
+      rightUri.isNotEmpty &&
+      leftUri.toLowerCase() == rightUri.toLowerCase()) {
+    return true;
   }
 
-  final String leftItemId = left.itemId.trim();
-  final String rightItemId = right.itemId.trim();
-  return leftItemId.isNotEmpty &&
-      rightItemId.isNotEmpty &&
-      leftItemId == rightItemId;
+  Set<(String, String)> providerIdentities(MediaItem item) => {
+    if (item.provider.trim().isNotEmpty && item.itemId.trim().isNotEmpty)
+      (item.provider.trim(), item.itemId.trim()),
+    for (final mapping in item.providerMappings)
+      if (mapping.providerInstance.trim().isNotEmpty &&
+          mapping.itemId.trim().isNotEmpty)
+        (mapping.providerInstance.trim(), mapping.itemId.trim()),
+  };
+
+  final leftIdentities = providerIdentities(left);
+  return providerIdentities(right).any(leftIdentities.contains);
 }
 
 /// Rebuilds [builder] with whether [item] is the currently active playback
@@ -3066,15 +3067,8 @@ class PlaybackAwareBuilder extends StatelessWidget {
     return ListenableBuilder(
       listenable: controller,
       builder: (BuildContext context, Widget? child) {
-        final queue = controller.mediaSessionState.queue;
-        final int? currentIndex = queue.currentIndex;
-        final List<QueueItem> queueItems = queue.items;
         final MediaItem? currentItem =
-            currentIndex != null &&
-                currentIndex >= 0 &&
-                currentIndex < queueItems.length
-            ? queueItems[currentIndex].mediaItem
-            : null;
+            controller.mediaSessionState.displayedMedia;
         final bool isCurrent =
             currentItem != null && isSamePlaybackTrack(mediaItem, currentItem);
         return builder(context, isCurrent);

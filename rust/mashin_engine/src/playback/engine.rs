@@ -15,6 +15,7 @@ use crate::playback::models::{MediaSessionState, PlayerState, Queue};
 use crate::playback::models::{QueueOption, RepeatMode};
 use crate::playback::server::PlaybackConnection;
 use crate::playback::server_target::ServerTargetConfiguration;
+use rand::seq::SliceRandom;
 use std::sync::{Arc, Mutex};
 
 pub(crate) struct PlaybackSessionCheckpoint {
@@ -164,16 +165,20 @@ impl PlaybackEngine {
 
     pub(crate) fn queue_play_media(
         &mut self,
-        media_items: Vec<MediaItem>,
+        mut media_items: Vec<MediaItem>,
         option: QueueOption,
-        start_item: Option<usize>,
-        shuffle: bool,
+        mut start_item: Option<usize>,
+        mut shuffle: bool,
     ) -> Result<(), String> {
         if matches!(option, QueueOption::Play | QueueOption::Replace) {
             self.reserve_media_selection();
         }
         let is_starting =
             matches!(option, QueueOption::Play | QueueOption::Replace) && !media_items.is_empty();
+        if is_starting {
+            start_item = prepare_start_selection(&mut media_items, start_item, shuffle)?;
+            shuffle = false;
+        }
         if is_starting
             && self
                 .pending_start
@@ -185,6 +190,9 @@ impl PlaybackEngine {
             && media_items.is_empty()
         {
             self.cancel_start();
+        }
+        if is_starting {
+            self.set_requested_media(media_items[0].clone());
         }
         let result = self.with_active_backend(|engine| {
             engine.queue_play_media(media_items, option, start_item, shuffle)
@@ -216,8 +224,17 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn select_queue_item(&mut self, item_id: QueueItemId) -> Result<(), String> {
+        let media = self
+            .queue()
+            .items
+            .iter()
+            .find(|item| item.queue_item_id == item_id)
+            .and_then(|item| item.media_item.clone());
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.begin_start(StartKind::Media)?;
+        if let Some(media) = media {
+            self.set_requested_media(media);
+        }
         let result = self.with_active_backend(|engine| engine.select_queue_item(item_id));
         if result.is_ok() {
             self.has_pending_start_command = true;
@@ -228,8 +245,16 @@ impl PlaybackEngine {
     }
 
     pub(crate) fn play_queue_index(&mut self, index: usize) -> Result<(), String> {
+        let media = self
+            .queue()
+            .items
+            .get(index)
+            .and_then(|item| item.media_item.clone());
         self.media_selection_revision = self.media_selection_revision.wrapping_add(1);
         self.begin_start(StartKind::Media)?;
+        if let Some(media) = media {
+            self.set_requested_media(media);
+        }
         let result = self.with_active_backend(|engine| engine.play_queue_index(index));
         if result.is_ok() {
             self.has_pending_start_command = true;
@@ -385,6 +410,16 @@ impl PlaybackEngine {
         Ok(request)
     }
 
+    pub(crate) fn set_requested_media(&self, media: MediaItem) {
+        if let Some(request) = &self.pending_start {
+            request.set_requested_media(media);
+            self.event_publisher
+                .publish(ApplicationEvent::PlayerStateChanged {
+                    player_state: self.player_state(),
+                });
+        }
+    }
+
     pub(crate) fn cancel_start(&mut self) {
         self.pending_start = None;
         self.has_pending_start_command = false;
@@ -526,6 +561,40 @@ impl Drop for PlaybackEngine {
     }
 }
 
+// Prepare once so the displayed selection and the pinned MA start are identical.
+fn prepare_start_selection(
+    media: &mut Vec<MediaItem>,
+    start_item: Option<usize>,
+    shuffle: bool,
+) -> Result<Option<usize>, String> {
+    let selected = start_item
+        .map(|index| {
+            media
+                .get(index)
+                .cloned()
+                .ok_or_else(|| "start item is outside the media request".to_string())
+        })
+        .transpose()?;
+    if shuffle {
+        media.shuffle(&mut rand::rng());
+    }
+    if let Some(selected) = selected {
+        let index = media
+            .iter()
+            .position(|item| item == &selected)
+            .expect("selected media remains in the request");
+        let selected = media.remove(index);
+        media.insert(0, selected);
+    }
+    Ok(media.first().and_then(|item| {
+        if matches!(item, MediaItem::Track(_)) {
+            Some(0)
+        } else {
+            start_item
+        }
+    }))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -536,6 +605,47 @@ mod tests {
         LogLevelPreference, SelectedOutput, SessionConfig, ThemePreference,
     };
     use crate::playback::local::session::LocalSessionConfiguration;
+
+    #[test]
+    fn start_selection_preserves_track_taps_and_pins_the_selected_item() {
+        let track = |id: &str| {
+            serde_json::from_value::<MediaItem>(serde_json::json!({
+                "media_type": "track", "item_id": id, "provider": "source", "name": id,
+            }))
+            .unwrap()
+        };
+        let mut media = vec![track("chosen"), track("following")];
+        assert_eq!(
+            prepare_start_selection(&mut media, None, false).unwrap(),
+            Some(0)
+        );
+        assert_eq!(media[0], track("chosen"));
+        assert_eq!(media[1], track("following"));
+        for _ in 0..20 {
+            let mut media = vec![track("before"), track("chosen"), track("following")];
+            assert_eq!(
+                prepare_start_selection(&mut media, Some(1), true).unwrap(),
+                Some(0)
+            );
+            assert_eq!(media[0], track("chosen"));
+            assert_eq!(media.len(), 3);
+        }
+        assert!(prepare_start_selection(&mut media, Some(2), false).is_err());
+    }
+
+    #[test]
+    fn shuffle_start_selection_returns_the_first_of_the_once_shuffled_batch() {
+        let mut media: Vec<MediaItem> = (0..10).map(|index| serde_json::from_value(serde_json::json!({
+            "media_type": "track", "item_id": index.to_string(), "provider": "source", "name": "Track",
+        })).unwrap()).collect();
+        let original = media.clone();
+        assert_eq!(
+            prepare_start_selection(&mut media, None, true).unwrap(),
+            Some(0)
+        );
+        assert_eq!(media.len(), original.len());
+        assert!(original.iter().all(|item| media.contains(item)));
+    }
 
     fn configuration() -> (PlaybackSessionConfiguration, Arc<dyn PlaybackConnection>) {
         let persisted = SessionConfig {

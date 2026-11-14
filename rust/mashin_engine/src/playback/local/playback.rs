@@ -21,7 +21,6 @@ use crate::playback::server_target::ServerTarget;
 use crate::playback::server_target::ServerTargetConfiguration;
 use crate::playback::start::{PlaybackStart, StartIdentity, StartObservation};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 use uuid::Uuid;
 
 pub(crate) struct LocalPlayback {
@@ -393,17 +392,16 @@ impl LocalPlayback {
             &session.receiver.snapshot(),
             self.last_queue.as_ref(),
         );
-        state.player_state.playback_state = self
-            .start
+        self.start
             .lock()
             .expect("playback start lock poisoned")
-            .project(
+            .project_player_state(
                 StartObservation {
                     identity: StartIdentity::Local(stream_id),
                     revision: output.resume.output_revision,
                     state: state.player_state.playback_state,
                 },
-                Instant::now(),
+                &mut state.player_state,
             );
         let recovery = session.output.recovery().borrow().target.clone();
         if output.current.is_none() {
@@ -597,6 +595,7 @@ fn project_media_session_state(
             .and_then(|stream| stream.duration_millis.map(|duration| duration as i64)),
         buffered_position_millis: position_millis
             .map(|position| position.saturating_add(output.buffered_duration_millis as i64)),
+        requested_media: None,
         volume: output.resume.volume_percent,
         muted: output.resume.is_muted,
     };

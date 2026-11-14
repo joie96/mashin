@@ -114,13 +114,16 @@ class _AppShellState extends State<AppShell> {
   }
 
   String get _currentTrackTitle {
-    final item = _currentQueueItem;
-    if (item == null) {
+    final mediaItem = _coreEvents.mediaSessionState.displayedMedia;
+    if (mediaItem == null) {
       return 'Kein Track aktiv';
     }
 
-    final mediaName = item.mediaItem.name.trim();
-    final queueName = item.name.trim();
+    final mediaName = mediaItem.name.trim();
+    final queueName =
+        _coreEvents.mediaSessionState.playerState.requestedMedia == null
+        ? _currentQueueItem?.name.trim() ?? ''
+        : '';
     if (mediaName.isNotEmpty) {
       return mediaName;
     }
@@ -131,14 +134,12 @@ class _AppShellState extends State<AppShell> {
   }
 
   String get _currentTrackSubtitle {
-    final item = _currentQueueItem;
-    if (item == null) {
+    final mediaItem = _coreEvents.mediaSessionState.displayedMedia;
+    if (mediaItem == null) {
       return 'Wähle einen Titel zum Starten';
     }
 
-    final Track? track = item.mediaItem is Track
-        ? item.mediaItem as Track
-        : null;
+    final Track? track = mediaItem is Track ? mediaItem : null;
     final artists =
         track?.artists
             .map((artist) => artist.name.trim())
@@ -154,7 +155,7 @@ class _AppShellState extends State<AppShell> {
   Artist? get _currentTrackPrimaryArtist => _currentTrack?.artists.firstOrNull;
 
   Track? get _currentTrack {
-    final MediaItem? mediaItem = _currentQueueItem?.mediaItem;
+    final MediaItem? mediaItem = _coreEvents.mediaSessionState.displayedMedia;
     return mediaItem is Track ? mediaItem : null;
   }
 
@@ -166,6 +167,10 @@ class _AppShellState extends State<AppShell> {
       return durationFromStateSeconds;
     }
 
+    if (_coreEvents.mediaSessionState.playerState.requestedMedia != null) {
+      return 0;
+    }
+
     final queueDuration = _currentQueueItem?.duration;
     if (queueDuration != null && queueDuration > 0) {
       return queueDuration.toDouble();
@@ -175,12 +180,24 @@ class _AppShellState extends State<AppShell> {
   }
 
   String? get _currentTrackCoverUrl {
-    final url = _currentQueueItem?.imageUriForSize(80)?.trim() ?? '';
+    final requested = _coreEvents.mediaSessionState.playerState.requestedMedia;
+    final url =
+        (requested != null
+                ? requested.imageUriForSize(80)
+                : _currentQueueItem?.imageUriForSize(80))
+            ?.trim() ??
+        '';
     return url.isEmpty ? null : url;
   }
 
   String? get _currentQueueCoverUrl {
-    final url = _currentQueueItem?.imageUriForSize(512)?.trim() ?? '';
+    final requested = _coreEvents.mediaSessionState.playerState.requestedMedia;
+    final url =
+        (requested != null
+                ? requested.imageUriForSize(512)
+                : _currentQueueItem?.imageUriForSize(512))
+            ?.trim() ??
+        '';
     return url.isEmpty ? null : url;
   }
 
@@ -1179,6 +1196,9 @@ class _AppShellState extends State<AppShell> {
   }
 
   Future<void> _seek(double seconds) async {
+    if (_coreEvents.mediaSessionState.playerState.requestedMedia != null) {
+      return;
+    }
     try {
       await _coreBridge.transportSeek(seconds);
     } catch (_) {
@@ -1962,7 +1982,9 @@ class _DesktopPlayerBar extends StatelessWidget {
                               max: clampedMaxSeconds > 0
                                   ? clampedMaxSeconds
                                   : 1,
-                              enabled: hasPlaybackSession,
+                              enabled:
+                                  hasPlaybackSession &&
+                                  playbackState.requestedMedia == null,
                               onSeek: onSeek,
                             ),
                           ),

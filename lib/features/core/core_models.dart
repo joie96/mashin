@@ -2885,6 +2885,7 @@ class PlayerState {
   final int? positionMillis;
   final int? durationMillis;
   final int? bufferedPositionMillis;
+  final MediaItem? requestedMedia;
   final int volume;
   final bool muted;
 
@@ -2897,6 +2898,7 @@ class PlayerState {
     this.positionMillis,
     this.durationMillis,
     this.bufferedPositionMillis,
+    this.requestedMedia,
     this.volume = 50,
     this.muted = false,
   });
@@ -2917,6 +2919,9 @@ class PlayerState {
       bufferedPositionMillis: _toClampedMillis(
         (json['bufferedPositionMillis'] as num?)?.toDouble(),
       ),
+      requestedMedia: json['requestedMedia'] is Map<String, dynamic>
+          ? mediaItemFromJson(json['requestedMedia'] as Map<String, dynamic>)
+          : null,
       volume: (json['volume'] as num?)?.toInt().clamp(0, 100) ?? 50,
       muted: json['muted'] == true,
     );
@@ -2931,6 +2936,15 @@ class MediaSessionState {
     this.queue = const Queue(),
     this.playerState = const PlayerState(),
   });
+
+  /// Displays the requested selection without changing the confirmed queue cursor.
+  MediaItem? get displayedMedia {
+    final requested = playerState.requestedMedia;
+    if (requested != null) return requested;
+    final index = queue.currentIndex;
+    if (index == null || index < 0 || index >= queue.items.length) return null;
+    return queue.items[index].mediaItem;
+  }
 }
 
 class PreferredProvider {
@@ -2963,9 +2977,13 @@ class CacheUsage {
   factory CacheUsage.fromJson(Map<String, dynamic> json) {
     final metadataBytes = json['metadataBytes'];
     final imageBytes = json['imageBytes'];
-    if (metadataBytes is! int || imageBytes is! int ||
-        metadataBytes < 0 || imageBytes < 0) {
-      throw const FormatException('cache usage must contain nonnegative byte counts');
+    if (metadataBytes is! int ||
+        imageBytes is! int ||
+        metadataBytes < 0 ||
+        imageBytes < 0) {
+      throw const FormatException(
+        'cache usage must contain nonnegative byte counts',
+      );
     }
     return CacheUsage(metadataBytes: metadataBytes, imageBytes: imageBytes);
   }

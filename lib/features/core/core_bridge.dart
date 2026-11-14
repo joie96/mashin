@@ -231,7 +231,7 @@ Future<Map<String, dynamic>> createSelectedProviderMediaItemPayload(
   return payload;
 }
 
-/// Expands albums and artists without applying each track's provider preference.
+/// Expands finite containers without applying each track's provider preference.
 Future<({List<Map<String, dynamic>> mediaItems, int? startItem})>
 resolveQueuePlayMedia(
   MashinCoreBridgeApi coreBridge,
@@ -250,7 +250,9 @@ resolveQueuePlayMedia(
       item,
       providerInstance: providerInstance,
     );
-    if (item is! Album && item is! Artist) {
+    if (item is! Album &&
+        item is! Artist &&
+        (item is! Playlist || item.isDynamic)) {
       payloads.add(payload);
       if (index == startItem) resolvedStartItem = offset;
       continue;
@@ -259,13 +261,15 @@ resolveQueuePlayMedia(
     final provider = payload['provider'] as String;
     final tracks = item is Album
         ? await coreBridge.getAlbumTracks(itemId, provider)
-        : await coreBridge.getArtistTopTracks(itemId, provider);
+        : item is Artist
+        ? await coreBridge.getArtistTopTracks(itemId, provider)
+        : await coreBridge.getPlaylistTracks(itemId, provider);
     for (final track in tracks) {
       if (!track.canPlay) continue;
       payloads.add(
         await createSelectedProviderMediaItemPayload(
           track,
-          providerInstance: provider,
+          providerInstance: item is Playlist ? null : provider,
         ),
       );
     }

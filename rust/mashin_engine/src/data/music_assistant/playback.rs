@@ -284,8 +284,35 @@ fn queue_command_request(
 
 #[cfg(test)]
 mod command_tests {
-    
-    
-    
-    
+    use super::*;
+    use crate::domain::media::MediaItem;
+    use crate::playback::models::QueueOption;
+
+    #[test]
+    fn play_media_sends_the_displayed_first_track_as_start_item() {
+        let media: Vec<MediaItem> = ["chosen", "following"]
+            .into_iter()
+            .map(|id| {
+                serde_json::from_value(serde_json::json!({
+                    "media_type": "track", "item_id": id, "provider": "source", "name": id,
+                }))
+                .unwrap()
+            })
+            .collect();
+        let (name, payload) = queue_command_request(
+            &QueueId("queue".into()),
+            QueueCommand::PlayMedia {
+                media,
+                option: QueueOption::Replace,
+                start_item: Some(0),
+                shuffle: false,
+            },
+        )
+        .unwrap();
+        assert_eq!(name, "play_media");
+        assert_eq!(payload["media"][0], payload["start_item"]);
+        assert_eq!(payload["media"][0]["item_id"], "chosen");
+        assert_eq!(payload["media"][1]["item_id"], "following");
+        assert!(payload.get("shuffle").is_none());
+    }
 }

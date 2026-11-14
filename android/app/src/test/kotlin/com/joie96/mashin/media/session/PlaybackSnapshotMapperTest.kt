@@ -14,6 +14,26 @@ import org.robolectric.annotation.Config
 class PlaybackSnapshotMapperTest {
     // Canonical state and metadata projection.
     @Test
+    fun requestedTrackReplacesOnlyPresentationMetadataWhileBuffering() {
+        val queue = JSONObject("""{"items":[{"queue_item_id":"old","name":"Old","media_item":{"media_type":"track","item_id":"old","provider":"source","uri":"source://track/old","duration":60}}]}""")
+        val before = queue.toString()
+        val state = JSONObject("""{"playbackState":"buffering","currentQueueItemId":"old","positionMillis":0,"durationMillis":180000,"requestedMedia":{"media_type":"track","item_id":"chosen","provider":"source","uri":"source://track/chosen","name":"Chosen","duration":180}}""")
+        val snapshot = PlaybackSnapshotMapper.fromPlayerState(state, queue, JSONObject("{}"))
+        assertEquals(PlaybackStatus.Buffering, snapshot.status)
+        assertEquals("Chosen", snapshot.mediaItems.single().mediaMetadata.title)
+        assertEquals("old", snapshot.mediaItems.single().mediaId)
+        assertEquals(0L, snapshot.positionMillis)
+        assertEquals(180000L, snapshot.durationMillis)
+        assertEquals("chosen", JSONObject(snapshot.serializedCurrentMediaItem!!).getString("item_id"))
+        assertEquals(before, queue.toString())
+        val empty = PlaybackSnapshotMapper.fromPlayerState(state, JSONObject("{}"))
+        assertEquals("Chosen", empty.mediaItems.single().mediaMetadata.title)
+        assertEquals(Player.STATE_BUFFERING, empty.playerState)
+        state.remove("requestedMedia")
+        assertEquals("Old", PlaybackSnapshotMapper.fromPlayerState(state, queue).mediaItems.single().mediaMetadata.title)
+    }
+
+    @Test
     fun favoriteStateUsesUserDataUriInsteadOfStaleQueueFlags() {
         val state = JSONObject("""{"currentQueueItemId":"queue:1"}""")
         val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","media_item":{"media_type":"track","item_id":"track-1","uri":" library://track/track-1 ","favorite":false}}]}""")
