@@ -74,6 +74,7 @@ pub(crate) struct PlayerState {
     pub(crate) position_millis: Option<i64>,
     pub(crate) duration_millis: Option<i64>,
     pub(crate) buffered_position_millis: Option<i64>,
+    pub(crate) requested_media: Option<MediaItem>,
     pub(crate) volume: u8,
     pub(crate) muted: bool,
 }
@@ -89,6 +90,7 @@ impl Default for PlayerState {
             position_millis: None,
             duration_millis: None,
             buffered_position_millis: None,
+            requested_media: None,
             volume: 50,
             muted: false,
         }
@@ -104,6 +106,7 @@ impl PlayerState {
             && self.current_index == other.current_index
             && self.duration_millis == other.duration_millis
             && self.buffered_position_millis == other.buffered_position_millis
+            && self.requested_media == other.requested_media
             && self.volume == other.volume
             && self.muted == other.muted
     }

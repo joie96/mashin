@@ -1,7 +1,8 @@
 //! Presentation-only start requests never mutate the native audio or MA queue state.
 
 use crate::domain::identifiers::QueueItemId;
-use crate::playback::models::PlayState;
+use crate::domain::media::MediaItem;
+use crate::playback::models::{PlayState, PlayerState};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant};
 use uuid::Uuid;
@@ -43,6 +44,20 @@ impl PlaybackStartRequest {
             .as_ref()
             .is_some_and(|pending| pending.id == self.id)
     }
+
+    pub(crate) fn set_requested_media(&self, media: MediaItem) {
+        let mut presentation = self
+            .presentation
+            .lock()
+            .expect("playback start lock poisoned");
+        if let Some(pending) = presentation
+            .pending
+            .as_mut()
+            .filter(|pending| pending.id == self.id)
+        {
+            pending.requested_media = Some(media);
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -71,6 +86,7 @@ struct PendingStart {
     started_at: Instant,
     has_completed_command: bool,
     has_observed_buffering: bool,
+    requested_media: Option<MediaItem>,
 }
 
 #[derive(Default)]
@@ -92,6 +108,7 @@ impl PlaybackStart {
             started_at: Instant::now(),
             has_completed_command: false,
             has_observed_buffering: false,
+            requested_media: None,
         });
         self.sequence
     }
@@ -110,6 +127,29 @@ impl PlaybackStart {
     pub(crate) fn cancel(&mut self) {
         self.pending = None;
         self.has_failed = false;
+    }
+
+    pub(crate) fn requested_media(&self) -> Option<MediaItem> {
+        self.pending
+            .as_ref()
+            .and_then(|pending| pending.requested_media.clone())
+    }
+
+    pub(crate) fn project_player_state(
+        &mut self,
+        observation: StartObservation,
+        player: &mut PlayerState,
+    ) {
+        player.playback_state = self.project(observation, Instant::now());
+        player.requested_media = self.requested_media();
+        if let Some(media) = &player.requested_media {
+            player.position_millis = Some(0);
+            player.buffered_position_millis = None;
+            player.duration_millis = match media {
+                MediaItem::Track(track) => Some(i64::from(track.duration) * 1000),
+                _ => None,
+            };
+        }
     }
 
     // Observations can end only their own start; old playing/error snapshots cannot.
@@ -174,5 +214,71 @@ mod tests {
             start.project(observation("same", 0, PlayState::Playing), Instant::now()),
             PlayState::Playing
         );
+    }
+
+    #[test]
+    fn requested_media_belongs_only_to_its_pending_start() {
+        let presentation = Arc::new(Mutex::new(PlaybackStart::default()));
+        let media: MediaItem = serde_json::from_value(serde_json::json!({
+            "media_type": "track", "item_id": "chosen", "provider": "source", "name": "Chosen"
+        }))
+        .unwrap();
+        let old = PlaybackStartRequest::begin(
+            presentation.clone(),
+            StartKind::Media,
+            observation("old", 0, PlayState::Playing),
+        );
+        old.set_requested_media(media.clone());
+        assert_eq!(
+            presentation.lock().unwrap().requested_media(),
+            Some(media.clone())
+        );
+        let current = PlaybackStartRequest::begin(
+            presentation.clone(),
+            StartKind::Media,
+            observation("old", 0, PlayState::Playing),
+        );
+        old.set_requested_media(media.clone());
+        assert_eq!(presentation.lock().unwrap().requested_media(), None);
+        current.set_requested_media(media);
+        old.complete(false);
+        assert!(presentation.lock().unwrap().requested_media().is_some());
+        current.complete(false);
+        assert_eq!(presentation.lock().unwrap().requested_media(), None);
+    }
+
+    #[test]
+    fn requested_media_resets_timing_until_the_new_playback_is_confirmed() {
+        let presentation = Arc::new(Mutex::new(PlaybackStart::default()));
+        let media: MediaItem = serde_json::from_value(serde_json::json!({
+            "media_type": "track", "item_id": "chosen", "provider": "source", "name": "Chosen", "duration": 180
+        })).unwrap();
+        let request = PlaybackStartRequest::begin(
+            presentation.clone(),
+            StartKind::Media,
+            observation("old", 0, PlayState::Playing),
+        );
+        request.set_requested_media(media.clone());
+        let mut player = PlayerState {
+            position_millis: Some(50000),
+            buffered_position_millis: Some(60000),
+            ..PlayerState::default()
+        };
+        presentation
+            .lock()
+            .unwrap()
+            .project_player_state(observation("old", 0, PlayState::Playing), &mut player);
+        assert_eq!(player.playback_state, PlayState::Buffering);
+        assert_eq!(player.requested_media, Some(media));
+        assert_eq!(player.position_millis, Some(0));
+        assert_eq!(player.duration_millis, Some(180000));
+        assert_eq!(player.buffered_position_millis, None);
+        request.complete(true);
+        presentation
+            .lock()
+            .unwrap()
+            .project_player_state(observation("new", 0, PlayState::Playing), &mut player);
+        assert_eq!(player.requested_media, None);
+        assert_eq!(player.playback_state, PlayState::Playing);
     }
 }

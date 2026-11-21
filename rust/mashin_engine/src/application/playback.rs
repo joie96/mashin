@@ -95,7 +95,7 @@ impl Application {
         &self,
         media_items: Vec<MediaItem>,
     ) -> Result<Vec<ApplicationEvent>, ApplicationError> {
-        let (generation, selection_revision, event_publisher) = {
+        let (generation, selection_revision, event_publisher, start_request) = {
             let _command_guard = self
                 .command_serializer
                 .lock()
@@ -107,18 +107,40 @@ impl Application {
             coordinator.connection.as_ref().ok_or_else(|| {
                 ApplicationError::command_failed("a restored session is required to start radio")
             })?;
+            let start_request = coordinator
+                .playback
+                .begin_start(crate::playback::start::StartKind::Media)
+                .map_err(ApplicationError::command_failed)?;
+            if media_items
+                .iter()
+                .all(|item| matches!(item, MediaItem::Track(_)))
+            {
+                if let Some(media) = media_items
+                    .iter()
+                    .find(|item| crate::domain::radio::is_playable(item))
+                {
+                    coordinator.playback.set_requested_media(media.clone());
+                }
+            }
             (
                 coordinator.session_generation,
                 coordinator.playback.reserve_media_selection(),
                 coordinator.session_events(),
+                start_request,
             )
         };
-        let providers = self.provider_repository(generation)?;
+        let providers = self
+            .provider_repository(generation)
+            .inspect_err(|_| start_request.complete(false))?;
         let instances = self
             .runtime
             .block_on(async { providers.read_instances().await?.resolve().await });
-        let catalog = self.catalog_repository(generation)?;
-        self.runtime
+        let catalog = self
+            .catalog_repository(generation)
+            .inspect_err(|_| start_request.complete(false))?;
+        let has_started = std::sync::atomic::AtomicBool::new(false);
+        let result = self
+            .runtime
             .block_on(crate::application::radio::start_radio(
                 catalog.as_ref(),
                 instances
@@ -128,6 +150,8 @@ impl Application {
                 media_items,
                 |media, option| {
                     let event_publisher = event_publisher.clone();
+                    let start_request = start_request.clone();
+                    let has_started = &has_started;
                     async move {
                         let expected_revision = if option == QueueOption::Replace {
                             selection_revision
@@ -137,7 +161,11 @@ impl Application {
                         let events = self
                             .execute_resolved_media_command(
                                 media,
-                                None,
+                                if option == QueueOption::Replace {
+                                    Some(&start_request)
+                                } else {
+                                    None
+                                },
                                 Some(expected_revision),
                                 Some(generation),
                                 |playback, media| {
@@ -149,11 +177,17 @@ impl Application {
                         for event in events {
                             event_publisher.publish(event);
                         }
+                        if option == QueueOption::Replace {
+                            has_started.store(true, std::sync::atomic::Ordering::Release);
+                        }
                         Ok(())
                     }
                 },
-            ))
-            .map_err(ApplicationError::command_failed)?;
+            ));
+        if result.is_err() && !has_started.load(std::sync::atomic::Ordering::Acquire) {
+            start_request.complete(false);
+        }
+        result.map_err(ApplicationError::command_failed)?;
         Ok(Vec::new())
     }
 

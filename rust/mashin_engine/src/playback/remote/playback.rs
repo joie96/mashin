@@ -10,7 +10,6 @@ use crate::playback::queue_projection::QueueSnapshotRequest;
 use crate::playback::server_target::ServerTarget;
 use crate::playback::start::{PlaybackStart, StartIdentity, StartObservation};
 use std::sync::{Arc, Mutex};
-use std::time::Instant;
 
 pub(crate) struct RemotePlayback {
     event_publisher: EventPublisher,
@@ -149,11 +148,10 @@ impl PlaybackBackend for RemotePlayback {
     }
     fn player_state(&self) -> PlayerState {
         let mut player = self.target.player_state();
-        player.playback_state = self
-            .start
+        self.start
             .lock()
             .expect("playback start lock poisoned")
-            .project(self.start_observation(), Instant::now());
+            .project_player_state(self.start_observation(), &mut player);
         player
     }
     fn take_pending_commands(&mut self) -> Vec<PlaybackCommand> {

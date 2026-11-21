@@ -19,7 +19,9 @@ internal object PlaybackSnapshotMapper {
             ?.let { items -> (0 until items.length()).mapNotNull(items::optJSONObject) }
             ?: emptyList()
         val currentQueueItem = queueItems.firstOrNull { it.optString("queue_item_id") == queueItemId }
-        val currentMediaItem = currentQueueItem?.optJSONObject("media_item")
+        val requestedMedia = values.optJSONObject("requestedMedia")
+        val currentMediaItem = requestedMedia ?: currentQueueItem?.optJSONObject("media_item")
+        val currentIndex = queueItems.indexOfFirst { it.optString("queue_item_id") == queueItemId }.coerceAtLeast(0)
         val currentUri = currentMediaItem?.optString("uri")?.trim()?.takeIf { it.isNotEmpty() && it != "null" }
         val favoriteCategory = when (currentMediaItem?.optString("media_type")) {
             "track" -> "tracks"
@@ -33,12 +35,20 @@ internal object PlaybackSnapshotMapper {
             favorites.optJSONObject(index)?.let { hasSameMediaIdentity(currentMediaItem, it) } == true
         }
         val durationMillis = values.optLong("durationMillis", -1L).takeIf { it > 0 }
-            ?: currentQueueItem?.optLong("duration")?.takeIf { it > 0 }?.times(1_000L)
+            ?: (requestedMedia ?: currentQueueItem)?.optLong("duration")?.takeIf { it > 0 }?.times(1_000L)
         val positionMillis = values.optLong("positionMillis", 0L)
         val bufferedPositionMillis = values.optLong("bufferedPositionMillis", -1L).takeIf { it >= 0 }
-            ?: currentQueueItem?.optJSONObject("cache")?.optLong("cached_duration_millis", -1L)?.takeIf { it >= 0 }
+            ?: currentQueueItem?.takeIf { requestedMedia == null }?.optJSONObject("cache")?.optLong("cached_duration_millis", -1L)?.takeIf { it >= 0 }
             ?: positionMillis
-        val items = queueItems.map { currentItem ->
+        val presentationItems = if (queueItems.isEmpty() && requestedMedia != null) {
+            listOf(JSONObject().put("queue_item_id", queueItemId))
+        } else queueItems
+        val items = presentationItems.mapIndexed { index, queueItem ->
+            val currentItem = if (requestedMedia != null && index == currentIndex) {
+                JSONObject().put("queue_item_id", queueItem.optString("queue_item_id"))
+                    .put("name", requestedMedia.optString("name"))
+                    .put("media_item", requestedMedia)
+            } else queueItem
             val mediaItem = currentItem.optJSONObject("media_item")
             MediaItem.Builder()
                 .setMediaId(currentItem.optString("queue_item_id"))
@@ -76,7 +86,7 @@ internal object PlaybackSnapshotMapper {
                 else -> Player.REPEAT_MODE_OFF
             },
             mediaItems = items,
-            currentIndex = queueItems.indexOfFirst { it.optString("queue_item_id") == queueItemId }.coerceAtLeast(0),
+            currentIndex = currentIndex,
             isLocalPlayback = values.optString("activeMode") == "local",
             serializedCurrentMediaItem = currentMediaItem?.takeIf { userData != null && currentUri != null && favoriteCategory != null }?.toString(),
             isCurrentItemFavorite = isCurrentItemFavorite,
