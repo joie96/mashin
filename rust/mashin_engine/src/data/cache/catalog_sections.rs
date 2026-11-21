@@ -343,7 +343,7 @@ pub(super) fn read_catalog_section(
         })
         .collect::<Result<Vec<_>, CacheError>>()?;
     if matches!(query, CatalogQuery::RecentlyPlayed { .. }) {
-        super::track_reads::hydrate_recent_tracks(transaction, &mut tracks, user_id)?;
+        super::track_reads::hydrate_track_references(transaction, &mut tracks, user_id)?;
     }
     Ok(
         if matches!(

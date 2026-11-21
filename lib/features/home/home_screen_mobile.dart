@@ -327,6 +327,53 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
         ),
         const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
         _sectionSliver(
+          ListenableBuilder(
+            listenable: _controller.personalSectionsListenable,
+            builder: (context, child) => Column(
+              children: [
+                _personalRow<Artist>(
+                  'user_artist_recommendations',
+                  'Künstler-Empfehlungen',
+                  _controller.artistRecommendations,
+                  widget.onOpenArtist,
+                ),
+                const SizedBox(height: _sectionGap),
+                _personalRow<Album>(
+                  'user_top_albums_monthly',
+                  'Deine meistgehörten Alben',
+                  _controller.topAlbums,
+                  widget.onOpenAlbum,
+                ),
+                const SizedBox(height: _sectionGap),
+                _personalRow<Album>(
+                  'user_album_recommendations',
+                  'Album-Empfehlungen',
+                  _controller.albumRecommendations,
+                  widget.onOpenAlbum,
+                ),
+              ],
+            ),
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
+        ListenableBuilder(
+          listenable: _controller.personalSectionsListenable,
+          builder: (context, child) => _sectionSliver(
+            MediaListSectionMobile<Track>(
+              title: 'Lange nicht gehört',
+              items: _controller.rediscoveryTracks,
+              isLoading: _controller.isFolderLoading('user_rediscovery_tracks'),
+              emptyText: 'Keine Tracks verfügbar.',
+              coreBridge: widget.coreBridge,
+              coreEvents: widget.coreEvents,
+              onItemTap: _openTrackContext,
+              onSelectionMenuTap: (items) =>
+                  unawaited(_showSelectionMenu(items)),
+            ),
+          ),
+        ),
+        const SliverPadding(padding: EdgeInsets.only(top: _sectionGap)),
+        _sectionSliver(
           _ArtistSections(
             controller: _controller,
             coreBridge: widget.coreBridge,
@@ -359,6 +406,23 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
       sliver: SliverToBoxAdapter(child: RepaintBoundary(child: child)),
     );
   }
+
+  // Personal recommendation rows retain the mobile selection workflow.
+  Widget _personalRow<T extends MediaItem>(
+    String folderId,
+    String title,
+    List<T> items,
+    ValueChanged<T>? onItemTap,
+  ) => MediaRowSectionMobile<T>(
+    title: title,
+    items: items,
+    isLoading: _controller.isFolderLoading(folderId),
+    emptyText: 'Keine Empfehlungen verfügbar.',
+    coreBridge: widget.coreBridge,
+    coreEvents: widget.coreEvents,
+    onItemTap: onItemTap,
+    onSelectionMenuTap: (items) => unawaited(_showSelectionMenu(items)),
+  );
 }
 
 class _RecommendationsSection extends StatelessWidget {
@@ -543,9 +607,8 @@ class _TopTracksSection extends StatelessWidget {
       child: ListenableBuilder(
         listenable: controller.topTracksListenable,
         builder: (BuildContext context, Widget? child) {
-          return MediaRowSectionMobile<Track>(
-            title: 'Deine Lieblingssongs',
-            startsTrackRadio: true,
+          return MediaListSectionMobile<Track>(
+            title: 'Deine meistgehörten Tracks',
             isLoading: controller.isLoadingTopTracks,
             items: controller.topTracks,
             emptyText: 'Keine Top-Tracks verfügbar.',
@@ -582,7 +645,7 @@ class _TopArtistsSection extends StatelessWidget {
         listenable: controller.topArtistsListenable,
         builder: (BuildContext context, Widget? child) {
           return MediaRowSectionMobile<Artist>(
-            title: 'Deine Lieblingskünstler:innen',
+            title: 'Deine meistgehörten Künstler:innen',
             isLoading: controller.isLoadingTopArtists,
             items: controller.topArtists,
             emptyText: 'Keine Top-Artists verfügbar.',

@@ -12,7 +12,7 @@ Streaming only, no offline downloads.
 A Music Assistant server and account. Additional server requirements:
 
 - Local playback: the Mashin provider from my fork's [feature/mashin_stream](https://github.com/joie96/music-assistant-server/tree/feature/mashin_stream) branch.
-- Recommendations: my [feature/listenbrainz_recommendations](https://github.com/joie96/music-assistant-server/tree/feature/listenbrainz_recommendations) branch and a configured [ListenBrainz scrobbler](https://github.com/joie96/music-assistant-server/tree/feature/listenbrainz_recommendations/music_assistant/providers/listenbrainz_scrobble).
+- Recommendations: a configured Last.fm Recommendations Enhanced provider (`lastfm_recommendations_enhanced`) on the server, with your own Last.fm API key and the Music Assistant user selected in its setup. No Last.fm login or ListenBrainz scrobbler is required. Personal recommendations appear on Home; charts, genre discovery, artist radios, moods and decades appear on Explore.
 
 Supported targets: Windows x64/ARM64 and Android ARM64.
 

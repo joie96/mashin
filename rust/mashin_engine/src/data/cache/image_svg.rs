@@ -30,7 +30,12 @@ pub(super) fn normalize(bytes: &[u8]) -> Result<Vec<u8>, CacheError> {
         if !node.is_element() {
             continue;
         }
-        if node.tag_name().namespace() != Some("http://www.w3.org/2000/svg")
+        // usvg ignores editor view settings; no other foreign elements are admitted.
+        let is_svg_element = node.tag_name().namespace() == Some("http://www.w3.org/2000/svg");
+        let is_editor_view_metadata = node.tag_name().namespace()
+            == Some("http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd")
+            && node.tag_name().name() == "namedview";
+        if (!is_svg_element && !is_editor_view_metadata)
             || matches!(
                 node.tag_name().name(),
                 "script"
@@ -97,6 +102,35 @@ mod tests {
     }
 
     #[test]
+    fn editor_view_metadata_preserves_static_svg_pixels() {
+        let svg = br##"<?xml version="1.0" encoding="UTF-8" standalone="no"?><svg xmlns="http://www.w3.org/2000/svg" xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" xmlns:sodipodi="http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd" width="4" height="2" inkscape:version="1.3.2"><sodipodi:namedview pagecolor="#ffffff" inkscape:zoom="1.1" inkscape:current-layer="logo"/><path id="logo" d="M0 0H2V2H0Z" fill="#ff0000"/></svg>"##;
+        let plain = br##"<svg xmlns="http://www.w3.org/2000/svg" width="4" height="2"><path id="logo" d="M0 0H2V2H0Z" fill="#ff0000"/></svg>"##;
+        let png = normalize(svg).unwrap();
+        assert_eq!(png, normalize(plain).unwrap());
+        let image = image::load_from_memory(&png).unwrap().to_rgba8();
+        assert_eq!(image.get_pixel(0, 0).0, [255, 0, 0, 255]);
+        assert_eq!(image.get_pixel(3, 0).0, [0, 0, 0, 0]);
+    }
+
+    #[test]
+    fn editor_metadata_does_not_admit_active_content_or_other_foreign_elements() {
+        for content in [
+            "<sodipodi:namedview onclick='run()'/>",
+            "<sodipodi:namedview href='https://example.invalid/editor'/>",
+            "<sodipodi:namedview><script>alert(1)</script></sodipodi:namedview>",
+            "<sodipodi:namedview><image href='file:///private.png'/></sodipodi:namedview>",
+            "<sodipodi:namedview xmlns:sodipodi='https://example.invalid/namespace'/>",
+            "<sodipodi:foreignObject/>",
+            "<foreign:namedview xmlns:foreign='https://example.invalid/namespace'/>",
+        ] {
+            let svg = format!(
+                "<svg xmlns='http://www.w3.org/2000/svg' xmlns:sodipodi='http://sodipodi.sourceforge.net/DTD/sodipodi-0.dtd' width='2' height='2'>{content}</svg>"
+            );
+            assert!(normalize(svg.as_bytes()).is_err(), "accepted {content}");
+        }
+    }
+
+    #[test]
     fn active_content_external_images_entities_and_unsupported_features_are_rejected() {
         for content in [
             "<script>alert(1)</script>",
@@ -128,7 +162,11 @@ mod tests {
                 format!("<svg xmlns='http://www.w3.org/2000/svg' width='{dimension}' height='2'/>");
             assert!(normalize(svg.as_bytes()).is_err());
         }
-        let svg = format!("<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'>{}<path d='M0 0H2V2Z'/>{}</svg>", "<g>".repeat(130), "</g>".repeat(130));
+        let svg = format!(
+            "<svg xmlns='http://www.w3.org/2000/svg' width='2' height='2'>{}<path d='M0 0H2V2Z'/>{}</svg>",
+            "<g>".repeat(130),
+            "</g>".repeat(130)
+        );
         assert!(normalize(svg.as_bytes()).is_err());
     }
 }

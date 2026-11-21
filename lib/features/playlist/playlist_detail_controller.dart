@@ -156,6 +156,8 @@ class PlaylistDetailController extends ChangeNotifier {
   bool get isLoadingSections => _isSelectingProvider || _isLoadingTracks;
   bool get isPlaylistFavorite =>
       _playlist != null && isItemFavorite(_playlist!);
+  bool get canTogglePlaylistFavorite =>
+      _playlist != null && !_playlist!.isDynamic && !isPrivatePlaylist;
   bool get isPlaylistDeleted => _isPlaylistDeleted;
   bool get isEditable => _playlist?.isEditable ?? false;
   bool get isPrivatePlaylist =>
@@ -835,7 +837,7 @@ class PlaylistDetailController extends ChangeNotifier {
 
   Future<void> togglePlaylistFavorite() async {
     final Playlist? current = _playlist;
-    if (current == null) {
+    if (current == null || !canTogglePlaylistFavorite) {
       return;
     }
     await toggleItemFavorite(current);

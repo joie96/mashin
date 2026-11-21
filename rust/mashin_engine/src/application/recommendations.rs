@@ -6,7 +6,6 @@ use crate::domain::catalog::{
     CatalogLoadPhase, CatalogLoadSnapshot, CatalogQuery, CatalogReadKnowledge, CatalogValue,
 };
 use crate::domain::identifiers::{MediaId, ProviderInstanceId};
-use crate::domain::media::{MediaItem, Track};
 use crate::domain::recommendations::{
     RecommendationDelta, RecommendationFolder, RecommendationFolderIdentity,
     RecommendationSnapshot, RecommendationView,
@@ -20,7 +19,6 @@ use std::sync::Arc;
 pub(crate) struct Recommendations {
     catalog: Arc<dyn CatalogClient>,
     view_publication_revisions: [AtomicU64; 2],
-    selected_artist_folders: std::sync::Mutex<[(Option<FolderKey>, Option<FolderKey>); 2]>,
 }
 
 type FolderKey = (String, String);
@@ -31,42 +29,19 @@ type ReadStreams<'read> =
 enum ReadTarget {
     Folders,
     Items(FolderKey),
-    Playlist(FolderKey, u64, usize),
-}
-
-struct PlaylistRead {
-    tracks: Option<Vec<Track>>,
-    is_finished: bool,
-    has_error: bool,
 }
 
 struct FolderRead {
     value: RecommendationFolder,
     items_are_finished: bool,
     has_embedded_items: bool,
-    revision: u64,
-    playlists: HashMap<usize, PlaylistRead>,
 }
 
 impl FolderRead {
     // Request-local content and load-state projection.
     fn project(&self) -> RecommendationFolder {
         let mut value = self.value.clone();
-        value.is_loading = (!value.knowledge.items && !self.items_are_finished)
-            || (!self.playlists.is_empty()
-                && self.playlists.values().all(|read| read.tracks.is_none())
-                && self.playlists.values().any(|read| !read.is_finished));
-        value.has_load_error |= self.playlists.values().any(|read| read.has_error);
-        if !self.playlists.is_empty() {
-            let mut positions = self.playlists.keys().copied().collect::<Vec<_>>();
-            positions.sort_unstable();
-            value.playlist_tracks = positions
-                .into_iter()
-                .flat_map(|position| self.playlists[&position].tracks.clone().unwrap_or_default())
-                .collect();
-            value.knowledge.playlist_tracks =
-                self.playlists.values().all(|read| read.tracks.is_some());
-        }
+        value.is_loading = !value.knowledge.items && !self.items_are_finished;
         value
     }
 }
@@ -98,7 +73,6 @@ impl Recommendations {
         Self {
             catalog,
             view_publication_revisions: [AtomicU64::new(0), AtomicU64::new(0)],
-            selected_artist_folders: Default::default(),
         }
     }
     // Startup owns its observation through refresh and only signals changed known folders.
@@ -173,7 +147,7 @@ impl Recommendations {
         while let Some((target, query, observation)) = streams.next().await {
             let dirty_keys = match &target {
                 ReadTarget::Folders => None,
-                ReadTarget::Items(key) | ReadTarget::Playlist(key, _, _) => Some(vec![key.clone()]),
+                ReadTarget::Items(key) => Some(vec![key.clone()]),
             };
             on_read(query, observation.clone());
             if observation.phase == CatalogLoadPhase::Invalidated {
@@ -234,13 +208,6 @@ impl Recommendations {
                                         read.value.items = folder.items;
                                         read.value.knowledge.items = true;
                                         read.value.has_load_error = folder.has_load_error;
-                                        self.start_playlist_reads(
-                                            &key,
-                                            &mut read,
-                                            &mut streams,
-                                            &mut handles,
-                                            force_refresh,
-                                        );
                                     }
                                 } else if folder.knowledge.items && read.has_embedded_items {
                                     read.has_embedded_items = false;
@@ -263,8 +230,6 @@ impl Recommendations {
                                     value: folder,
                                     items_are_finished: !needs_items,
                                     has_embedded_items: !needs_items,
-                                    revision: 0,
-                                    playlists: HashMap::new(),
                                 };
                                 if needs_items {
                                     read.value.knowledge.items = false;
@@ -278,14 +243,6 @@ impl Recommendations {
                                         },
                                         force_refresh,
                                     );
-                                } else {
-                                    self.start_playlist_reads(
-                                        &key,
-                                        &mut read,
-                                        &mut streams,
-                                        &mut handles,
-                                        force_refresh,
-                                    );
                                 }
                                 read
                             };
@@ -295,7 +252,7 @@ impl Recommendations {
                         handles.retain(|target, handle| {
                             let retained = match target {
                                 ReadTarget::Folders => true,
-                                ReadTarget::Items(key) | ReadTarget::Playlist(key, _, _) => {
+                                ReadTarget::Items(key) => {
                                     selected.contains_key(key)
                                 }
                             };
@@ -312,31 +269,10 @@ impl Recommendations {
                             if !read.value.knowledge.items || read.value.items != items {
                                 read.value.items = items;
                                 read.value.knowledge.items = true;
-                                self.start_playlist_reads(
-                                    &key,
-                                    read,
-                                    &mut streams,
-                                    &mut handles,
-                                    force_refresh,
-                                );
                             }
                         }
                         read.items_are_finished = is_finished;
                         read.value.has_load_error = has_error;
-                    }
-                }
-                ReadTarget::Playlist(key, revision, position) => {
-                    if let Some(read) = selected
-                        .get_mut(&key)
-                        .filter(|read| read.revision == revision)
-                    {
-                        if let Some(playlist) = read.playlists.get_mut(&position) {
-                            if let Some(CatalogValue::Tracks(tracks)) = observation.value.map(Arc::unwrap_or_clone) {
-                                playlist.tracks = Some(tracks);
-                            }
-                            playlist.is_finished = is_finished;
-                            playlist.has_error = has_error;
-                        }
                     }
                 }
             }
@@ -395,26 +331,9 @@ impl Recommendations {
         view: RecommendationView,
         folders: &[RecommendationFolder],
     ) -> std::collections::HashSet<FolderKey> {
-        let (identities, prefixes) = view.folder_selection();
-        let mut selected = self.selected_artist_folders.lock().unwrap_or_else(|error| error.into_inner());
-        let mut included = folders.iter().filter(|folder| identities.contains(&folder.item_id.as_str()))
+        folders.iter().filter(|folder| view.includes(folder.item_id.as_str()))
             .map(|folder| (folder.provider.as_str().to_owned(), folder.item_id.as_str().to_owned()))
-            .collect::<std::collections::HashSet<_>>();
-        assert!(prefixes.len() <= selected.len());
-        for (&prefix, chosen) in prefixes.iter().zip(selected.iter_mut()) {
-            let candidates = folders.iter().filter(|folder| folder.item_id.as_str().starts_with(prefix))
-                .map(|folder| (folder.provider.as_str().to_owned(), folder.item_id.as_str().to_owned()))
-                .collect::<std::collections::HashSet<_>>();
-            if candidates.is_empty() { continue; }
-            if chosen.0.is_none() && chosen.1.is_none() {
-                let mut ranked = candidates.into_iter().map(|identity| (uuid::Uuid::new_v4(), identity)).collect::<Vec<_>>();
-                ranked.sort_unstable_by_key(|entry| entry.0);
-                let mut identities = ranked.into_iter().map(|entry| entry.1);
-                *chosen = (identities.next(), identities.next());
-            }
-            included.extend(chosen.0.iter().chain(chosen.1.iter()).cloned());
-        }
-        included
+            .collect()
     }
 
     // Observation participation is owned by this request, not a spawned feed worker.
@@ -438,60 +357,12 @@ impl Recommendations {
         );
     }
 
-    fn start_playlist_reads<'read>(
-        &'read self,
-        key: &FolderKey,
-        read: &mut FolderRead,
-        streams: &mut ReadStreams<'read>,
-        handles: &mut HashMap<ReadTarget, AbortHandle>,
-        force_refresh: bool,
-    ) {
-        handles.retain(|target, handle| {
-            let retained = !matches!(target, ReadTarget::Playlist(folder, _, _) if folder == key);
-            if !retained {
-                handle.abort();
-            }
-            retained
-        });
-        read.revision += 1;
-        read.playlists.clear();
-        read.value.playlist_tracks.clear();
-        read.value.knowledge.playlist_tracks = true;
-        if !matches!(
-            key.1.as_str(),
-            "user_exploration_weekly" | "similarusers_jam_weekly"
-        ) {
-            return;
-        }
-        for (position, item) in read.value.items.iter().enumerate() {
-            if let MediaItem::Playlist(playlist) = item {
-                read.playlists.insert(
-                    position,
-                    PlaylistRead {
-                        tracks: None,
-                        is_finished: false,
-                        has_error: false,
-                    },
-                );
-                self.start_read(
-                    streams,
-                    handles,
-                    ReadTarget::Playlist(key.clone(), read.revision, position),
-                    CatalogQuery::PlaylistTracks {
-                        item_id: playlist.media.item_id.clone(),
-                        provider: playlist.media.provider.as_str().into(),
-                        allow_dynamic_tracks: false,
-                    },
-                    force_refresh,
-                );
-            }
-        }
-    }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::domain::media::MediaItem;
     use crate::domain::catalog::{CatalogDataSource, CatalogFreshness, CatalogReadKnowledge};
     use futures_util::future::BoxFuture;
     use std::sync::Mutex;
@@ -573,9 +444,9 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn home_loads_only_selected_artist_folders_and_keeps_selection_across_reads() {
+    async fn home_loads_all_genre_artist_folders_and_excludes_other_views() {
         let folders: Vec<RecommendationFolder> = serde_json::from_value(serde_json::Value::Array(
-            ["user_genre_artists_", "user_similar_artists_"].into_iter().flat_map(|prefix| {
+            ["user_genre_artists_", "global_genre_artists_"].into_iter().flat_map(|prefix| {
                 (0..6).map(move |index| serde_json::json!({
                     "provider":"source", "item_id":format!("{prefix}{index}"), "name":"Artists", "items":[]
                 }))
@@ -607,28 +478,28 @@ mod tests {
             let snapshot = tokio::time::timeout(std::time::Duration::from_secs(2),
                 service.get_recommendation_data(RecommendationView::Home, false, |snapshot| publications.push(snapshot), |_, _| {})
             ).await.unwrap().unwrap();
-            assert_eq!(snapshot.folders.len(), 4);
+            assert_eq!(snapshot.folders.len(), 6);
             assert!(!snapshot.is_loading);
             assert!(snapshot.delta.is_none());
-            assert_eq!(publications[0].folders.len(), 4);
+            assert_eq!(publications[0].folders.len(), 6);
             for (index, update) in publications.iter().enumerate() {
                 let delta = update.delta.as_ref().expect("Home publishes section deltas");
                 assert_eq!(delta.sequence, index as u64 + 1);
-                assert_eq!(delta.order.len(), 4);
+                assert_eq!(delta.order.len(), 6);
                 if index > 0 { assert_eq!(update.folders.len(), 1); }
             }
             let identities = snapshot.folders.iter().map(|folder| folder.item_id.clone()).collect::<Vec<_>>();
             if let Some(previous) = &previous { assert_eq!(previous, &identities); }
             previous = Some(identities);
         }
-        assert_eq!(catalog.starts.lock().unwrap().len(), 10);
+        assert_eq!(catalog.starts.lock().unwrap().len(), 14);
     }
 
     #[tokio::test]
     async fn explore_publishes_only_changed_folders_and_keeps_complete_duplicate_inventories() {
         let folders: Vec<RecommendationFolder> = serde_json::from_value(serde_json::json!([
-            {"provider":"source", "item_id":"user_exploration_weekly", "name":"Explore", "items":[]},
-            {"provider":"source", "item_id":"sitewide_top_tracks_weekly", "name":"Tracks", "items":[]}
+            {"provider":"source", "item_id":"de_top_tracks", "name":"Explore", "items":[]},
+            {"provider":"source", "item_id":"global_top_tracks", "name":"Tracks", "items":[]}
         ])).unwrap();
         let tracks: Vec<MediaItem> = serde_json::from_value(serde_json::Value::Array((0..201).map(|_| {
             serde_json::json!({"media_type":"track", "provider":"source", "item_id":"duplicate", "name":"Track"})
@@ -963,7 +834,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recommendation_embedded_playlist_replacement_cancels_old_content_reads() {
+    async fn recommendation_embedded_playlist_replacement_does_not_preload_tracks() {
         let catalog = Arc::new(ObservedCatalog {
             reads: Mutex::new(HashMap::new()),
             starts: Mutex::new(Vec::new()),
@@ -971,16 +842,6 @@ mod tests {
         let mut senders = Vec::new();
         for query in [
             CatalogQuery::RecommendationFolders,
-            CatalogQuery::PlaylistTracks {
-                provider: "source".into(),
-                item_id: MediaId("old".into()),
-                allow_dynamic_tracks: false,
-            },
-            CatalogQuery::PlaylistTracks {
-                provider: "source".into(),
-                item_id: MediaId("new".into()),
-                allow_dynamic_tracks: false,
-            },
         ] {
             let (sender, receiver) = mpsc::unbounded_channel();
             catalog
@@ -994,7 +855,7 @@ mod tests {
         }
         let folders = |item_id| {
             serde_json::from_value(serde_json::json!([{
-            "provider":"source","item_id":"user_exploration_weekly","name":"Header",
+            "provider":"source","item_id":"global_artist_radio_playlists","name":"Header",
             "items":[{"media_type":"playlist","provider":"source","item_id":item_id,"name":item_id}]
         }])).unwrap()
         };
@@ -1021,34 +882,22 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(early.folders[0].items[0].fields().item_id.as_str(), "old");
-        assert_eq!(catalog.starts.lock().unwrap().len(), 2);
-        let tracks: Vec<Track> = serde_json::from_value(serde_json::json!([
-            {"provider":"source","item_id":"new-track","name":"New track"}
-        ]))
-        .unwrap();
-        senders[2]
-            .send(observation(
-                Some(CatalogValue::Tracks(tracks.clone())),
-                CatalogLoadPhase::Ready,
-            ))
-            .unwrap();
+        assert_eq!(catalog.starts.lock().unwrap().len(), 1);
         senders[0]
             .send(observation(
                 Some(CatalogValue::RecommendationFolders(folders("new"))),
                 CatalogLoadPhase::Ready,
             ))
             .unwrap();
-        let old_sender = senders.remove(1);
         drop(senders);
         let result = tokio::time::timeout(std::time::Duration::from_secs(5), task)
             .await
             .unwrap()
             .unwrap()
             .unwrap();
-        assert!(old_sender.is_closed());
         assert_eq!(result.folders[0].items[0].fields().item_id.as_str(), "new");
-        assert_eq!(result.folders[0].playlist_tracks, tracks);
-        assert_eq!(catalog.starts.lock().unwrap().len(), 3);
+        assert!(result.folders[0].playlist_tracks.is_empty());
+        assert_eq!(catalog.starts.lock().unwrap().len(), 1);
     }
 
     #[tokio::test]
@@ -1175,7 +1024,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recommendation_playlist_reads_publish_out_of_order_without_losing_occurrences() {
+    async fn recommendation_playlist_folders_preserve_order_without_track_reads() {
         let catalog = Arc::new(ObservedCatalog {
             reads: Mutex::new(HashMap::new()),
             starts: Mutex::new(Vec::new()),
@@ -1183,16 +1032,6 @@ mod tests {
         let mut senders = Vec::new();
         for query in [
             CatalogQuery::RecommendationFolders,
-            CatalogQuery::PlaylistTracks {
-                provider: "source".into(),
-                item_id: MediaId("slow".into()),
-                allow_dynamic_tracks: false,
-            },
-            CatalogQuery::PlaylistTracks {
-                provider: "source".into(),
-                item_id: MediaId("fast".into()),
-                allow_dynamic_tracks: false,
-            },
         ] {
             let (sender, receiver) = mpsc::unbounded_channel();
             catalog
@@ -1205,7 +1044,7 @@ mod tests {
             senders.push(sender);
         }
         let folders = serde_json::from_value(serde_json::json!([{
-            "provider":"source", "item_id":"user_exploration_weekly", "name":"Explore",
+            "provider":"source", "item_id":"global_genre_playlists", "name":"Explore",
             "items":[
                 {"media_type":"playlist", "provider":"source", "item_id":"slow", "name":"Slow"},
                 {"media_type":"playlist", "provider":"source", "item_id":"fast", "name":"Fast"}
@@ -1215,13 +1054,6 @@ mod tests {
         senders[0]
             .send(observation(
                 Some(CatalogValue::RecommendationFolders(folders)),
-                CatalogLoadPhase::Ready,
-            ))
-            .unwrap();
-        let fast: Track = serde_json::from_value(serde_json::json!({"provider":"source", "item_id":"duplicate", "name":"Fast", "position":9})).unwrap();
-        senders[2]
-            .send(observation(
-                Some(CatalogValue::Tracks(vec![fast.clone()])),
                 CatalogLoadPhase::Ready,
             ))
             .unwrap();
@@ -1241,38 +1073,21 @@ mod tests {
                 )
                 .await
         });
-        let early = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            loop {
-                let snapshot = observed.recv().await.unwrap();
-                if snapshot
-                    .folders
-                    .first()
-                    .is_some_and(|folder| !folder.playlist_tracks.is_empty())
-                {
-                    break snapshot;
-                }
-            }
-        })
+        let early = tokio::time::timeout(std::time::Duration::from_secs(2), observed.recv())
         .await
-        .unwrap();
-        assert_eq!(early.folders[0].playlist_tracks, vec![fast.clone()]);
+        .unwrap().unwrap();
+        assert_eq!(early.folders[0].items.len(), 2);
+        assert!(early.folders[0].playlist_tracks.is_empty());
         assert!(!early.folders[0].is_loading);
-        assert!(early.is_loading);
-        assert!(!task.is_finished());
-        assert_eq!(catalog.starts.lock().unwrap().len(), 3);
-        let slow: Track = serde_json::from_value(serde_json::json!({"provider":"source", "item_id":"duplicate", "name":"Slow", "position":1})).unwrap();
-        senders[1]
-            .send(observation(
-                Some(CatalogValue::Tracks(vec![slow.clone()])),
-                CatalogLoadPhase::Failed,
-            ))
-            .unwrap();
+        assert!(!early.is_loading);
+        assert_eq!(catalog.starts.lock().unwrap().len(), 1);
         drop(senders);
         let result = task.await.unwrap().unwrap();
-        assert_eq!(result.folders[0].playlist_tracks, vec![slow, fast]);
-        assert!(result.has_load_error);
+        assert_eq!(result.folders[0].items[0].fields().item_id.as_str(), "slow");
+        assert_eq!(result.folders[0].items[1].fields().item_id.as_str(), "fast");
+        assert!(!result.has_load_error);
         assert!(!result.is_loading);
-        assert_eq!(read_count.load(std::sync::atomic::Ordering::Relaxed), 3);
+        assert_eq!(read_count.load(std::sync::atomic::Ordering::Relaxed), 1);
     }
 
     #[tokio::test]

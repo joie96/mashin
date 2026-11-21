@@ -99,13 +99,13 @@ class _DesktopCustomMenuLayout extends SingleChildLayoutDelegate {
   Offset getPositionForChild(Size size, Size childSize) {
     const viewportInset = AppContextMenuController._desktopMenuViewportInset;
     const anchorGap = AppContextMenuController._desktopMenuAnchorGap;
-    double left = anchorCenter.dx - childSize.width - anchorGap;
-    double top = anchorCenter.dy - childSize.height - anchorGap;
-    if (left < viewportInset) {
-      left = anchorCenter.dx + anchorGap;
+    double left = anchorCenter.dx + anchorGap;
+    double top = anchorCenter.dy + anchorGap;
+    if (left + childSize.width > size.width - viewportInset) {
+      left = anchorCenter.dx - childSize.width - anchorGap;
     }
-    if (top < viewportInset) {
-      top = anchorCenter.dy + anchorGap;
+    if (top + childSize.height > size.height - viewportInset) {
+      top = anchorCenter.dy - childSize.height - anchorGap;
     }
     return Offset(
       left.clamp(viewportInset, size.width - childSize.width - viewportInset),
@@ -283,15 +283,19 @@ class AppContextMenuController {
     required double width,
   }) async {
     final RenderBox overlayBox =
-        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+        Navigator.of(
+              context,
+              rootNavigator: true,
+            ).overlay!.context.findRenderObject()!
+            as RenderBox;
     final RenderBox anchorBox = anchorContext.findRenderObject()! as RenderBox;
-    final Offset anchorCenter = anchorBox.localToGlobal(
-      anchorBox.size.center(Offset.zero),
-      ancestor: overlayBox,
+    final Offset anchorCenter = overlayBox.globalToLocal(
+      anchorBox.localToGlobal(anchorBox.size.center(Offset.zero)),
     );
 
     await showGeneralDialog<void>(
       context: context,
+      useRootNavigator: true,
       barrierDismissible: true,
       barrierLabel: 'Kontextmenü schließen',
       barrierColor: Colors.transparent,
@@ -315,7 +319,11 @@ class AppContextMenuController {
     Offset? globalPosition,
   }) async {
     final RenderBox overlayBox =
-        Navigator.of(context).overlay!.context.findRenderObject()! as RenderBox;
+        Navigator.of(
+              context,
+              rootNavigator: true,
+            ).overlay!.context.findRenderObject()!
+            as RenderBox;
 
     final double menuHeight = _measureMenuHeight(actions);
     double left;
@@ -337,9 +345,8 @@ class AppContextMenuController {
     } else {
       final RenderBox anchorBox =
           anchorContext.findRenderObject()! as RenderBox;
-      final Offset anchorCenter = anchorBox.localToGlobal(
-        anchorBox.size.center(Offset.zero),
-        ancestor: overlayBox,
+      final Offset anchorCenter = overlayBox.globalToLocal(
+        anchorBox.localToGlobal(anchorBox.size.center(Offset.zero)),
       );
 
       left = anchorCenter.dx + _desktopMenuAnchorGap;
@@ -367,6 +374,7 @@ class AppContextMenuController {
     final ContextMenuAction? selected =
         await showGeneralDialog<ContextMenuAction>(
           context: context,
+          useRootNavigator: true,
           barrierDismissible: true,
           barrierLabel: 'Kontextmenü schließen',
           barrierColor: Colors.transparent,

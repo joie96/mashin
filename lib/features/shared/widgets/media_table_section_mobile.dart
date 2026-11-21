@@ -2,6 +2,8 @@ import 'dart:math' as math;
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import '../selection/mobile_section_selection.dart'
+    show MobileSelectionCheckBox;
 import 'detail_provider_switcher.dart';
 
 import '../../../app/theme/app_theme.dart';
@@ -1093,7 +1095,7 @@ class _MobileTableRowBase extends StatelessWidget {
                   color: Colors.transparent,
                   child: Center(
                     child: selectionEnabled && selectionModeActive
-                        ? _MobileSelectionCheckBox(
+                        ? MobileSelectionCheckBox(
                             isChecked: isSelected,
                             isVisible: true,
                             onTap: onToggleSelected,
@@ -1347,52 +1349,6 @@ class _MobileTableRowSkeleton extends StatelessWidget {
             child: Center(child: skeletonBox(width: 18, height: 18, radius: 9)),
           ),
         ],
-      ),
-    );
-  }
-}
-
-class _MobileSelectionCheckBox extends StatelessWidget {
-  final bool isChecked;
-  final bool isVisible;
-  final VoidCallback? onTap;
-
-  const _MobileSelectionCheckBox({
-    required this.isChecked,
-    required this.isVisible,
-    this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-
-    return IgnorePointer(
-      ignoring: !isVisible,
-      child: GestureDetector(
-        onTap: onTap,
-        child: Opacity(
-          opacity: isVisible ? 1 : 0,
-          child: Container(
-            width: 20,
-            height: 20,
-            decoration: BoxDecoration(
-              color: isChecked ? colors.accent : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
-              border: Border.all(
-                color: isChecked ? colors.accent : colors.textSecondary,
-                width: 0.9,
-              ),
-            ),
-            child: isChecked
-                ? Icon(
-                    Icons.check,
-                    size: 14,
-                    color: Theme.of(context).colorScheme.onPrimary,
-                  )
-                : null,
-          ),
-        ),
       ),
     );
   }

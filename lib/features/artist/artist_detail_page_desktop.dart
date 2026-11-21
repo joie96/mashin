@@ -608,7 +608,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
                                             _headerMenuAnchorKey.currentContext,
                                       ),
                                     ),
-                              icon: Icons.more_horiz_outlined,
+                              icon: Icons.more_vert_outlined,
                             ),
                           ],
                         ),
@@ -819,27 +819,7 @@ class _HeaderHoverIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          hoverColor: colors.hover,
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: Icon(icon, size: 18, color: colors.textSecondary),
-          ),
-        ),
-      ),
-    );
+    return SectionHeaderIconButton(icon: icon, onTap: onTap, tooltip: tooltip);
   }
 }
 

@@ -1,11 +1,17 @@
 import 'dart:async';
 
+import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:mashin/app/session/preferred_provider_controller.dart';
+import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/core/core_query_scope.dart';
+import 'package:mashin/features/core/core_userdata.dart';
 import 'package:mashin/features/playlist/playlist_detail_controller.dart';
+import 'package:mashin/features/playlist/playlist_detail_page_desktop.dart';
+import 'package:mashin/features/playlist/playlist_detail_page_mobile.dart';
 
 void main() {
   setUp(() {
@@ -15,6 +21,155 @@ void main() {
     );
   });
   tearDown(PreferredProviderController.instance.reset);
+
+  test(
+    'playlist favorite eligibility follows loaded dynamic metadata',
+    () async {
+      final metadata = Completer<Playlist>();
+      final bridge = _PlaylistBridge(metadata: metadata);
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: '44',
+        providerInstanceIdOrDomain: 'library',
+      );
+      addTearDown(() async {
+        controller.dispose();
+        await bridge.updates.close();
+      });
+      expect(controller.canTogglePlaylistFavorite, isFalse);
+      final loading = controller.loadPlaylist();
+      await bridge.metadataRequested.future;
+      bridge.emitHeader('Header', isDynamic: true);
+      await bridge.requested.future;
+      expect(controller.canTogglePlaylistFavorite, isFalse);
+      bridge.emitHeader('Header');
+      expect(controller.canTogglePlaylistFavorite, isTrue);
+      bridge.emitHeader('Header', isDynamic: true);
+      expect(controller.canTogglePlaylistFavorite, isFalse);
+      metadata.complete(
+        Playlist.fromJson({
+          'item_id': '44',
+          'provider': 'library',
+          'name': 'Header',
+          'is_dynamic': false,
+        }),
+      );
+      bridge.tracks.complete([]);
+      await loading;
+      expect(controller.canTogglePlaylistFavorite, isTrue);
+    },
+  );
+
+  for (final isDynamic in [false, true]) {
+    test('playlist favorite command respects isDynamic=$isDynamic', () async {
+      final metadata = Completer<Playlist>();
+      final bridge = _PlaylistBridge(metadata: metadata);
+      final userData = _FavoriteRecordingUserData(coreBridge: bridge);
+      final controller = PlaylistDetailController(
+        coreBridge: bridge,
+        itemId: '44',
+        providerInstanceIdOrDomain: 'library',
+        userDataController: userData,
+      );
+      addTearDown(() async {
+        controller.dispose();
+        userData.dispose();
+        await bridge.updates.close();
+      });
+      await controller.togglePlaylistFavorite();
+      expect(userData.favoriteRequests, isEmpty);
+      final loading = controller.loadPlaylist();
+      metadata.complete(
+        Playlist.fromJson({
+          'item_id': '44',
+          'provider': 'library',
+          'name': 'Playlist',
+          'is_dynamic': isDynamic,
+        }),
+      );
+      bridge.tracks.complete([]);
+      await loading;
+      expect(controller.playlist, isNotNull);
+      await controller.togglePlaylistFavorite();
+      expect(userData.favoriteRequests, hasLength(isDynamic ? 0 : 1));
+      if (!isDynamic) {
+        expect(userData.favoriteRequests.single.$1.single, controller.playlist);
+        expect(userData.favoriteRequests.single.$2, isTrue);
+      }
+      final track = Track.fromJson({
+        'item_id': 'track',
+        'provider': 'source-a',
+        'name': 'Track',
+      });
+      await controller.toggleItemFavorite(track);
+      expect(userData.favoriteRequests.last.$1.single, track);
+      expect(userData.favoriteRequests.last.$2, isTrue);
+      expect(userData.favoriteRequests, hasLength(isDynamic ? 1 : 2));
+    });
+
+    for (final isMobile in [false, true]) {
+      testWidgets(
+        '${isMobile ? 'mobile' : 'desktop'} playlist favorite controls respect isDynamic=$isDynamic',
+        (tester) async {
+          await tester.binding.setSurfaceSize(
+            isMobile ? const Size(390, 844) : const Size(1280, 900),
+          );
+          addTearDown(() => tester.binding.setSurfaceSize(null));
+          final metadata = Completer<Playlist>();
+          final bridge = _PlaylistBridge(metadata: metadata);
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(() async {
+            events.dispose();
+            await bridge.updates.close();
+          });
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.dark(),
+              home: Scaffold(
+                body: isMobile
+                    ? PlaylistDetailPageMobile(
+                        coreBridge: bridge,
+                        coreEvents: events,
+                        itemId: '44',
+                        providerInstanceIdOrDomain: 'library',
+                      )
+                    : PlaylistDetailPageDesktop(
+                        coreBridge: bridge,
+                        coreEvents: events,
+                        itemId: '44',
+                        providerInstanceIdOrDomain: 'library',
+                      ),
+              ),
+            ),
+          );
+          metadata.complete(
+            Playlist.fromJson({
+              'item_id': '44',
+              'provider': 'library',
+              'name': 'Playlist',
+              'is_dynamic': isDynamic,
+            }),
+          );
+          bridge.tracks.complete([]);
+          await tester.pumpAndSettle();
+          expect(
+            find.byIcon(Icons.favorite_border_outlined),
+            isDynamic ? findsNothing : findsOneWidget,
+          );
+          expect(find.byIcon(Icons.favorite), findsNothing);
+          await tester.tap(find.byIcon(Icons.more_vert_outlined));
+          await tester.pumpAndSettle();
+          expect(find.text('Als Nächstes spielen'), findsOneWidget);
+          expect(
+            find.text('Zu Favoriten hinzufügen'),
+            isDynamic ? findsNothing : findsOneWidget,
+          );
+          expect(tester.takeException(), isNull);
+          await tester.pumpWidget(const SizedBox.shrink());
+        },
+      );
+    }
+  }
 
   for (final retirement in ['hidden', 'disposed', 'invalidated']) {
     test(
@@ -401,6 +556,20 @@ void main() {
   }
 }
 
+class _FavoriteRecordingUserData extends UserData {
+  _FavoriteRecordingUserData({required super.coreBridge});
+
+  final favoriteRequests = <(List<MediaItem>, bool)>[];
+
+  @override
+  Future<void> refreshLibrarySnapshot() async {}
+
+  @override
+  Future<void> setFavorite(Iterable<MediaItem> items, bool isFavorite) async {
+    favoriteRequests.add((items.toList(), isFavorite));
+  }
+}
+
 class _PlaylistBridge implements MashinCoreBridgeApi {
   _PlaylistBridge({this.metadata});
 
@@ -416,14 +585,19 @@ class _PlaylistBridge implements MashinCoreBridgeApi {
   @override
   Stream<Map<String, dynamic>> get events => updates.stream;
 
-  void emitHeader(String name) {
+  void emitHeader(String name, {bool isDynamic = false}) {
     updates.add({
       'type': 'catalog_updated',
       'query': {
         'Playlist': {'item_id': '44', 'provider': 'library'},
       },
       'value': {
-        'Playlist': {'item_id': '44', 'provider': 'library', 'name': name},
+        'Playlist': {
+          'item_id': '44',
+          'provider': 'library',
+          'name': name,
+          'is_dynamic': isDynamic,
+        },
       },
     });
   }

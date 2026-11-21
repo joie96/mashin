@@ -2216,7 +2216,7 @@ Widget _buildDesktopTableHeaderBase({
               width: 40,
               child: Center(
                 child: _DesktopIconActionButton(
-                  icon: Icons.more_horiz_outlined,
+                  icon: Icons.more_vert_outlined,
                   onTap: onMoreTap,
                   baseColor: colors.textSecondary,
                   hoverColor: colors.textPrimary,
@@ -2357,7 +2357,7 @@ class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
                   width: 40,
                   child: Center(
                     child: _DesktopIconActionButton(
-                      icon: Icons.more_horiz_outlined,
+                      icon: Icons.more_vert_outlined,
                       onTap: widget.onMoreTap,
                       onAnchorTap: widget.onMoreAnchorTap,
                       baseColor: colors.textTertiary,
@@ -2698,9 +2698,12 @@ class _DesktopIconActionButtonState extends State<_DesktopIconActionButton> {
 
   @override
   Widget build(BuildContext context) {
-    final Color iconColor = _isHovered ? widget.hoverColor : widget.baseColor;
+    final isEnabled = widget.onTap != null || widget.onAnchorTap != null;
+    final isHovered = _isHovered && isEnabled;
+    final Color iconColor = isHovered ? widget.hoverColor : widget.baseColor;
 
     return MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: Listener(
@@ -2722,7 +2725,7 @@ class _DesktopIconActionButtonState extends State<_DesktopIconActionButton> {
           height: 32,
           child: Center(
             child: AnimatedScale(
-              scale: _isHovered ? 1.08 : 1,
+              scale: isHovered ? 1.24 : 1,
               duration: const Duration(milliseconds: 120),
               curve: Curves.easeOutCubic,
               child: Icon(widget.icon, size: 18, color: iconColor),
@@ -3309,6 +3312,14 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool isDisabled = widget.onTap == null;
+    final isFavoriteOrContextAction = const <IconData>[
+      Icons.favorite,
+      Icons.favorite_outlined,
+      Icons.favorite_border,
+      Icons.favorite_border_outlined,
+      Icons.more_vert,
+      Icons.more_vert_outlined,
+    ].contains(widget.icon);
     final bool enableHoverAndTooltip = switch (Theme.of(context).platform) {
       TargetPlatform.android ||
       TargetPlatform.iOS ||
@@ -3323,6 +3334,7 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
         customBorder: const CircleBorder(),
         onTap: widget.onTap,
         splashColor: colors.selection,
+        hoverColor: isFavoriteOrContextAction ? Colors.transparent : null,
         child: Opacity(
           opacity: isDisabled ? 0.4 : 1,
           child: Container(
@@ -3330,15 +3342,22 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
             height: 28,
             alignment: Alignment.center,
             decoration: BoxDecoration(
-              color: _isHovered && !isDisabled
+              color: _isHovered && !isDisabled && !isFavoriteOrContextAction
                   ? colors.hover
                   : Colors.transparent,
               borderRadius: BorderRadius.circular(14),
             ),
-            child: Icon(
-              widget.icon,
-              size: widget.iconSize,
-              color: colors.textSecondary,
+            child: AnimatedScale(
+              scale: _isHovered && !isDisabled
+                  ? (isFavoriteOrContextAction ? 1.24 : 1.18)
+                  : 1,
+              duration: const Duration(milliseconds: 120),
+              curve: Curves.easeOutCubic,
+              child: Icon(
+                widget.icon,
+                size: widget.iconSize,
+                color: colors.textSecondary,
+              ),
             ),
           ),
         ),
@@ -3347,6 +3366,9 @@ class _SectionHeaderIconButtonState extends State<SectionHeaderIconButton> {
 
     final Widget button = enableHoverAndTooltip
         ? MouseRegion(
+            cursor: isDisabled
+                ? SystemMouseCursors.basic
+                : SystemMouseCursors.click,
             onEnter: (_) => setState(() => _isHovered = true),
             onExit: (_) => setState(() => _isHovered = false),
             child: buttonCore,

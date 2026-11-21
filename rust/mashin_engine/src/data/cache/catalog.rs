@@ -764,10 +764,14 @@ impl CatalogRuntime {
                             return;
                         }
                     };
-                    let history_references = match &value {
-                        CatalogValue::Tracks(tracks) if matches!(query, CatalogQuery::RecentlyPlayed { .. }) => tracks.clone(),
-                        _ => Vec::new(),
-                    };
+                    let requires_media_hydration = matches!(query,
+                        CatalogQuery::RecentlyPlayed { .. }
+                        | CatalogQuery::RecommendationFolders
+                        | CatalogQuery::RecommendationItems { .. });
+                    let mut media_references = Vec::new();
+                    if requires_media_hydration {
+                        visit_catalog_media_references(&mut value, |item| media_references.push(item.clone()));
+                    }
                     let persistence_started = Instant::now();
                     let persistence = match local_result {
                         Ok((context, _)) => {
@@ -826,7 +830,7 @@ impl CatalogRuntime {
                             }
                         }
                     }
-                    if matches!(query, CatalogQuery::RecentlyPlayed { .. })
+                    if requires_media_hydration && !media_references.is_empty()
                         && state.phase == CatalogLoadPhase::Ready
                     {
                         state.phase = CatalogLoadPhase::Refreshing;
@@ -834,7 +838,7 @@ impl CatalogRuntime {
                         let observer = Arc::downgrade(&publication);
                         drop(publication);
                         drop(_persistence_owner);
-                        runtime.hydrate_recently_played(observer, state, history_references, expected_revision, timings).await;
+                        runtime.hydrate_catalog_media_references(observer, state, media_references, expected_revision, timings).await;
                     } else {
                         timings.log_result(&publication, &state);
                         publication.publish(state);
@@ -850,37 +854,49 @@ impl CatalogRuntime {
         refresh
     }
 
-    // Optional details belong to the history observer, not its retained persistence owner.
-    fn hydrate_recently_played(
+    // Optional details belong to the list observer, not its retained persistence owner.
+    fn hydrate_catalog_media_references(
         self: &Arc<Self>,
         observer: Weak<Refresh>,
         mut state: CatalogLoadSnapshot,
-        references: Vec<crate::domain::media::Track>,
+        references: Vec<crate::domain::media::MediaItem>,
         expected_revision: u64,
         timings: RefreshTimings,
     ) -> futures_util::future::BoxFuture<'static, ()> {
         let runtime = self.clone();
         Box::pin(async move {
-            let Some(CatalogValue::Tracks(mut tracks)) = state.value.take().map(Arc::unwrap_or_clone)
+            let Some(mut value) = state.value.take().map(Arc::unwrap_or_clone)
             else {
                 return;
             };
+            let mut items = Vec::new();
+            visit_catalog_media_references(&mut value, |item| items.push(item.clone()));
             if let Ok(context) = runtime.cache_context().await {
-                let mut local_tracks = tracks.clone();
+                let mut local_items = items.clone();
                 let user_id = context.user_id.clone();
                 match context
                     .database
                     .read_snapshot(move |snapshot| {
-                        super::track_reads::hydrate_recent_tracks(
-                            snapshot,
-                            &mut local_tracks,
-                            &user_id,
-                        )?;
-                        Ok(local_tracks)
+                        for item in &mut local_items {
+                            use crate::domain::media::MediaItem;
+                            let known = match item {
+                                MediaItem::Track(track) => {
+                                    super::track_reads::hydrate_track_references(snapshot, std::slice::from_mut(track), &user_id)?;
+                                    None
+                                }
+                                MediaItem::Artist(artist) => super::artists::read_artist(snapshot, &artist.media.provider, &artist.media.item_id, &user_id)?.map(MediaItem::Artist),
+                                MediaItem::Album(album) => super::albums::read_album(snapshot, &album.media.provider, &album.media.item_id, &user_id)?.map(MediaItem::Album),
+                                _ => None,
+                            };
+                            if let Some(known) = known {
+                                *item = merge_catalog_media_reference(known, item);
+                            }
+                        }
+                        Ok(local_items)
                     })
                     .await
                 {
-                    Ok(hydrated) => tracks = hydrated,
+                    Ok(hydrated) => items = hydrated,
                     Err(error) => state.cache_error = Some(error.to_string()),
                 }
             }
@@ -889,13 +905,19 @@ impl CatalogRuntime {
             };
             let mut identities = std::collections::HashSet::new();
             let mut details = futures_util::stream::SelectAll::new();
-            for track in &tracks {
-                let identity = (track.media.provider.clone(), track.media.item_id.clone());
-                if !track.knowledge.duration && identities.insert(identity.clone()) {
+            for item in &items {
+                use crate::domain::media::MediaItem;
+                let requires_details = match item {
+                    MediaItem::Track(track) => !track.knowledge.duration,
+                    MediaItem::Artist(_) | MediaItem::Album(_) => !item.fields().knowledge.provider_mappings,
+                    _ => false,
+                };
+                let identity = (item.media_type(), item.fields().provider.clone(), item.fields().item_id.clone());
+                if requires_details && identities.insert(identity.clone()) {
                     let query = CatalogQuery::ProviderItem {
-                        media_type: crate::domain::media::MediaType::Track,
-                        provider: identity.0.as_str().to_owned(),
-                        item_id: identity.1.clone(),
+                        media_type: identity.0,
+                        provider: identity.1.as_str().to_owned(),
+                        item_id: identity.2.clone(),
                     };
                     details.push(
                         catalog
@@ -914,10 +936,14 @@ impl CatalogRuntime {
                 {
                     state.phase = CatalogLoadPhase::Invalidated;
                     state.value = None;
-                    state.error = Some("history hydration invalidated".into());
+                    state.error = Some("catalog media hydration invalidated".into());
                     state.knowledge = CatalogReadKnowledge::Unknown;
                 } else {
-                    state.value = Some(Arc::new(CatalogValue::Tracks(tracks.clone())));
+                    let mut hydrated = items.iter();
+                    visit_catalog_media_references(&mut value, |slot| {
+                        if let Some(item) = hydrated.next() { *slot = item.clone(); }
+                    });
+                    state.value = Some(Arc::new(value.clone()));
                     state.phase = if details.is_empty() {
                         CatalogLoadPhase::Ready
                     } else {
@@ -945,14 +971,14 @@ impl CatalogRuntime {
                 if let Some(error) = snapshot.cache_error {
                     state.cache_error = Some(error);
                 }
-                if let Some(CatalogValue::Item(crate::domain::media::MediaItem::Track(known))) =
-                    snapshot.value.as_deref()
-                {
-                    for (track, reference) in tracks.iter_mut().zip(&references) {
-                        if reference.media.provider == identity.0
-                            && reference.media.item_id == identity.1
+                if let Some(CatalogValue::Item(known)) = snapshot.value.as_deref() {
+                    for (item, reference) in items.iter_mut().zip(&references) {
+                        if reference.media_type() == identity.0
+                            && reference.fields().provider == identity.1
+                            && reference.fields().item_id == identity.2
+                            && known.media_type() == identity.0
                         {
-                            *track = super::track_reads::merge_recent_track(known.clone(), reference);
+                            *item = merge_catalog_media_reference(known.clone(), reference);
                         }
                     }
                 }
@@ -1719,6 +1745,67 @@ impl SessionCache {
         self.owner.require_generation(self.generation)?;
         *resolved = Some(catalog.clone());
         Ok(catalog)
+    }
+}
+
+// Details enrich occurrences without replacing their identity or ranking context.
+fn merge_catalog_media_reference(
+    mut known: crate::domain::media::MediaItem,
+    reference: &crate::domain::media::MediaItem,
+) -> crate::domain::media::MediaItem {
+    known.fields_mut().provider = reference.fields().provider.clone();
+    known.fields_mut().item_id = reference.fields().item_id.clone();
+    known.merge_known(reference.clone());
+    known
+}
+
+// Only supported reference types participate; unrelated recommendation items stay unchanged.
+fn visit_catalog_media_references(
+    value: &mut CatalogValue,
+    mut visit: impl FnMut(&mut crate::domain::media::MediaItem),
+) {
+    use crate::domain::media::MediaItem;
+    match value {
+        CatalogValue::RecommendationItems(items) => {
+            for item in items {
+                if matches!(item, MediaItem::Track(_) | MediaItem::Artist(_) | MediaItem::Album(_)) { visit(item); }
+            }
+        }
+        CatalogValue::RecommendationFolders(folders) => {
+            for item in folders.iter_mut().flat_map(|folder| &mut folder.items) {
+                if matches!(item, MediaItem::Track(_) | MediaItem::Artist(_) | MediaItem::Album(_)) { visit(item); }
+            }
+        }
+        _ => {
+            for track in catalog_track_references_mut(value) {
+                let mut item = MediaItem::Track(track.clone());
+                visit(&mut item);
+                if let MediaItem::Track(hydrated) = item { *track = hydrated; }
+            }
+        }
+    }
+}
+
+// Track projections also serve recently played lists and focused layout assertions.
+fn catalog_track_references_mut(value: &mut CatalogValue) -> Vec<&mut crate::domain::media::Track> {
+    match value {
+        CatalogValue::Tracks(tracks) => tracks.iter_mut().collect(),
+        CatalogValue::RecommendationItems(items) => items
+            .iter_mut()
+            .filter_map(|item| match item {
+                crate::domain::media::MediaItem::Track(track) => Some(track),
+                _ => None,
+            })
+            .collect(),
+        CatalogValue::RecommendationFolders(folders) => folders
+            .iter_mut()
+            .flat_map(|folder| folder.items.iter_mut())
+            .filter_map(|item| match item {
+                crate::domain::media::MediaItem::Track(track) => Some(track),
+                _ => None,
+            })
+            .collect(),
+        _ => Vec::new(),
     }
 }
 
@@ -3405,6 +3492,196 @@ mod tests {
     }
 
     #[tokio::test(flavor = "current_thread")]
+    async fn recommendation_artist_and_album_references_load_details_after_initial_publication() {
+        for (media_type, succeeds) in [("artist", true), ("artist", false), ("album", true), ("album", false)] {
+            for embedded in [true, false] {
+                let directory = tempfile::tempdir().unwrap();
+                let cache = cache(directory.path()).await;
+                let references = json!([
+                    {"media_type":media_type,"provider":"library","item_id":"ranked","name":"Reference","position":1},
+                    {"media_type":media_type,"provider":"library","item_id":"ranked","name":"Repeated reference","position":2}
+                ]);
+                let (query, command, response) = if embedded {
+                    (CatalogQuery::RecommendationFolders, "music/recommendations",
+                        json!([{"provider":"recommendations","item_id":"top","name":"Top items","items":references}]))
+                } else {
+                    (CatalogQuery::RecommendationItems { provider:"recommendations".into(), item_id:MediaId("top".into()) },
+                        "music/recommendations/items", references)
+                };
+                let detail = if succeeds {
+                    json!({"media_type":media_type,"provider":"library","item_id":"ranked","name":"Detailed item",
+                        "provider_mappings":[
+                            {"provider_instance":"source-a","provider_domain":"source","item_id":"remote","available":true},
+                            {"provider_instance":"other-a","provider_domain":"other","item_id":"other-remote","available":true}
+                        ]})
+                } else {
+                    json!({"test_http_status":503})
+                };
+                let mut responses = vec![
+                    (command, response.clone()),
+                    ("music/item", detail.clone()),
+                    (command, response),
+                ];
+                if !succeeds { responses.push(("music/item", detail)); }
+                let (client, worker) = server(responses);
+                let catalog = CachedCatalog::new(Arc::new(client), cache.clone(), UserId("user".into()), Duration::from_secs(60)).await.unwrap();
+                let mut observations = catalog.observe_catalog(query.clone(), false);
+                let mut saw_references = false;
+                let items = tokio::time::timeout(Duration::from_secs(5), async {
+                    while let Some(snapshot) = observations.next().await {
+                        let items = match snapshot.value.as_deref() {
+                            Some(CatalogValue::RecommendationFolders(folders)) => &folders[0].items,
+                            Some(CatalogValue::RecommendationItems(items)) => items,
+                            _ => continue,
+                        };
+                        saw_references |= items[0].fields().provider_mappings.is_empty();
+                        if snapshot.phase == CatalogLoadPhase::Ready { return items.clone(); }
+                    }
+                    panic!("recommendation details did not complete")
+                }).await.unwrap();
+                assert!(saw_references);
+                assert_eq!(items.len(), 2);
+                for (index, item) in items.iter().enumerate() {
+                    assert_eq!(item.fields().provider.as_str(), "library");
+                    assert_eq!(item.fields().item_id.as_str(), "ranked");
+                    assert_eq!(item.fields().position, Some(index as u32 + 1));
+                    assert_eq!(item.fields().provider_mappings.len(), if succeeds { 2 } else { 0 });
+                }
+                assert_eq!(items[0].fields().name, "Reference");
+                assert_eq!(items[1].fields().name, "Repeated reference");
+                let repeated_query = match query {
+                    CatalogQuery::RecommendationItems { provider, .. } => CatalogQuery::RecommendationItems {
+                        provider, item_id:MediaId("another-ranking".into()),
+                    },
+                    query => query,
+                };
+                let mut repeated = catalog.observe_catalog(repeated_query, false);
+                let snapshot = completed_snapshot(&mut repeated).await;
+                let repeated_items = match snapshot.value.as_deref().unwrap() {
+                    CatalogValue::RecommendationFolders(folders) => &folders[0].items,
+                    CatalogValue::RecommendationItems(items) => items,
+                    _ => panic!("unexpected recommendation value"),
+                };
+                assert!(repeated_items.iter().all(|item| item.fields().provider_mappings.len() == if succeeds { 2 } else { 0 }));
+                assert_eq!(worker.join().unwrap().len(), if succeeds { 3 } else { 4 });
+                drop(observations);
+                drop(repeated);
+                drop(catalog);
+                cache.shutdown().await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn recommendation_track_references_load_details_after_initial_publication() {
+        for succeeds in [true, false] {
+            for embedded in [true, false] {
+                let directory = tempfile::tempdir().unwrap();
+                let cache = cache(directory.path()).await;
+                let references = json!([
+                    {"media_type":"track","provider":"source","item_id":"track","name":"Reference"},
+                    {"media_type":"track","provider":"source","item_id":"track","name":"Repeated reference"}
+                ]);
+                let (query, command, response) = if embedded {
+                    (
+                        CatalogQuery::RecommendationFolders,
+                        "music/recommendations",
+                        json!([{"provider":"recommendations","item_id":"top","name":"Top tracks","items":references}]),
+                    )
+                } else {
+                    (
+                        CatalogQuery::RecommendationItems {
+                            provider: "recommendations".into(),
+                            item_id: MediaId("top".into()),
+                        },
+                        "music/recommendations/items",
+                        references,
+                    )
+                };
+                let detail = if succeeds {
+                    json!({"media_type":"track","provider":"source","item_id":"track",
+                        "name":"Detailed track","duration":180,
+                        "artists":[{"provider":"source","item_id":"artist","name":"Artist"}],
+                        "album":{"provider":"source","item_id":"album","name":"Album"}})
+                } else {
+                    json!({"test_http_status":503})
+                };
+                let mut responses = vec![
+                    (command, response.clone()),
+                    ("music/item", detail.clone()),
+                    (command, response),
+                ];
+                if !succeeds {
+                    responses.push(("music/item", detail));
+                }
+                let (client, worker) = server(responses);
+                let catalog = CachedCatalog::new(
+                    Arc::new(client),
+                    cache.clone(),
+                    UserId("user".into()),
+                    Duration::from_secs(60),
+                )
+                .await
+                .unwrap();
+                let mut observations = catalog.observe_catalog(query.clone(), false);
+                let mut saw_references = false;
+                let final_tracks = tokio::time::timeout(Duration::from_secs(5), async {
+                    while let Some(snapshot) = observations.next().await {
+                        if let Some(mut value) = snapshot.value.clone().map(Arc::unwrap_or_clone) {
+                            let tracks: Vec<_> = catalog_track_references_mut(&mut value)
+                                .into_iter()
+                                .map(|track| track.clone())
+                                .collect();
+                            if tracks.is_empty() {
+                                continue;
+                            }
+                            saw_references |= !tracks[0].knowledge.duration;
+                            if snapshot.phase == CatalogLoadPhase::Ready {
+                                return tracks;
+                            }
+                        }
+                    }
+                    panic!("recommendation details did not complete")
+                })
+                .await
+                .unwrap();
+                assert!(saw_references);
+                assert_eq!(final_tracks.len(), 2);
+                assert_eq!(final_tracks[0].media.name, "Reference");
+                assert_eq!(final_tracks[1].media.name, "Repeated reference");
+                for track in &final_tracks {
+                    assert_eq!(track.duration, if succeeds { 180 } else { 0 });
+                    if succeeds {
+                        assert_eq!(track.artists[0].media.name, "Artist");
+                        assert_eq!(track.album.as_ref().unwrap().media.name, "Album");
+                    }
+                }
+                let mut repeated = catalog.observe_catalog(query.clone(), false);
+                let repeated_snapshot = completed_snapshot(&mut repeated).await;
+                assert_eq!(repeated_snapshot.phase, CatalogLoadPhase::Ready);
+                let mut repeated_value = repeated_snapshot.value.map(Arc::unwrap_or_clone).unwrap();
+                for track in catalog_track_references_mut(&mut repeated_value) {
+                    assert_eq!(track.duration, if succeeds { 180 } else { 0 });
+                }
+                let requests = worker.join().unwrap();
+                assert_eq!(requests.len(), if succeeds { 3 } else { 4 });
+                drop(observations);
+                drop(repeated);
+                drop(catalog);
+                cache.database().await.unwrap().read_snapshot(move |snapshot| {
+                    let mut value = read_cached_read(snapshot, &query, &UserId("user".into()))?
+                        .unwrap().value;
+                    for track in catalog_track_references_mut(&mut value) {
+                        assert_eq!(track.duration, if succeeds { 180 } else { 0 });
+                    }
+                    Ok(())
+                }).await.unwrap();
+                cache.shutdown().await.unwrap();
+            }
+        }
+    }
+
+    #[tokio::test(flavor = "current_thread")]
     async fn recently_played_hydrates_cache_aliases_and_online_details_without_losing_occurrences() {
         for succeeds in [true, false] {
             let directory = tempfile::tempdir().unwrap();
@@ -3993,7 +4270,7 @@ mod tests {
                 json!([{"provider":"recommendations","item_id":"row","name":"Old"}]),
                 json!([{"provider":"recommendations","item_id":"row","name":"Updated"}]),
                 json!([{"provider":"recommendations","item_id":"row","name":"Online only","items":[
-                    {"media_type":"track","provider":"source","item_id":"intruder","name":"Must roll back"},
+                    {"media_type":"track","provider":"source","item_id":"intruder","name":"Must roll back","duration":0},
                     {"media_type":"radio","provider":"source","item_id":"radio","name":"Online Radio"}
                 ]}]),
             ),
@@ -4005,14 +4282,14 @@ mod tests {
                 "music/recommendations/items",
                 json!([{"media_type":"track","provider":"source","item_id":"old","name":"Old"}]),
                 json!([
-                    {"media_type":"artist","provider":"source","item_id":"artist","name":"Artist"},
-                    {"media_type":"album","provider":"source","item_id":"album","name":"Album"},
+                    {"media_type":"artist","provider":"source","item_id":"artist","name":"Artist","provider_mappings":[]},
+                    {"media_type":"album","provider":"source","item_id":"album","name":"Album","provider_mappings":[]},
                     {"media_type":"playlist","provider":"source","item_id":"playlist","name":"Playlist"},
-                    {"media_type":"track","provider":"source","item_id":"track","name":"Track","position":1},
-                    {"media_type":"track","provider":"source","item_id":"track","name":"Track","position":4}
+                    {"media_type":"track","provider":"source","item_id":"track","name":"Track","position":1,"duration":0},
+                    {"media_type":"track","provider":"source","item_id":"track","name":"Track","position":4,"duration":0}
                 ]),
                 json!([
-                    {"media_type":"track","provider":"source","item_id":"intruder","name":"Must roll back"},
+                    {"media_type":"track","provider":"source","item_id":"intruder","name":"Must roll back","duration":0},
                     {"media_type":"radio","provider":"source","item_id":"radio","name":"Online Radio"}
                 ]),
             ),

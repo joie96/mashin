@@ -21,18 +21,27 @@ impl RecommendationView {
                     "user_artist_playlists_monthly",
                     "user_top_tracks_monthly",
                     "user_top_artists_monthly",
+                    "user_artist_recommendations",
+                    "user_top_albums_monthly",
+                    "user_album_recommendations",
+                    "user_rediscovery_tracks",
                 ],
-                &["user_genre_artists_", "user_similar_artists_"],
+                &["user_genre_artists_"],
             ),
             Self::Explore => (
                 &[
-                    "user_exploration_weekly",
-                    "similarusers_jam_weekly",
-                    "sitewide_top_albums_weekly",
-                    "sitewide_top_tracks_weekly",
-                    "sitewide_top_artists_weekly",
+                    "global_top_tracks",
+                    "de_top_tracks",
+                    "global_top_artists",
+                    "de_top_artists",
+                    "global_popular_artist_albums",
+                    "de_popular_artist_albums",
+                    "global_genre_playlists",
+                    "global_artist_radio_playlists",
+                    "global_mood_playlists",
+                    "global_decade_playlists",
                 ],
-                &[],
+                &["global_genre_albums_", "global_genre_artists_"],
             ),
         }
     }
@@ -86,4 +95,27 @@ pub(crate) struct RecommendationKnowledge {
     pub(crate) subtitle: bool,
     pub(crate) items: bool,
     pub(crate) playlist_tracks: bool,
+}
+
+#[cfg(test)]
+mod tests {
+    use super::RecommendationView;
+
+    #[test]
+    fn lastfm_folders_belong_to_exactly_one_view() {
+        for view in [RecommendationView::Home, RecommendationView::Explore] {
+            let other = match view {
+                RecommendationView::Home => RecommendationView::Explore,
+                RecommendationView::Explore => RecommendationView::Home,
+            };
+            let (identities, prefixes) = view.folder_selection();
+            for identity in identities.iter().map(|identity| identity.to_string())
+                .chain(prefixes.iter().map(|prefix| format!("{prefix}rock"))) {
+                assert!(view.includes(&identity));
+                assert!(!other.includes(&identity));
+            }
+            assert!(!view.includes("sitewide_top_tracks_weekly"));
+            assert!(!view.includes("user_similar_artists_rock"));
+        }
+    }
 }

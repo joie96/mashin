@@ -538,7 +538,7 @@ class _DesktopSlideCardState<T> extends State<_DesktopSlideCard<T>> {
                                         ),
                                         const SizedBox(width: 4),
                                         _SlideOverlayIconButton(
-                                          icon: Icons.more_horiz_outlined,
+                                          icon: Icons.more_vert_outlined,
                                           onAnchorTap: widget.onMoreTap,
                                         ),
                                       ],
@@ -965,6 +965,7 @@ class _SlideOverlayIconButtonState extends State<_SlideOverlayIconButton> {
     final bool isEnabled = widget.onTap != null || widget.onAnchorTap != null;
 
     return MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: GestureDetector(
@@ -980,11 +981,12 @@ class _SlideOverlayIconButtonState extends State<_SlideOverlayIconButton> {
                 }
               }
             : null,
-        child: SizedBox.square(
-          dimension: 32,
+        child: SizedBox(
+          width: 32,
+          height: 32,
           child: Center(
             child: AnimatedScale(
-              scale: _isHovered && isEnabled ? 1.08 : 1,
+              scale: _isHovered && isEnabled ? 1.24 : 1,
               duration: const Duration(milliseconds: 120),
               curve: Curves.easeOutCubic,
               child: Icon(widget.icon, size: 18, color: colors.overlayIcon),

@@ -86,9 +86,56 @@ class MobileSectionSelectionState extends ChangeNotifier {
   }
 }
 
+class MobileSelectionCheckBox extends StatelessWidget {
+  final bool isChecked;
+  final bool isVisible;
+  final VoidCallback? onTap;
+
+  const MobileSelectionCheckBox({
+    super.key,
+    required this.isChecked,
+    required this.isVisible,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.mashinColors;
+    return IgnorePointer(
+      ignoring: !isVisible,
+      child: GestureDetector(
+        onTap: onTap,
+        child: Opacity(
+          opacity: isVisible ? 1 : 0,
+          child: Container(
+            width: 20,
+            height: 20,
+            decoration: BoxDecoration(
+              color: isChecked ? colors.accent : Colors.transparent,
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: isChecked ? colors.accent : colors.textSecondary,
+                width: 0.9,
+              ),
+            ),
+            child: isChecked
+                ? Icon(
+                    Icons.check,
+                    size: 14,
+                    color: Theme.of(context).colorScheme.onPrimary,
+                  )
+                : null,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class MobileSelectableSectionItem extends StatefulWidget {
   final bool selectionModeActive;
   final bool isSelected;
+  final bool showSelectionIndicator;
   final VoidCallback onLongPress;
   final VoidCallback onToggleSelection;
   final VoidCallback? onTap;
@@ -98,6 +145,7 @@ class MobileSelectableSectionItem extends StatefulWidget {
     super.key,
     required this.selectionModeActive,
     required this.isSelected,
+    this.showSelectionIndicator = true,
     required this.onLongPress,
     required this.onToggleSelection,
     this.onTap,
@@ -241,43 +289,44 @@ class _MobileSelectableSectionItemState
                 child: widget.child,
               ),
             ),
-            Positioned(
-              top: 4,
-              right: 4,
-              child: IgnorePointer(
-                ignoring: !widget.selectionModeActive,
-                child: AnimatedOpacity(
-                  duration: const Duration(milliseconds: 180),
-                  opacity: widget.selectionModeActive ? 1 : 0,
-                  child: GestureDetector(
-                    onTap: widget.onToggleSelection,
-                    child: Container(
-                      width: 20,
-                      height: 20,
-                      alignment: Alignment.center,
-                      decoration: BoxDecoration(
-                        color: widget.isSelected
-                            ? colors.accent
-                            : Colors.transparent,
-                        border: Border.all(
+            if (widget.showSelectionIndicator)
+              Positioned(
+                top: 4,
+                right: 4,
+                child: IgnorePointer(
+                  ignoring: !widget.selectionModeActive,
+                  child: AnimatedOpacity(
+                    duration: const Duration(milliseconds: 180),
+                    opacity: widget.selectionModeActive ? 1 : 0,
+                    child: GestureDetector(
+                      onTap: widget.onToggleSelection,
+                      child: Container(
+                        width: 20,
+                        height: 20,
+                        alignment: Alignment.center,
+                        decoration: BoxDecoration(
                           color: widget.isSelected
                               ? colors.accent
-                              : colors.textSecondary,
+                              : Colors.transparent,
+                          border: Border.all(
+                            color: widget.isSelected
+                                ? colors.accent
+                                : colors.textSecondary,
+                          ),
+                          shape: BoxShape.circle,
                         ),
-                        shape: BoxShape.circle,
+                        child: widget.isSelected
+                            ? Icon(
+                                Icons.check,
+                                size: 14,
+                                color: Theme.of(context).colorScheme.onPrimary,
+                              )
+                            : null,
                       ),
-                      child: widget.isSelected
-                          ? Icon(
-                              Icons.check,
-                              size: 14,
-                              color: Theme.of(context).colorScheme.onPrimary,
-                            )
-                          : null,
                     ),
                   ),
                 ),
               ),
-            ),
           ],
         ),
       ),

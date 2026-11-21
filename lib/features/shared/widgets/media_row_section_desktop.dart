@@ -46,6 +46,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
   final ValueChanged<Album>? onAlbumTap;
   final ValueChanged<Playlist>? onPlaylistTap;
   final bool showPlaylistDetails;
+  final Widget? Function(Playlist playlist)? playlistCoverBuilder;
 
   const MediaRowSectionDesktop({
     super.key,
@@ -72,6 +73,7 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.onAlbumTap,
     this.onPlaylistTap,
     this.showPlaylistDetails = true,
+    this.playlistCoverBuilder,
   });
 
   @override
@@ -750,6 +752,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
             : null,
         onPlaylistTap: widget.onPlaylistTap,
         showDetails: widget.showPlaylistDetails,
+        coverContent: widget.playlistCoverBuilder?.call(item),
       );
     }
     if (item is Artist) {
@@ -1447,11 +1450,13 @@ Widget _buildDesktopMediaRowPlaylist({
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Playlist>? onPlaylistTap,
   required bool showDetails,
+  Widget? coverContent,
 }) {
   return _buildDesktopMediaRowItemBase(
     itemWidth: itemWidth,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
+    coverContent: coverContent,
     title: _prefer(item.name, 'Unknown Playlist'),
     titleLinkItem: item,
     onTitleTap: onPlaylistTap == null
@@ -1626,6 +1631,7 @@ Widget _buildDesktopMediaRowItemBase({
   bool isCircularCover = false,
   MashinCoreBridgeEvents? coreEvents,
   MediaItem? playbackItem,
+  Widget? coverContent,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -1650,6 +1656,7 @@ Widget _buildDesktopMediaRowItemBase({
           coverBuilder: (bool isHovered) => _DesktopMediaCover(
             coverSize: insetCoverSize,
             icon: icon,
+            coverContent: coverContent,
             coverUrl: coverUrl,
             providerLabel: providerLabel,
             providerId: providerId,
@@ -1826,6 +1833,7 @@ class _DesktopMediaCover extends StatefulWidget {
   final double coverSize;
   final IconData icon;
   final String? coverUrl;
+  final Widget? coverContent;
   final String providerLabel;
   final String? providerId;
   final MediaItem? providerItem;
@@ -1845,6 +1853,7 @@ class _DesktopMediaCover extends StatefulWidget {
     required this.coverSize,
     required this.icon,
     required this.coverUrl,
+    this.coverContent,
     required this.providerLabel,
     required this.providerId,
     this.providerItem,
@@ -1898,6 +1907,19 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
     const bool showSelectControl = true;
     final bool showSelectControlVisible = widget.isHovered || widget.isSelected;
     const bool showOverlayActions = true;
+    final coverContent =
+        widget.coverContent ??
+        (hasCover
+            ? MediaImage(
+                source: widget.coverUrl!,
+                fit: BoxFit.cover,
+                fallback: Icon(
+                  widget.icon,
+                  color: colors.textSecondary,
+                  size: 34,
+                ),
+              )
+            : Icon(widget.icon, color: colors.textSecondary, size: 34));
 
     final Widget clippedContent = SizedBox(
       width: widget.coverSize,
@@ -1912,41 +1934,10 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                 ? ClipOval(
                     child: Container(
                       color: colors.bgTertiary,
-                      child: hasCover
-                          ? MediaImage(
-                              source: widget.coverUrl!,
-                              fit: BoxFit.cover,
-                              fallback: Icon(
-                                widget.icon,
-                                color: colors.textSecondary,
-                                size: 34,
-                              ),
-                            )
-                          : Icon(
-                              widget.icon,
-                              color: colors.textSecondary,
-                              size: 34,
-                            ),
+                      child: coverContent,
                     ),
                   )
-                : Container(
-                    color: colors.bgTertiary,
-                    child: hasCover
-                        ? MediaImage(
-                            source: widget.coverUrl!,
-                            fit: BoxFit.cover,
-                            fallback: Icon(
-                              widget.icon,
-                              color: colors.textSecondary,
-                              size: 34,
-                            ),
-                          )
-                        : Icon(
-                            widget.icon,
-                            color: colors.textSecondary,
-                            size: 34,
-                          ),
-                  ),
+                : Container(color: colors.bgTertiary, child: coverContent),
           ),
           if (showHoverPlay || showOverlayActions)
             Positioned.fill(
@@ -2025,7 +2016,7 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                               ),
                               const SizedBox(width: 4),
                               _DesktopCoverOverlayIconButton(
-                                icon: Icons.more_horiz_outlined,
+                                icon: Icons.more_vert_outlined,
                                 onTap: widget.onMoreTap,
                                 onAnchorTap: widget.onMoreAnchorTap,
                                 baseColor: colors.overlayIcon,
@@ -2170,9 +2161,12 @@ class _DesktopCoverOverlayIconButtonState
 
   @override
   Widget build(BuildContext context) {
-    final Color iconColor = _isHovered ? widget.hoverColor : widget.baseColor;
+    final isEnabled = widget.onTap != null || widget.onAnchorTap != null;
+    final isHovered = _isHovered && isEnabled;
+    final Color iconColor = isHovered ? widget.hoverColor : widget.baseColor;
 
     return MouseRegion(
+      cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
       child: Listener(
@@ -2194,7 +2188,7 @@ class _DesktopCoverOverlayIconButtonState
           height: 32,
           child: Center(
             child: AnimatedScale(
-              scale: _isHovered ? 1.08 : 1,
+              scale: isHovered ? 1.24 : 1,
               duration: const Duration(milliseconds: 120),
               curve: Curves.easeOutCubic,
               child: Icon(widget.icon, size: 18, color: iconColor),

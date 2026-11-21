@@ -38,6 +38,8 @@ class HomeScreenDesktop extends StatefulWidget {
 class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
   late final HomeController _controller;
   bool _isPageVisible = true;
+  List<Track> _selectedTopTracks = const <Track>[];
+  List<Track> _selectedRediscoveryTracks = const <Track>[];
 
   // Session data keeps loading while the route is covered.
   @override
@@ -93,49 +95,57 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
     return null;
   }
 
-  List<ContextMenuAction> _buildItemMenuActions(MediaItem item) {
-    final bool isFavorite = _controller.isItemFavorite(item);
-    final Artist? primaryArtist = _primaryArtistOf(item);
-    final Album? primaryAlbum = item is Track ? item.album : null;
+  List<ContextMenuAction> _buildItemMenuActions(List<MediaItem> items) {
+    final item = items.first;
+    final isSingleItem = items.length == 1;
+    final playableItems = items
+        .where((item) => item.canPlay)
+        .toList(growable: false);
+    final bool isFavorite = items.every(_controller.isItemFavorite);
+    final Artist? primaryArtist = isSingleItem ? _primaryArtistOf(item) : null;
+    final Album? primaryAlbum = isSingleItem && item is Track
+        ? item.album
+        : null;
 
     return <ContextMenuAction>[
       ContextMenuAction(
         label: 'Abspielen',
-        isEnabled: item.canPlay,
+        isEnabled: playableItems.isNotEmpty,
         icon: Icons.play_arrow,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[item]),
+        onSelected: () => widget.coreBridge.queuePlayMedia(playableItems),
       ),
-      if (item is Album || item is Playlist)
+      if (!isSingleItem || item is Album || item is Playlist)
         ContextMenuAction(
           label: 'Zufällig abspielen',
-          isEnabled: item.canPlay,
+          isEnabled: playableItems.isNotEmpty,
           icon: Icons.shuffle_outlined,
-          onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
-            item,
-          ], shuffle: true),
+          onSelected: () =>
+              widget.coreBridge.queuePlayMedia(playableItems, shuffle: true),
         ),
       ContextMenuAction(
         label: 'Radio starten',
-        isEnabled: item.canPlay,
+        isEnabled: playableItems.isNotEmpty,
         icon: Icons.radio_outlined,
-        onSelected: () => widget.coreBridge.startRadio(<MediaItem>[item]),
+        onSelected: () => widget.coreBridge.startRadio(playableItems),
       ),
       ContextMenuAction(
         label: 'Als Nächstes spielen',
-        isEnabled: item.canPlay,
+        isEnabled: playableItems.isNotEmpty,
         icon: Icons.keyboard_return,
         iconQuarterTurns: 2,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
-          item,
-        ], option: QueueOption.next),
+        onSelected: () => widget.coreBridge.queuePlayMedia(
+          playableItems,
+          option: QueueOption.next,
+        ),
       ),
       ContextMenuAction(
         label: 'Als Letztes spielen',
-        isEnabled: item.canPlay,
+        isEnabled: playableItems.isNotEmpty,
         icon: Icons.last_page,
-        onSelected: () => widget.coreBridge.queuePlayMedia(<MediaItem>[
-          item,
-        ], option: QueueOption.add),
+        onSelected: () => widget.coreBridge.queuePlayMedia(
+          playableItems,
+          option: QueueOption.add,
+        ),
       ),
       if (primaryArtist != null || primaryAlbum != null) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
@@ -160,7 +170,9 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
-        onSelected: () => _controller.setFavorite(item, !isFavorite),
+        onSelected: () => Future.wait(
+          items.map((item) => _controller.setFavorite(item, !isFavorite)),
+        ),
       ),
     ];
   }
@@ -169,7 +181,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
     return const AppContextMenuController().showContextMenu(
       context: context,
       anchorContext: anchorContext,
-      actions: _buildItemMenuActions(item),
+      actions: _buildItemMenuActions(<MediaItem>[item]),
     );
   }
 
@@ -177,7 +189,20 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
     return const AppContextMenuController().showContextMenu(
       context: context,
       globalPosition: globalPosition,
-      actions: _buildItemMenuActions(item),
+      actions: _buildItemMenuActions(<MediaItem>[item]),
+    );
+  }
+
+  // Selection actions operate on the complete list selection, not the clicked row.
+  Future<void> _showSelectionMenu(
+    List<Track> items, {
+    Offset? globalPosition,
+  }) async {
+    if (items.isEmpty) return;
+    await const AppContextMenuController().showContextMenu(
+      context: context,
+      globalPosition: globalPosition,
+      actions: _buildItemMenuActions(items),
     );
   }
 
@@ -249,7 +274,6 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                     isLoading: _controller.isLoadingGenrePlaylists,
                     items: _controller.genrePlaylists,
                     emptyText: 'Keine Genre-Playlists verfügbar.',
-                    maxItems: 9,
                     coreBridge: widget.coreBridge,
                     onItemTap: widget.onOpenPlaylist,
                     onItemContextMenu:
@@ -289,25 +313,28 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
             ListenableBuilder(
               listenable: _controller.topTracksListenable,
               builder: (BuildContext context, Widget? child) =>
-                  MediaRowSectionDesktop<Track>(
-                    title: 'Deine Lieblingssongs',
-                    startsTrackRadio: true,
+                  MediaListSectionDesktop<Track>(
+                    title: 'Deine meistgehörten Tracks',
                     isLoading: _controller.isLoadingTopTracks,
                     items: _controller.topTracks,
                     emptyText: 'Keine Top-Tracks verfügbar.',
                     coreBridge: widget.coreBridge,
                     coreEvents: widget.coreEvents,
-                    isRowFavorite: (Track item, int _) =>
-                        _controller.isItemFavorite(item),
-                    onRowFavoriteTap: (Track item, int _) => _controller
-                        .setFavorite(item, !_controller.isItemFavorite(item)),
-                    onRowMoreAnchorTap:
+                    onSelectionChanged: (items) => _selectedTopTracks = items,
+                    onAlbumTap: widget.onOpenAlbum,
+                    onSelectionMenuTap: () =>
+                        _showSelectionMenu(_selectedTopTracks),
+                    onItemSelectionContextMenu: (items, position) {
+                      _selectedTopTracks = items;
+                      unawaited(
+                        _showSelectionMenu(items, globalPosition: position),
+                      );
+                    },
+                    onItemMoreAnchorTap:
                         (Track item, int _, BuildContext anchor) =>
                             _showItemMenu(item, anchorContext: anchor),
-                    onRowContextMenu: (Track item, int _, Offset position) =>
+                    onItemContextMenu: (Track item, int _, Offset position) =>
                         _showItemMenuAtPosition(item, position),
-                    onArtistTap: widget.onOpenArtist,
-                    onAlbumTap: widget.onOpenAlbum,
                   ),
             ),
           ),
@@ -317,7 +344,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
               listenable: _controller.topArtistsListenable,
               builder: (BuildContext context, Widget? child) =>
                   MediaRowSectionDesktop<Artist>(
-                    title: 'Deine Lieblingskünstler:innen',
+                    title: 'Deine meistgehörten Künstler:innen',
                     isLoading: _controller.isLoadingTopArtists,
                     items: _controller.topArtists,
                     emptyText: 'Keine Top-Artists verfügbar.',
@@ -336,7 +363,59 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
                   ),
             ),
           ),
-          const SliverPadding(padding: EdgeInsets.only(top: 24)),
+          _sectionSliver(
+            ListenableBuilder(
+              listenable: _controller.personalSectionsListenable,
+              builder: (context, child) => Column(
+                children: [
+                  _personalRow<Artist>(
+                    'user_artist_recommendations',
+                    'Künstler-Empfehlungen',
+                    _controller.artistRecommendations,
+                  ),
+                  const SizedBox(height: 24),
+                  _personalRow<Album>(
+                    'user_top_albums_monthly',
+                    'Deine meistgehörten Alben',
+                    _controller.topAlbums,
+                  ),
+                  const SizedBox(height: 24),
+                  _personalRow<Album>(
+                    'user_album_recommendations',
+                    'Album-Empfehlungen',
+                    _controller.albumRecommendations,
+                  ),
+                  const SizedBox(height: 24),
+                  MediaListSectionDesktop<Track>(
+                    title: 'Lange nicht gehört',
+                    items: _controller.rediscoveryTracks,
+                    isLoading: _controller.isFolderLoading(
+                      'user_rediscovery_tracks',
+                    ),
+                    emptyText: 'Keine Tracks verfügbar.',
+                    coreBridge: widget.coreBridge,
+                    coreEvents: widget.coreEvents,
+                    onSelectionChanged: (items) =>
+                        _selectedRediscoveryTracks = items,
+                    onSelectionMenuTap: () =>
+                        _showSelectionMenu(_selectedRediscoveryTracks),
+                    onItemSelectionContextMenu: (items, position) {
+                      _selectedRediscoveryTracks = items;
+                      unawaited(
+                        _showSelectionMenu(items, globalPosition: position),
+                      );
+                    },
+                    onItemMoreAnchorTap: (item, index, anchor) =>
+                        _showItemMenu(item, anchorContext: anchor),
+                    onItemContextMenu: (item, index, position) =>
+                        _showItemMenuAtPosition(item, position),
+                    onAlbumTap: widget.onOpenAlbum,
+                  ),
+                  const SizedBox(height: 24),
+                ],
+              ),
+            ),
+          ),
           _sectionSliver(
             ListenableBuilder(
               listenable: _controller.artistSectionsListenable,
@@ -408,4 +487,27 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
       sliver: SliverToBoxAdapter(child: child),
     );
   }
+
+  // Personal recommendation rows share media navigation and favorite commands.
+  Widget _personalRow<T extends MediaItem>(
+    String folderId,
+    String title,
+    List<T> items,
+  ) => MediaRowSectionDesktop<T>(
+    title: title,
+    items: items,
+    isLoading: _controller.isFolderLoading(folderId),
+    emptyText: 'Keine Empfehlungen verfügbar.',
+    coreBridge: widget.coreBridge,
+    coreEvents: widget.coreEvents,
+    isRowFavorite: (item, index) => _controller.isItemFavorite(item),
+    onRowFavoriteTap: (item, index) =>
+        _controller.setFavorite(item, !_controller.isItemFavorite(item)),
+    onRowMoreAnchorTap: (item, index, anchor) =>
+        _showItemMenu(item, anchorContext: anchor),
+    onRowContextMenu: (item, index, position) =>
+        _showItemMenuAtPosition(item, position),
+    onArtistTap: widget.onOpenArtist,
+    onAlbumTap: widget.onOpenAlbum,
+  );
 }

@@ -29,6 +29,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
   final ValueChanged<List<T>>? onSelectionMenuTap;
   final bool showAlbumArtist;
   final bool showPlaylistDetails;
+  final Widget? Function(Playlist playlist)? playlistCoverBuilder;
 
   const MediaRowSectionMobile({
     super.key,
@@ -47,6 +48,7 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.onSelectionMenuTap,
     this.showAlbumArtist = true,
     this.showPlaylistDetails = true,
+    this.playlistCoverBuilder,
   });
 
   @override
@@ -400,6 +402,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
         onPlayTap: () => _onPlayTap(index),
         onItemTap: onItemTap,
         showDetails: showPlaylistDetails,
+        coverContent: widget.playlistCoverBuilder?.call(item),
       );
     }
     if (item is Artist) {
@@ -512,6 +515,7 @@ Widget _buildMobileMediaRowPlaylist({
   required VoidCallback? onPlayTap,
   required VoidCallback? onItemTap,
   required bool showDetails,
+  Widget? coverContent,
 }) {
   final _MobileRowText rowText = _mobileRowText(
     item,
@@ -522,6 +526,7 @@ Widget _buildMobileMediaRowPlaylist({
     playbackItem: item,
     coverSize: coverSize,
     icon: Icons.queue_music_outlined,
+    coverContent: coverContent,
     title: rowText.title,
     secondaryText: rowText.secondary,
     tertiaryText: rowText.tertiary,
@@ -622,6 +627,7 @@ Widget _buildMobileMediaRowItemBase({
   bool showPlayOverlay = true,
   MashinCoreBridgeEvents? coreEvents,
   MediaItem? playbackItem,
+  Widget? coverContent,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -654,17 +660,18 @@ Widget _buildMobileMediaRowItemBase({
                         width: coverSize,
                         height: coverSize,
                         color: colors.bgTertiary,
-                        child: coverUrl != null && coverUrl.trim().isNotEmpty
-                            ? _DeferredRowMediaImage(
-                                source: coverUrl,
-                                fit: BoxFit.cover,
-                                fallback: Icon(
-                                  icon,
-                                  color: colors.textSecondary,
-                                  size: 56,
-                                ),
-                              )
-                            : Icon(icon, color: colors.textSecondary, size: 56),
+                        child: coverContent ??
+                            (coverUrl != null && coverUrl.trim().isNotEmpty
+                                ? _DeferredRowMediaImage(
+                                    source: coverUrl,
+                                    fit: BoxFit.cover,
+                                    fallback: Icon(
+                                      icon,
+                                      color: colors.textSecondary,
+                                      size: 56,
+                                    ),
+                                  )
+                                : Icon(icon, color: colors.textSecondary, size: 56)),
                       ),
                     ),
                   ),

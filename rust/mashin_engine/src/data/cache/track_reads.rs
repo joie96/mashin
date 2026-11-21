@@ -316,8 +316,8 @@ pub(crate) fn read_partial_track(
         .map(|track| track_value(query, track)))
 }
 
-// History membership stays authoritative while canonical details fill missing fields.
-pub(super) fn hydrate_recent_tracks(
+// Selection membership stays authoritative while canonical details fill missing fields.
+pub(super) fn hydrate_track_references(
     transaction: &Transaction<'_>,
     tracks: &mut [Track],
     user_id: &UserId,
@@ -329,13 +329,13 @@ pub(super) fn hydrate_recent_tracks(
         };
         if let Some(CatalogValue::Track(known)) = read_partial_track(transaction, &query, user_id)?
         {
-            *track = merge_recent_track(known, track);
+            *track = merge_track_reference(known, track);
         }
     }
     Ok(())
 }
 
-pub(super) fn merge_recent_track(mut known: Track, reference: &Track) -> Track {
+pub(super) fn merge_track_reference(mut known: Track, reference: &Track) -> Track {
     known.media.provider = reference.media.provider.clone();
     known.media.item_id = reference.media.item_id.clone();
     let mut merged = MediaItem::Track(known);
@@ -671,7 +671,7 @@ mod tests {
             {"provider":"library","item_id":"007","name":"History library"},
             {"provider":"source-a","item_id":"remote","name":"Repeated alias"}
         ])).unwrap();
-        hydrate_recent_tracks(&transaction, &mut references, &user).unwrap();
+        hydrate_track_references(&transaction, &mut references, &user).unwrap();
         assert!(!references[0].knowledge.duration);
         for index in [1, 2, 3] {
             assert_eq!(references[index].duration, 240);

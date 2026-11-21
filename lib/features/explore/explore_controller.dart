@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 
@@ -8,11 +7,7 @@ import '../core/core_models.dart';
 import '../core/core_userdata.dart';
 
 class ExploreController extends ChangeNotifier {
-  ExploreController({
-    required this.coreBridge,
-    this.userDataController,
-    math.Random? random,
-  }) : _random = random ?? math.Random() {
+  ExploreController({required this.coreBridge, this.userDataController}) {
     _eventSubscription = coreBridge.events.listen((event) {
       if (!_isDisposed &&
           _hasStartedLoading &&
@@ -40,7 +35,6 @@ class ExploreController extends ChangeNotifier {
 
   final MashinCoreBridgeApi coreBridge;
   final UserData? userDataController;
-  final math.Random _random;
   StreamSubscription<Map<String, dynamic>>? _eventSubscription;
   Future<void>? _snapshotRefresh;
   bool _needsSnapshotRefresh = false;
@@ -49,18 +43,12 @@ class ExploreController extends ChangeNotifier {
     isLoading: true,
   );
   int _recommendationSequence = 0;
-  bool _hasLoadedExploration = false;
-  bool _hasLoadedSimilarUsersJam = false;
   bool _hasStartedLoading = false;
 
   bool _isDisposed = false;
   bool _isLoading = true;
   bool _hasLoadError = false;
-  List<Track> _weeklyExploration = const <Track>[];
-  List<Album> _weeklyAlbums = const <Album>[];
-  List<Track> _similarUsersJam = const <Track>[];
-  List<Track> _weeklyTracks = const <Track>[];
-  List<Artist> _weeklyArtists = const <Artist>[];
+  List<RecommendationFolder> _folders = const [];
 
   // Lifecycle.
   @override
@@ -73,12 +61,17 @@ class ExploreController extends ChangeNotifier {
   // Recommendation snapshots.
   bool get isLoading => _isLoading;
   bool get hasLoadError => _hasLoadError;
-  List<Track> get weeklyExploration => _weeklyExploration;
-  List<Album> get weeklyAlbums => _weeklyAlbums;
-  List<Track> get similarUsersJam => _similarUsersJam;
-  List<Track> get weeklyTracks => _weeklyTracks;
-  List<Artist> get weeklyArtists => _weeklyArtists;
   bool isFolderLoading(String itemId) => _snapshot.isFolderLoading(itemId);
+
+  List<T> itemsForFolder<T extends MediaItem>(String itemId) => _folders
+      .where((folder) => folder.itemId == itemId)
+      .expand((folder) => folder.items)
+      .whereType<T>()
+      .toList(growable: false);
+
+  List<RecommendationFolder> foldersWithPrefix(String prefix) => _folders
+      .where((folder) => folder.itemId.startsWith(prefix))
+      .toList(growable: false);
 
   Future<void> load({bool refresh = true}) {
     if (_isDisposed) return Future.value();
@@ -125,7 +118,6 @@ class ExploreController extends ChangeNotifier {
     if (snapshot.revision != 0 && snapshot.revision < _snapshot.revision) {
       return;
     }
-    Set<String>? changedFolderIds;
     final delta = snapshot.delta;
     if (delta != null) {
       if (snapshot.revision == _snapshot.revision &&
@@ -137,7 +129,6 @@ class ExploreController extends ChangeNotifier {
         unawaited(load(refresh: false));
         return;
       }
-      final update = snapshot;
       try {
         snapshot = snapshot.applyTo(
           isNewRead ? const RecommendationSnapshot() : _snapshot,
@@ -146,15 +137,6 @@ class ExploreController extends ChangeNotifier {
         unawaited(load(refresh: false));
         return;
       }
-      final retained = snapshot.folders
-          .map((folder) => (folder.provider, folder.itemId))
-          .toSet();
-      changedFolderIds = {
-        for (final folder in update.folders) folder.itemId,
-        for (final folder in _snapshot.folders)
-          if (!retained.contains((folder.provider, folder.itemId)))
-            folder.itemId,
-      };
       _recommendationSequence = delta.sequence;
     } else {
       if (snapshot.revision != 0 &&
@@ -164,114 +146,38 @@ class ExploreController extends ChangeNotifier {
       }
       _recommendationSequence = 0;
     }
-    bool hasChanged(String identity) =>
-        changedFolderIds == null || changedFolderIds.contains(identity);
-    final previous = _snapshot;
-    final exploration = _weeklyExploration;
-    final albums = _weeklyAlbums;
-    final jam = _similarUsersJam;
-    final tracks = _weeklyTracks;
-    final artists = _weeklyArtists;
+    final previous = _folders;
+    final hadLoading = _isLoading;
+    final hadLoadError = _hasLoadError;
     _snapshot = snapshot;
     _isLoading = snapshot.isLoading;
     _hasLoadError = snapshot.hasLoadError;
-    final folders = snapshot.folders;
-    if (hasChanged('user_exploration_weekly') &&
-        !snapshot.isFolderLoading('user_exploration_weekly') &&
-        !snapshot.hasFolderLoadError('user_exploration_weekly')) {
-      _weeklyExploration = _tracksFromPlaylistFolders(
-        folders,
-        'user_exploration_weekly',
-      );
-      if (!_hasLoadedExploration) {
-        _weeklyExploration.shuffle(_random);
-      } else {
-        _preserveSelectedOrder(exploration, _weeklyExploration);
-      }
-      _hasLoadedExploration = true;
-    }
-    if (hasChanged('sitewide_top_albums_weekly') &&
-        _canApplyFolder(snapshot, 'sitewide_top_albums_weekly')) {
-      _weeklyAlbums = _itemsFromFolders<Album>(
-        folders,
-        'sitewide_top_albums_weekly',
-      );
-    }
-    if (hasChanged('similarusers_jam_weekly') &&
-        !snapshot.isFolderLoading('similarusers_jam_weekly') &&
-        !snapshot.hasFolderLoadError('similarusers_jam_weekly')) {
-      _similarUsersJam = _tracksFromPlaylistFolders(
-        folders,
-        'similarusers_jam_weekly',
-      );
-      if (!_hasLoadedSimilarUsersJam) {
-        _similarUsersJam.shuffle(_random);
-      } else {
-        _preserveSelectedOrder(jam, _similarUsersJam);
-      }
-      _hasLoadedSimilarUsersJam = true;
-    }
-    if (hasChanged('sitewide_top_tracks_weekly') &&
-        _canApplyFolder(snapshot, 'sitewide_top_tracks_weekly')) {
-      _weeklyTracks = _itemsFromFolders<Track>(
-        folders,
-        'sitewide_top_tracks_weekly',
-      );
-    }
-    if (hasChanged('sitewide_top_artists_weekly') &&
-        _canApplyFolder(snapshot, 'sitewide_top_artists_weekly')) {
-      _weeklyArtists = _itemsFromFolders<Artist>(
-        folders,
-        'sitewide_top_artists_weekly',
-      );
-    }
-    _weeklyExploration = _retainMediaList(exploration, _weeklyExploration);
-    _weeklyAlbums = _retainMediaList(albums, _weeklyAlbums);
-    _similarUsersJam = _retainMediaList(jam, _similarUsersJam);
-    _weeklyTracks = _retainMediaList(tracks, _weeklyTracks);
-    _weeklyArtists = _retainMediaList(artists, _weeklyArtists);
-    final hasChangedStatus =
-        previous.isLoading != snapshot.isLoading ||
-        previous.hasLoadError != snapshot.hasLoadError ||
-        previous.folders.length != snapshot.folders.length ||
-        snapshot.folders.indexed.any((entry) {
-          final (index, folder) = entry;
-          return index >= previous.folders.length ||
-              previous.folders[index].itemId != folder.itemId ||
-              previous.folders[index].provider != folder.provider ||
-              previous.folders[index].isLoading != folder.isLoading ||
-              previous.folders[index].hasLoadError != folder.hasLoadError;
-        });
-    if (hasChangedStatus ||
-        !identical(exploration, _weeklyExploration) ||
-        !identical(albums, _weeklyAlbums) ||
-        !identical(jam, _similarUsersJam) ||
-        !identical(tracks, _weeklyTracks) ||
-        !identical(artists, _weeklyArtists)) {
+    final previousByIdentity = {
+      for (final folder in previous) (folder.provider, folder.itemId): folder,
+    };
+    _folders = [
+      for (final folder in snapshot.folders)
+        _projectFolder(
+          folder,
+          previousByIdentity[(folder.provider, folder.itemId)],
+        ),
+      if (snapshot.isLoading || snapshot.hasLoadError)
+        for (final folder in previous)
+          if (!snapshot.folders.any(
+            (incoming) =>
+                incoming.provider == folder.provider &&
+                incoming.itemId == folder.itemId,
+          ))
+            folder,
+    ];
+    final hasChanges =
+        previous.length != _folders.length ||
+        _folders.indexed.any(
+          (entry) => !identical(entry.$2, previous[entry.$1]),
+        );
+    if (hasChanges || hadLoading != _isLoading || hadLoadError != _hasLoadError) {
       notifyListeners();
     }
-  }
-
-  // Preserve unchanged sections and the existing one-time shuffle selection.
-  bool _canApplyFolder(RecommendationSnapshot snapshot, String itemId) =>
-      !snapshot.isFolderLoading(itemId) && !snapshot.hasFolderLoadError(itemId);
-
-  List<T> _retainMediaList<T extends MediaItem>(
-    List<T> previous,
-    List<T> incoming,
-  ) => hasSameMediaListContent(previous, incoming) ? previous : incoming;
-
-  void _preserveSelectedOrder(List<Track> previous, List<Track> incoming) {
-    final order = {
-      for (var index = 0; index < previous.length; index++)
-        (previous[index].provider, previous[index].itemId): index,
-    };
-    incoming.sort(
-      (first, second) =>
-          (order[(first.provider, first.itemId)] ?? previous.length).compareTo(
-            order[(second.provider, second.itemId)] ?? previous.length,
-          ),
-    );
   }
 
   // Favorite commands and updates.
@@ -281,46 +187,44 @@ class ExploreController extends ChangeNotifier {
 
   void refreshFavoriteStatuses() {
     if (_isDisposed) return;
-    _weeklyExploration = _withFavoriteStatuses(_weeklyExploration);
-    _weeklyAlbums = _withFavoriteStatuses(_weeklyAlbums);
-    _similarUsersJam = _withFavoriteStatuses(_similarUsersJam);
-    _weeklyTracks = _withFavoriteStatuses(_weeklyTracks);
-    _weeklyArtists = _withFavoriteStatuses(_weeklyArtists);
+    _folders = [for (final folder in _folders) _projectFolder(folder, null)];
     notifyListeners();
   }
 
   // Folder mapping.
-  List<Track> _tracksFromPlaylistFolders(
-    List<RecommendationFolder> folders,
-    String itemId,
+  RecommendationFolder _projectFolder(
+    RecommendationFolder folder,
+    RecommendationFolder? previous,
   ) {
-    return _withFavoriteStatuses(
-      folders
-          .where((folder) => folder.itemId == itemId)
-          .expand(
-            (folder) => <Track>[
-              ...folder.items.whereType<Track>(),
-              ...folder.playlistTracks,
-            ],
-          )
-          .toList(growable: false),
+    final items = (folder.isLoading || folder.hasLoadError) && previous != null
+        ? previous.items
+        : _withFavoriteStatuses(
+            folder.items
+                .where(
+                  (item) =>
+                      item.itemId.trim().isNotEmpty &&
+                      item.provider.trim().isNotEmpty,
+                )
+                .toList(growable: false),
+          );
+    if (previous != null &&
+        previous.title == folder.title &&
+        previous.subtitle == folder.subtitle &&
+        previous.isLoading == folder.isLoading &&
+        previous.hasLoadError == folder.hasLoadError &&
+        hasSameMediaListContent(previous.items, items)) {
+      return previous;
+    }
+    return RecommendationFolder(
+      itemId: folder.itemId,
+      provider: folder.provider,
+      title: folder.title,
+      subtitle: folder.subtitle,
+      items: items,
+      isLoading: folder.isLoading,
+      hasLoadError: folder.hasLoadError,
     );
   }
-
-  List<T> _itemsFromFolders<T extends MediaItem>(
-    List<RecommendationFolder> folders,
-    String itemId,
-  ) => _withFavoriteStatuses(
-    folders
-        .where((RecommendationFolder folder) => folder.itemId == itemId)
-        .expand((RecommendationFolder folder) => folder.items)
-        .whereType<T>()
-        .where(
-          (T item) =>
-              item.itemId.trim().isNotEmpty && item.provider.trim().isNotEmpty,
-        )
-        .toList(growable: false),
-  );
 
   List<T> _withFavoriteStatuses<T extends MediaItem>(List<T> items) {
     final UserData? controller = userDataController;

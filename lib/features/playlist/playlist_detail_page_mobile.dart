@@ -270,7 +270,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile>
           playlist,
         ], option: QueueOption.add),
       ),
-      if (!_controller.isPrivatePlaylist) ...<ContextMenuAction>[
+      if (_controller.canTogglePlaylistFavorite) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction(
           label: _controller.isPlaylistFavorite
@@ -457,7 +457,7 @@ class _PlaylistDetailPageMobileState extends State<PlaylistDetailPageMobile>
                             ? null
                             : _controller.shufflePlaylist,
                       ),
-                      if (!_controller.isPrivatePlaylist) ...<Widget>[
+                      if (_controller.canTogglePlaylistFavorite) ...<Widget>[
                         const SizedBox(width: 14),
                         _MobileActionButton(
                           icon: _controller.isPlaylistFavorite

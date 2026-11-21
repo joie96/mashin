@@ -561,7 +561,7 @@ class _AlbumDetailPageDesktopState extends State<AlbumDetailPageDesktop>
                             _HeaderIconButton(
                               key: _headerMenuAnchorKey,
                               tooltip: 'Weitere Optionen',
-                              icon: Icons.more_horiz_outlined,
+                              icon: Icons.more_vert_outlined,
                               onTap: album == null
                                   ? null
                                   : () => unawaited(
@@ -710,25 +710,6 @@ class _HeaderIconButton extends StatelessWidget {
   final VoidCallback? onTap;
   @override
   Widget build(BuildContext context) {
-    final colors = context.mashinColors;
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          hoverColor: colors.hover,
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: Icon(icon, size: 18, color: colors.textSecondary),
-          ),
-        ),
-      ),
-    );
+    return SectionHeaderIconButton(icon: icon, onTap: onTap, tooltip: tooltip);
   }
 }

@@ -280,7 +280,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
           playlist,
         ], option: QueueOption.add),
       ),
-      if (!_controller.isPrivatePlaylist) ...<ContextMenuAction>[
+      if (_controller.canTogglePlaylistFavorite) ...<ContextMenuAction>[
         const ContextMenuAction.separator(),
         ContextMenuAction(
           label: _controller.isPlaylistFavorite
@@ -533,7 +533,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
           onTap: _controller.shufflePlaylist,
         ),
         const SizedBox(width: 24),
-        if (!_controller.isPrivatePlaylist) ...<Widget>[
+        if (_controller.canTogglePlaylistFavorite) ...<Widget>[
           _HeaderIconButton(
             tooltip: _controller.isPlaylistFavorite
                 ? 'Favorit entfernen'
@@ -548,7 +548,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
         _HeaderIconButton(
           key: anchorKey,
           tooltip: 'Weitere Optionen',
-          icon: Icons.more_horiz_outlined,
+          icon: Icons.more_vert_outlined,
           onTap: _controller.playlist == null
               ? null
               : () => unawaited(_showHeaderMenu(anchorKey)),
@@ -703,25 +703,6 @@ class _HeaderIconButton extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final MashinColors colors = context.mashinColors;
-    return Tooltip(
-      message: tooltip,
-      child: Material(
-        color: Colors.transparent,
-        borderRadius: BorderRadius.circular(14),
-        child: InkWell(
-          onTap: onTap,
-          borderRadius: BorderRadius.circular(14),
-          hoverColor: colors.hover,
-          splashColor: Colors.transparent,
-          highlightColor: Colors.transparent,
-          child: SizedBox(
-            width: 28,
-            height: 28,
-            child: Icon(icon, size: 18, color: colors.textSecondary),
-          ),
-        ),
-      ),
-    );
+    return SectionHeaderIconButton(icon: icon, onTap: onTap, tooltip: tooltip);
   }
 }
