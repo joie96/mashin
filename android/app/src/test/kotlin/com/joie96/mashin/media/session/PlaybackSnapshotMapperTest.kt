@@ -14,6 +14,50 @@ import org.robolectric.annotation.Config
 class PlaybackSnapshotMapperTest {
     // Canonical state and metadata projection.
     @Test
+    fun playerStateUpdatesRetainQueueMetadataAndFavorites() {
+        val state = JSONObject("""{"activeMode":"local","playbackState":"playing","currentQueueItemId":"queue:1","durationMillis":60000,"positionMillis":1000}""")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","name":"Track","media_item":{"media_type":"track","item_id":"1","uri":"library://track/1"}}],"shuffleEnabled":true,"repeatMode":"one"}""")
+        val userData = JSONObject("""{"favorites":{"tracks":[{"uri":"library://track/1"}]}}""")
+        val previous = PlaybackSnapshotMapper.fromPlayerState(state, queue, userData)
+        for (status in listOf("playing", "paused", "seeking", "buffering")) {
+            state.put("playbackState", status).put("positionMillis", 2500).put("bufferedPositionMillis", 3000)
+                .put("volume", 75).put("muted", true)
+            val updated = requireNotNull(PlaybackSnapshotMapper.updatePlayerState(previous, state))
+            assertSame(previous.mediaItems, updated.mediaItems)
+            assertEquals(2500L, updated.positionMillis)
+            assertEquals(3000L, updated.bufferedPositionMillis)
+            assertEquals(PlaybackSnapshotMapper.fromPlayerState(state, queue, userData), updated)
+        }
+    }
+
+    @Test
+    fun presentationChangesRequireFullSnapshotMapping() {
+        val state = JSONObject("""{"currentQueueItemId":"queue:1","durationMillis":60000,"requestedMedia":{"name":"Chosen"}}""")
+        val previous = PlaybackSnapshotMapper.fromPlayerState(state, JSONObject("{}"))
+        assertNotNull(PlaybackSnapshotMapper.updatePlayerState(previous, state))
+        for (change in listOf(
+            JSONObject(state.toString()).put("currentQueueItemId", "queue:2"),
+            JSONObject(state.toString()).put("durationMillis", 90000),
+            JSONObject(state.toString()).apply { remove("durationMillis") },
+            JSONObject(state.toString()).put("requestedMedia", JSONObject("""{"name":"Other"}""")),
+            JSONObject(state.toString()).apply { remove("requestedMedia") },
+        )) assertNull(PlaybackSnapshotMapper.updatePlayerState(previous, change))
+    }
+
+    @Test
+    fun absentBufferValuesUseQueueCacheOrCurrentPositionInsteadOfPreviousReports() {
+        for (cache in listOf("", """, "cache":{"cached_duration_millis":4000}""")) {
+            val state = JSONObject("""{"currentQueueItemId":"queue:1","bufferedPositionMillis":10000}""")
+            val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1"$cache}]}""")
+            val previous = PlaybackSnapshotMapper.fromPlayerState(state, queue)
+            state.remove("bufferedPositionMillis")
+            state.put("positionMillis", 2500)
+            assertEquals(PlaybackSnapshotMapper.fromPlayerState(state, queue),
+                PlaybackSnapshotMapper.updatePlayerState(previous, state))
+        }
+    }
+
+    @Test
     fun requestedTrackReplacesOnlyPresentationMetadataWhileBuffering() {
         val queue = JSONObject("""{"items":[{"queue_item_id":"old","name":"Old","media_item":{"media_type":"track","item_id":"old","provider":"source","uri":"source://track/old","duration":60}}]}""")
         val before = queue.toString()
@@ -183,4 +227,5 @@ class PlaybackSnapshotMapperTest {
             assertFalse(snapshot.isLocalPlayback)
         }
     }
+
 }

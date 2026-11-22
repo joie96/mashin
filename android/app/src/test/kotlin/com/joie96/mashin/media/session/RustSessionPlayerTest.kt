@@ -11,6 +11,8 @@ import org.json.JSONObject
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotSame
+import org.junit.Assert.assertSame
 import org.junit.Assert.assertTrue
 import org.junit.Assert.assertThrows
 import org.junit.Before
@@ -164,6 +166,44 @@ class RustSessionPlayerTest {
         assertEquals(listOf("queue-2"), requestedIds())
     }
 
+    // Transport-only updates retain Media3 period data; presentation changes rebuild it.
+    @Test
+    fun positionAndTransportUpdatesReuseProjectedPlaylist() {
+        val snapshot = PlaybackSnapshot.empty().copy(
+            status = PlaybackStatus.Paused, mediaItems = listOf(media("queue-1")), durationMillis = 60000,
+        )
+        player.updateState(snapshot)
+        val playlist = projectedPlaylist()
+        player.updateState(snapshot.copy(positionMillis = 2500, bufferedPositionMillis = 3000, volume = 75))
+        assertSame(playlist, projectedPlaylist())
+        assertEquals(2500L, player.currentPosition)
+        assertEquals(3000L, player.bufferedPosition)
+        assertEquals(0.75f, player.volume)
+        player.updateState(snapshot.copy(status = PlaybackStatus.Playing))
+        assertSame(playlist, projectedPlaylist())
+        assertTrue(player.playWhenReady)
+    }
+
+    @Test
+    fun changedMetadataDurationAndSelectionRebuildProjectedPlaylist() {
+        val snapshot = PlaybackSnapshot.empty().copy(
+            mediaItems = listOf(media("queue-1"), media("queue-2")), durationMillis = 60000,
+        )
+        player.updateState(snapshot)
+        var previousPlaylist = projectedPlaylist()
+        for (updated in listOf(
+            snapshot.copy(durationMillis = 90000),
+            snapshot.copy(currentIndex = 1),
+            snapshot.copy(mediaItems = listOf(media("replacement"))),
+            PlaybackSnapshot.empty(),
+        )) {
+            player.updateState(updated)
+            assertNotSame(previousPlaylist, projectedPlaylist())
+            assertEquals(updated.mediaItems.size, player.mediaItemCount)
+            previousPlaylist = projectedPlaylist()
+        }
+    }
+
     // Invoke the protected Media3 boundary without its optimistic local timeline.
     private fun invokeCommand(name: String, vararg arguments: Any): ListenableFuture<*> {
         val method = RustSessionPlayer::class.java.declaredMethods.single { it.name == name }
@@ -175,4 +215,7 @@ class RustSessionPlayerTest {
         .setMediaId(mediaId).setUri("mashin://queue/$mediaId").build()
 
     private fun requestedIds(): List<String> = requests.map { JSONObject(it.arguments).getString("itemId") }
+
+    private fun projectedPlaylist(): Any = requireNotNull(RustSessionPlayer::class.java.getDeclaredField("playlist")
+        .apply { isAccessible = true }.get(player))
 }

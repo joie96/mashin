@@ -20,9 +20,14 @@ internal class RustSessionPlayer(
     private val resolveLibraryMediaItem: (String) -> JSONObject?,
 ) : SimpleBasePlayer(Looper.getMainLooper()) {
     private var snapshot = PlaybackSnapshot.empty()
+    private var playlist = emptyList<MediaItemData>()
 
     // Snapshot projection is confined to the Media3 player looper.
     fun updateState(nextSnapshot: PlaybackSnapshot) {
+        if (snapshot.mediaItems !== nextSnapshot.mediaItems || snapshot.currentIndex != nextSnapshot.currentIndex ||
+            snapshot.durationMillis != nextSnapshot.durationMillis) {
+            playlist = projectPlaylist(nextSnapshot)
+        }
         snapshot = nextSnapshot
         invalidateState()
     }
@@ -225,23 +230,26 @@ internal class RustSessionPlayer(
             .setUnmuteVolume((snapshot.volume.takeIf { it > 0 } ?: 100) / 100f)
 
         if (snapshot.mediaItems.isNotEmpty()) {
-            builder.setPlaylist(snapshot.mediaItems.mapIndexed { index, item ->
-                val durationUs = if (index == snapshot.currentIndex) {
-                    snapshot.durationMillis?.times(1_000L) ?: C.TIME_UNSET
-                } else {
-                    item.mediaMetadata.durationMs?.times(1_000L) ?: C.TIME_UNSET
-                }
-                MediaItemData.Builder(item.mediaId)
-                    .setMediaItem(item)
-                    .setMediaMetadata(item.mediaMetadata)
-                    .setIsSeekable(durationUs != C.TIME_UNSET)
-                    .setDurationUs(durationUs)
-                    .setPeriods(listOf(PeriodData.Builder(item.mediaId).setDurationUs(durationUs).build()))
-                    .build()
-            })
+            builder.setPlaylist(playlist)
             builder.setCurrentMediaItemIndex(snapshot.currentIndex)
         }
         return builder.build()
+    }
+
+    // Position and transport updates reuse the immutable Media3 timeline.
+    private fun projectPlaylist(snapshot: PlaybackSnapshot): List<MediaItemData> = snapshot.mediaItems.mapIndexed { index, item ->
+        val durationUs = if (index == snapshot.currentIndex) {
+            snapshot.durationMillis?.times(1_000L) ?: C.TIME_UNSET
+        } else {
+            item.mediaMetadata.durationMs?.times(1_000L) ?: C.TIME_UNSET
+        }
+        MediaItemData.Builder(item.mediaId)
+            .setMediaItem(item)
+            .setMediaMetadata(item.mediaMetadata)
+            .setIsSeekable(durationUs != C.TIME_UNSET)
+            .setDurationUs(durationUs)
+            .setPeriods(listOf(PeriodData.Builder(item.mediaId).setDurationUs(durationUs).build()))
+            .build()
     }
 
     // Resolve existing queue identities from the canonical playback snapshot.

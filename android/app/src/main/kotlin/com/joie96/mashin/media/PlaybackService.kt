@@ -295,18 +295,29 @@ class PlaybackService : MediaLibraryService() {
     }
 
     private fun applySnapshot(nextSnapshot: PlaybackSnapshot) {
+        val previousSnapshot = snapshot
+        val previousCoreItems = coreSnapshot.mediaItems
         coreSnapshot = nextSnapshot
-        val pendingSnapshot = PlaybackSessionActions.projectFavoriteRequests(nextSnapshot,
-            listOfNotNull(executingRequest) + pendingCommands.map { it.request })
-        val previousItems = snapshot.mediaItems.associateBy { it.mediaId }
-        val projected = pendingSnapshot.copy(mediaItems = pendingSnapshot.mediaItems.map { item ->
-            val previousUri = previousItems[item.mediaId]?.mediaMetadata?.artworkUri
-            val artwork = MediaArtworkContentProvider.retainRevision(previousUri, item.mediaMetadata.artworkUri)
-            item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build()
-        })
+        val requests = listOfNotNull(executingRequest) + pendingCommands.map { it.request }
+        val pendingSnapshot = if (requests.isEmpty()) nextSnapshot else PlaybackSessionActions.projectFavoriteRequests(nextSnapshot, requests)
+        val projected = if (nextSnapshot.mediaItems === previousCoreItems) {
+            pendingSnapshot.copy(mediaItems = previousSnapshot.mediaItems)
+        } else {
+            val previousItems = previousSnapshot.mediaItems.associateBy { it.mediaId }
+            pendingSnapshot.copy(mediaItems = pendingSnapshot.mediaItems.map { item ->
+                val previousUri = previousItems[item.mediaId]?.mediaMetadata?.artworkUri
+                val artwork = MediaArtworkContentProvider.retainRevision(previousUri, item.mediaMetadata.artworkUri)
+                item.buildUpon().setMediaMetadata(item.mediaMetadata.buildUpon().setArtworkUri(artwork).build()).build()
+            })
+        }
         snapshot = projected
         sessionPlayer?.updateState(projected)
-        mediaLibrarySession?.setMediaButtonPreferences(PlaybackSessionActions.buttons(projected))
+        if (previousSnapshot.isCurrentItemFavorite != projected.isCurrentItemFavorite ||
+            previousSnapshot.isShuffleEnabled != projected.isShuffleEnabled ||
+            previousSnapshot.repeatMode != projected.repeatMode ||
+            (previousSnapshot.serializedCurrentMediaItem == null) != (projected.serializedCurrentMediaItem == null)) {
+            mediaLibrarySession?.setMediaButtonPreferences(PlaybackSessionActions.buttons(projected))
+        }
         if (projected.hasPlaybackIntent && projected.isLocalPlayback) {
             if (!wakeLock.isHeld) wakeLock.acquire()
         } else if (pendingPlaybackStarts == 0) {
@@ -343,6 +354,14 @@ class PlaybackService : MediaLibraryService() {
             return
         }
         browser?.onCoreEvent(eventType, catalogEvent = event)
+        if (eventType == "player_state_changed" && !isSnapshotRefreshQueued) {
+            val state = event.optJSONObject("player_state") ?: return
+            val updated = PlaybackSnapshotMapper.updatePlayerState(coreSnapshot, state)
+            if (updated != null) {
+                applySnapshot(updated)
+                return
+            }
+        }
         if (isSnapshotRefreshQueued || eventType !in listOf("player_state_changed", "queue_changed", "user_data_changed", "user_data_favorites_changed", "user_data_metadata_changed")) return
         isSnapshotRefreshQueued = true
         coreExecutor.execute {

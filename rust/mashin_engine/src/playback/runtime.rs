@@ -5,6 +5,8 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::Duration;
 
+const PRESENTATION_INTERVAL: Duration = Duration::from_millis(250);
+
 pub(crate) struct PeriodicWorker {
     should_keep_running: Arc<AtomicBool>,
     task: Option<JoinHandle<()>>,
@@ -34,7 +36,7 @@ impl PeriodicWorker {
         let task = std::thread::spawn(move || {
             while should_keep_running_for_thread.load(Ordering::Relaxed) {
                 run_periodic_work(&should_keep_running_for_thread);
-                std::thread::park_timeout(Duration::from_millis(25));
+                std::thread::park_timeout(PRESENTATION_INTERVAL);
             }
         });
         Self {
@@ -75,5 +77,44 @@ impl PeriodicWorker {
 impl Drop for PeriodicWorker {
     fn drop(&mut self) {
         self.stop();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PeriodicWorker, PRESENTATION_INTERVAL};
+    use std::sync::mpsc;
+    use std::time::{Duration, Instant};
+
+    // Presentation cadence is independent of audio callbacks and remains interruptible on shutdown.
+    #[test]
+    fn presentation_ticks_are_spaced_by_250_milliseconds() {
+        let (sender, receiver) = mpsc::channel();
+        let mut worker = PeriodicWorker::start(move |_| {
+            sender.send(Instant::now()).expect("tick receiver is alive");
+        });
+        let first = receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        let second = receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        worker.stop();
+        assert!(second.duration_since(first) >= PRESENTATION_INTERVAL);
+        assert_eq!(PRESENTATION_INTERVAL, Duration::from_millis(250));
+    }
+
+    #[test]
+    fn shutdown_wakes_the_parked_presentation_worker() {
+        let (sender, receiver) = mpsc::channel();
+        let worker = PeriodicWorker::start(move |_| {
+            sender.send(()).expect("tick receiver is alive");
+        });
+        receiver.recv_timeout(Duration::from_secs(2)).unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let completion = worker.shutdown(runtime.handle());
+        runtime.block_on(async {
+            tokio::time::timeout(Duration::from_secs(2), completion)
+                .await
+                .unwrap()
+                .unwrap();
+        });
+        assert!(receiver.try_recv().is_err());
     }
 }

@@ -37,9 +37,10 @@ internal object PlaybackSnapshotMapper {
         val durationMillis = values.optLong("durationMillis", -1L).takeIf { it > 0 }
             ?: (requestedMedia ?: currentQueueItem)?.optLong("duration")?.takeIf { it > 0 }?.times(1_000L)
         val positionMillis = values.optLong("positionMillis", 0L)
+        val queueBufferedPositionMillis = currentQueueItem?.takeIf { requestedMedia == null }
+            ?.optJSONObject("cache")?.optLong("cached_duration_millis", -1L)?.takeIf { it >= 0 }
         val bufferedPositionMillis = values.optLong("bufferedPositionMillis", -1L).takeIf { it >= 0 }
-            ?: currentQueueItem?.takeIf { requestedMedia == null }?.optJSONObject("cache")?.optLong("cached_duration_millis", -1L)?.takeIf { it >= 0 }
-            ?: positionMillis
+            ?: queueBufferedPositionMillis ?: positionMillis
         val presentationItems = if (queueItems.isEmpty() && requestedMedia != null) {
             listOf(JSONObject().put("queue_item_id", queueItemId))
         } else queueItems
@@ -65,15 +66,7 @@ internal object PlaybackSnapshotMapper {
                 .build()
         }
         return PlaybackSnapshot(
-            status = when (values.optString("playbackState", "idle")) {
-                "playing" -> PlaybackStatus.Playing
-                "paused" -> PlaybackStatus.Paused
-                "buffering" -> PlaybackStatus.Buffering
-                "seeking" -> PlaybackStatus.Seeking
-                "uninitialized" -> PlaybackStatus.Uninitialized
-                "error" -> PlaybackStatus.Error
-                else -> PlaybackStatus.Idle
-            },
+            status = playbackStatus(values),
             positionMillis = positionMillis,
             durationMillis = durationMillis,
             bufferedPositionMillis = bufferedPositionMillis.coerceAtLeast(positionMillis),
@@ -90,6 +83,29 @@ internal object PlaybackSnapshotMapper {
             isLocalPlayback = values.optString("activeMode") == "local",
             serializedCurrentMediaItem = currentMediaItem?.takeIf { userData != null && currentUri != null && favoriteCategory != null }?.toString(),
             isCurrentItemFavorite = isCurrentItemFavorite,
+            currentQueueItemId = queueItemId,
+            serializedRequestedMedia = requestedMedia?.toString(),
+            reportedDurationMillis = values.optLong("durationMillis", -1L).takeIf { it > 0 },
+            queueBufferedPositionMillis = queueBufferedPositionMillis,
+        )
+    }
+
+    // Transport updates retain the timeline; changed presentation metadata requires a full snapshot.
+    fun updatePlayerState(previous: PlaybackSnapshot, values: JSONObject): PlaybackSnapshot? {
+        val reportedDurationMillis = values.optLong("durationMillis", -1L).takeIf { it > 0 }
+        if (values.optString("currentQueueItemId") != previous.currentQueueItemId ||
+            values.optJSONObject("requestedMedia")?.toString() != previous.serializedRequestedMedia ||
+            reportedDurationMillis != previous.reportedDurationMillis) return null
+        val positionMillis = values.optLong("positionMillis", 0L)
+        val bufferedPositionMillis = values.optLong("bufferedPositionMillis", -1L).takeIf { it >= 0 }
+            ?: previous.queueBufferedPositionMillis ?: positionMillis
+        return previous.copy(
+            status = playbackStatus(values),
+            positionMillis = positionMillis,
+            bufferedPositionMillis = bufferedPositionMillis.coerceAtLeast(positionMillis),
+            volume = values.optInt("volume", 50).coerceIn(0, 100),
+            isMuted = values.optBoolean("muted", false),
+            isLocalPlayback = values.optString("activeMode") == "local",
         )
     }
 
@@ -122,6 +138,16 @@ internal object PlaybackSnapshotMapper {
     }
 
     // Boundary metadata mapping.
+    private fun playbackStatus(values: JSONObject): PlaybackStatus = when (values.optString("playbackState", "idle")) {
+        "playing" -> PlaybackStatus.Playing
+        "paused" -> PlaybackStatus.Paused
+        "buffering" -> PlaybackStatus.Buffering
+        "seeking" -> PlaybackStatus.Seeking
+        "uninitialized" -> PlaybackStatus.Uninitialized
+        "error" -> PlaybackStatus.Error
+        else -> PlaybackStatus.Idle
+    }
+
     private fun JSONObject.providerMappings(): List<JSONObject> = optJSONArray("provider_mappings")
         ?.let { mappings -> (0 until mappings.length()).mapNotNull(mappings::optJSONObject) }
         ?: emptyList()
