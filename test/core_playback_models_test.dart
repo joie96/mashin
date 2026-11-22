@@ -6,9 +6,366 @@ import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/features/core/core_bridge.dart';
 import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
+import 'package:mashin/features/playerbar/playback_seek_slider.dart';
+import 'package:mashin/features/playerbar/playerbar_overlay_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_image.dart';
+import 'package:mashin/features/shared/widgets/overlay_lifecycle.dart';
 import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
 
 void main() {
+  test(
+    'position updates notify progress without rebuilding presentation or identity',
+    () async {
+      final bridge = _PlaybackIndicatorBridge();
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      addTearDown(() async {
+        events.dispose();
+        await bridge.queues.close();
+        await bridge.players.close();
+      });
+      await events.start();
+      var presentationChanges = 0;
+      var progressChanges = 0;
+      var queueChanges = 0;
+      var mediaChanges = 0;
+      events.addListener(() => presentationChanges++);
+      events.playbackProgressChanges.addListener(() => progressChanges++);
+      events.queueChanges.addListener(() => queueChanges++);
+      events.currentMediaChanges.addListener(() => mediaChanges++);
+      for (final position in [250, 500, 750]) {
+        bridge.players.add(
+          PlayerState(
+            playbackState: PlayState.playing,
+            positionMillis: position,
+            bufferedPositionMillis: position + 1000,
+          ),
+        );
+      }
+      expect(
+        [presentationChanges, progressChanges, queueChanges, mediaChanges],
+        [0, 3, 0, 0],
+      );
+      expect(events.mediaSessionState.playerState.positionMillis, 750);
+      bridge.players.add(
+        const PlayerState(
+          playbackState: PlayState.paused,
+          positionMillis: 750,
+          bufferedPositionMillis: 1750,
+        ),
+      );
+      expect(
+        [presentationChanges, progressChanges, queueChanges, mediaChanges],
+        [1, 3, 0, 0],
+      );
+      await events.reset();
+      expect(
+        [presentationChanges, progressChanges, queueChanges, mediaChanges],
+        [2, 4, 1, 1],
+      );
+      expect(events.mediaSessionState.displayedMedia, isNull);
+    },
+  );
+
+  test(
+    'redecoded requested media separates metadata, identity, queue and progress',
+    () async {
+      final bridge = _PlaybackIndicatorBridge();
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      addTearDown(() async {
+        events.dispose();
+        await bridge.queues.close();
+        await bridge.players.close();
+      });
+      await events.start();
+      var presentationChanges = 0;
+      var mediaChanges = 0;
+      var progressChanges = 0;
+      var queueChanges = 0;
+      events.addListener(() => presentationChanges++);
+      events.currentMediaChanges.addListener(() => mediaChanges++);
+      events.playbackProgressChanges.addListener(() => progressChanges++);
+      events.queueChanges.addListener(() => queueChanges++);
+      void publish({int? position, String name = 'Requested'}) =>
+          bridge.players.add(
+            PlayerState(
+              playbackState: PlayState.playing,
+              positionMillis: position,
+              requestedMedia: Track.fromJson({
+                'item_id': 'requested',
+                'provider': 'library',
+                'name': name,
+              }),
+            ),
+          );
+      publish();
+      publish(position: 250);
+      expect(
+        [presentationChanges, mediaChanges, progressChanges, queueChanges],
+        [1, 1, 1, 0],
+      );
+      publish(position: 250, name: 'Updated title');
+      expect(
+        [presentationChanges, mediaChanges, progressChanges, queueChanges],
+        [2, 1, 1, 0],
+      );
+      await bridge.refreshQueue();
+      expect(
+        [presentationChanges, mediaChanges, progressChanges, queueChanges],
+        [3, 1, 1, 1],
+      );
+      bridge.players.add(
+        const PlayerState(
+          playbackState: PlayState.playing,
+          positionMillis: 250,
+        ),
+      );
+      expect(
+        [presentationChanges, mediaChanges, progressChanges, queueChanges],
+        [4, 2, 1, 1],
+      );
+    },
+  );
+
+  testWidgets(
+    'progress controls rebuild without rebuilding their presentation sibling',
+    (tester) async {
+      final bridge = _PlaybackIndicatorBridge();
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      addTearDown(() async {
+        events.dispose();
+        await bridge.queues.close();
+        await bridge.players.close();
+      });
+      await events.start();
+      var presentationBuilds = 0;
+      var progressBuilds = 0;
+      var rowBuilds = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Column(
+            children: [
+              ListenableBuilder(
+                listenable: events,
+                builder: (context, child) {
+                  presentationBuilds++;
+                  return const Text('Track');
+                },
+              ),
+              PlaybackProgressBuilder(
+                coreEvents: events,
+                builder: (context, state) {
+                  progressBuilds++;
+                  return Text('position:${state.positionMillis ?? 0}');
+                },
+              ),
+              PlaybackAwareBuilder(
+                coreEvents: events,
+                item: bridge.oldTrack,
+                builder: (context, isCurrent) {
+                  rowBuilds++;
+                  return Text(isCurrent ? 'Current row' : 'Other row');
+                },
+              ),
+            ],
+          ),
+        ),
+      );
+      for (final position in [250, 500, 750]) {
+        bridge.players.add(
+          PlayerState(
+            playbackState: PlayState.playing,
+            positionMillis: position,
+          ),
+        );
+      }
+      await tester.pump();
+      expect(presentationBuilds, 1);
+      expect(progressBuilds, 2);
+      expect(rowBuilds, 1);
+      expect(find.text('position:750'), findsOneWidget);
+    },
+  );
+
+  testWidgets(
+    'closed overlays release listeners after animation and survive reopening',
+    (tester) async {
+      final changes = _OverlayChanges();
+      addTearDown(changes.dispose);
+      var isActive = false;
+      var contentBuilds = 0;
+      Widget host() => MaterialApp(
+        home: OverlayLifecycle(
+          isActive: isActive,
+          builder: (context, hasEntered, onEnd) => AnimatedSlide(
+            duration: const Duration(milliseconds: 260),
+            offset: Offset(0, isActive && hasEntered ? 0 : 1),
+            onEnd: onEnd,
+            child: ListenableBuilder(
+              listenable: changes,
+              builder: (context, child) {
+                contentBuilds++;
+                return const Text('Overlay content');
+              },
+            ),
+          ),
+        ),
+      );
+      await tester.pumpWidget(host());
+      expect(contentBuilds, 0);
+      expect(changes.hasActiveListeners, isFalse);
+      isActive = true;
+      await tester.pumpWidget(host());
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(changes.hasActiveListeners, isTrue);
+      isActive = false;
+      await tester.pumpWidget(host());
+      await tester.pump(const Duration(milliseconds: 100));
+      expect(find.text('Overlay content'), findsOneWidget);
+      expect(changes.hasActiveListeners, isTrue);
+      isActive = true;
+      await tester.pumpWidget(host());
+      await tester.pump(const Duration(milliseconds: 300));
+      expect(changes.hasActiveListeners, isTrue);
+      isActive = false;
+      await tester.pumpWidget(host());
+      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
+      expect(find.text('Overlay content'), findsNothing);
+      expect(changes.hasActiveListeners, isFalse);
+      final closedBuilds = contentBuilds;
+      changes.notifyListeners();
+      await tester.pump();
+      expect(contentBuilds, closedBuilds);
+      isActive = true;
+      await tester.pumpWidget(host());
+      isActive = false;
+      await tester.pumpWidget(host());
+      await tester.pump();
+      expect(changes.hasActiveListeners, isFalse);
+      expect(find.text('Overlay content'), findsNothing);
+    },
+  );
+
+  testWidgets(
+    'player cover sources are lazy and survive transport-only rebuilds',
+    (tester) async {
+      tester.view.physicalSize = const Size(800, 1200);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final bridge = _PlaybackIndicatorBridge();
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      final sourceRequests = <String>[];
+      void configureLoader() {
+        MediaImage.configureImageLoader(
+          (request, refresh) async => ImageReadSnapshot(bytes: null),
+        );
+        final createSource = MediaItemImage.cachedImageSource!;
+        MediaItemImage.cachedImageSource = (request) {
+          sourceRequests.add(request.image.path);
+          return createSource(request);
+        };
+      }
+
+      configureLoader();
+      addTearDown(() async {
+        events.dispose();
+        MediaImage.configureImageLoader(null);
+        await bridge.queues.close();
+        await bridge.players.close();
+      });
+      Track track(int index, {String? path}) => Track.fromJson({
+        'item_id': '$index',
+        'provider': 'library',
+        'name': 'Track $index',
+        'metadata': {
+          'images': [
+            {
+              'type': 'thumb',
+              'path': path ?? 'cover-$index',
+              'provider': 'builtin',
+              'remotely_accessible': false,
+            },
+          ],
+        },
+      });
+      var queue = Queue(
+        currentIndex: 0,
+        items: [
+          for (var index = 0; index < 45; index++)
+            QueueItem(queueItemId: '$index', mediaItem: track(index)),
+        ],
+      );
+      var state = PlayState.playing;
+      Future<void> command() async {}
+      Widget host() => MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: PlayerBarOverlayMobile(
+            coreEvents: events,
+            isOpen: true,
+            openProgress: 0,
+            trackTitle: 'Track',
+            trackSubtitle: 'Artist',
+            trackCoverUrl: null,
+            currentTrack: null,
+            playbackStateType: state,
+            playbackQueue: queue,
+            maxSeconds: 180,
+            dontStopTheMusicEnabled: false,
+            userDataController: null,
+            onClose: () {},
+            onAnimationEnd: () {},
+            onOpenQueue: () {},
+            onQueueDragUpdate: (delta, height) {},
+            onQueueDragEnd: (velocity) {},
+            onTogglePlayPause: command,
+            onPrevious: command,
+            onNext: command,
+            onToggleShuffle: command,
+            onToggleRepeatMode: command,
+            onToggleDontStopTheMusic: command,
+            onToggleMute: command,
+            onSeek: (seconds) async {},
+            onOpenAudioOptions: (context) {},
+          ),
+        ),
+      );
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+      expect(sourceRequests.length, lessThan(3));
+      await tester.drag(find.byType(PageView), const Offset(-700, 0));
+      await tester.pumpAndSettle();
+      expect(sourceRequests, contains('cover-1'));
+      expect(sourceRequests.length, lessThan(4));
+      final beforeTransport = sourceRequests.length;
+      state = PlayState.paused;
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+      expect(sourceRequests.length, beforeTransport);
+      queue = Queue(
+        currentIndex: 0,
+        items: [
+          queue.items.first,
+          QueueItem(
+            queueItemId: '1',
+            mediaItem: track(1, path: 'changed-cover'),
+          ),
+          ...queue.items.skip(2),
+        ],
+      );
+      await tester.pumpWidget(host());
+      await tester.pumpAndSettle();
+      expect(sourceRequests, contains('changed-cover'));
+      final beforeLoaderChange = sourceRequests.length;
+      configureLoader();
+      await tester.pumpAndSettle();
+      expect(sourceRequests.length, greaterThan(beforeLoaderChange));
+      await tester.pumpWidget(const SizedBox.shrink());
+    },
+  );
+
   Track mappedTrack(
     String provider,
     String itemId, {
@@ -471,4 +828,8 @@ class _PlaybackIndicatorBridge extends _PlaybackResolutionBridge {
   Future<void> refreshPlayerState() async {
     players.add(const PlayerState(playbackState: PlayState.playing));
   }
+}
+
+class _OverlayChanges extends ChangeNotifier {
+  bool get hasActiveListeners => hasListeners;
 }

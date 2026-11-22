@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart' hide RepeatMode;
 
 import '../../app/theme/app_theme.dart';
+import '../core/core_events.dart';
 import '../core/core_models.dart';
 import '../shared/context_menu/context_menu_controller.dart';
 import '../core/core_userdata.dart';
@@ -12,6 +13,7 @@ import 'playback_seek_slider.dart';
 class PlayerBarOverlayMobile extends StatefulWidget {
   const PlayerBarOverlayMobile({
     super.key,
+    required this.coreEvents,
     required this.isOpen,
     required this.openProgress,
     required this.trackTitle,
@@ -19,13 +21,12 @@ class PlayerBarOverlayMobile extends StatefulWidget {
     required this.trackCoverUrl,
     required this.currentTrack,
     required this.playbackStateType,
-    required this.playbackState,
     required this.playbackQueue,
     required this.maxSeconds,
-    required this.currentSeconds,
     required this.dontStopTheMusicEnabled,
     required this.userDataController,
     required this.onClose,
+    required this.onAnimationEnd,
     required this.onOpenQueue,
     required this.onQueueDragUpdate,
     required this.onQueueDragEnd,
@@ -43,6 +44,7 @@ class PlayerBarOverlayMobile extends StatefulWidget {
     this.shouldShowMultiDeviceButton = true,
   });
 
+  final MashinCoreBridgeEvents coreEvents;
   final bool isOpen;
   final double openProgress;
   final String trackTitle;
@@ -50,14 +52,13 @@ class PlayerBarOverlayMobile extends StatefulWidget {
   final String? trackCoverUrl;
   final Track? currentTrack;
   final PlayState playbackStateType;
-  final PlayerState playbackState;
   final Queue playbackQueue;
   final double maxSeconds;
-  final double currentSeconds;
   final bool dontStopTheMusicEnabled;
   final bool shouldShowMultiDeviceButton;
   final UserData? userDataController;
   final VoidCallback onClose;
+  final VoidCallback onAnimationEnd;
   final VoidCallback onOpenQueue;
   final void Function(double upwardDelta, double viewportHeight)
   onQueueDragUpdate;
@@ -251,9 +252,6 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
     final double clampedMaxSeconds = widget.maxSeconds
         .clamp(0, 36000)
         .toDouble();
-    final double clampedCurrentSeconds = widget.currentSeconds
-        .clamp(0, clampedMaxSeconds > 0 ? clampedMaxSeconds : 1)
-        .toDouble();
     final double effectiveOpenProgress = widget.isOpen
         ? 1
         : widget.openProgress.clamp(0, 1).toDouble();
@@ -292,6 +290,7 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                       _dragOffset = 0;
                     });
                   }
+                  widget.onAnimationEnd();
                 },
                 child: AnimatedSlide(
                   duration: _dragOffsetAnimationDuration,
@@ -378,68 +377,81 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                   constraints: const BoxConstraints(
                                     maxWidth: 400,
                                   ),
-                                  child: Row(
-                                    children: <Widget>[
-                                      Text(
-                                        _formatSeconds(clampedCurrentSeconds),
-                                        style: TextStyle(
-                                          color: colors.textTertiary,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Expanded(
-                                        child: SliderTheme(
-                                          data: SliderTheme.of(context).copyWith(
-                                            trackHeight: 3,
-                                            thumbShape:
-                                                const RoundSliderThumbShape(
-                                                  enabledThumbRadius: 7,
-                                                  disabledThumbRadius: 7,
-                                                ),
-                                            overlayShape:
-                                                const RoundSliderOverlayShape(
-                                                  overlayRadius: 10,
-                                                ),
-                                            thumbColor: colors.textSecondary,
-                                            activeTrackColor:
-                                                colors.textSecondary,
-                                            secondaryActiveTrackColor:
-                                                colors.textTertiary,
-                                            inactiveTrackColor:
-                                                colors.bgTertiary,
+                                  child: PlaybackProgressBuilder(
+                                    coreEvents: widget.coreEvents,
+                                    builder: (context, state) {
+                                      final clampedCurrentSeconds =
+                                          ((state.positionMillis ?? 0) / 1000)
+                                              .clamp(
+                                                0,
+                                                clampedMaxSeconds > 0
+                                                    ? clampedMaxSeconds
+                                                    : 1,
+                                              )
+                                              .toDouble();
+                                      return Row(
+                                        children: <Widget>[
+                                          Text(
+                                            _formatSeconds(
+                                              clampedCurrentSeconds,
+                                            ),
+                                            style: TextStyle(
+                                              color: colors.textTertiary,
+                                              fontSize: 12,
+                                            ),
                                           ),
-                                          child: PlaybackSeekSlider(
-                                            value: clampedCurrentSeconds,
-                                            bufferedValue:
-                                                clampedMaxSeconds > 0 &&
-                                                    widget
-                                                            .playbackState
-                                                            .bufferedPositionMillis !=
-                                                        null
-                                                ? widget
-                                                          .playbackState
-                                                          .bufferedPositionMillis! /
-                                                      1000
-                                                : null,
-                                            min: 0,
-                                            max: clampedMaxSeconds > 0
-                                                ? clampedMaxSeconds
-                                                : 1,
-                                            enabled: hasPlaybackSession,
-                                            onSeek: widget.onSeek,
+                                          const SizedBox(width: 10),
+                                          Expanded(
+                                            child: SliderTheme(
+                                              data: SliderTheme.of(context).copyWith(
+                                                trackHeight: 3,
+                                                thumbShape:
+                                                    const RoundSliderThumbShape(
+                                                      enabledThumbRadius: 7,
+                                                      disabledThumbRadius: 7,
+                                                    ),
+                                                overlayShape:
+                                                    const RoundSliderOverlayShape(
+                                                      overlayRadius: 10,
+                                                    ),
+                                                thumbColor:
+                                                    colors.textSecondary,
+                                                activeTrackColor:
+                                                    colors.textSecondary,
+                                                secondaryActiveTrackColor:
+                                                    colors.textTertiary,
+                                                inactiveTrackColor:
+                                                    colors.bgTertiary,
+                                              ),
+                                              child: PlaybackSeekSlider(
+                                                value: clampedCurrentSeconds,
+                                                bufferedValue:
+                                                    clampedMaxSeconds > 0 &&
+                                                        state.bufferedPositionMillis !=
+                                                            null
+                                                    ? state.bufferedPositionMillis! /
+                                                          1000
+                                                    : null,
+                                                min: 0,
+                                                max: clampedMaxSeconds > 0
+                                                    ? clampedMaxSeconds
+                                                    : 1,
+                                                enabled: hasPlaybackSession,
+                                                onSeek: widget.onSeek,
+                                              ),
+                                            ),
                                           ),
-                                        ),
-                                      ),
-                                      const SizedBox(width: 10),
-                                      Text(
-                                        _formatSeconds(clampedMaxSeconds),
-                                        style: TextStyle(
-                                          color: colors.textTertiary,
-                                          fontSize: 12,
-                                        ),
-                                      ),
-                                    ],
+                                          const SizedBox(width: 10),
+                                          Text(
+                                            _formatSeconds(clampedMaxSeconds),
+                                            style: TextStyle(
+                                              color: colors.textTertiary,
+                                              fontSize: 12,
+                                            ),
+                                          ),
+                                        ],
+                                      );
+                                    },
                                   ),
                                 ),
                               ),
@@ -665,6 +677,7 @@ class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
   Timer? _syncTimer;
   late int _requestedIndex;
   bool _isResetting = false;
+  final Map<int, String?> _coverSources = {};
 
   int get _currentIndex {
     final int? index = widget.queue.currentIndex;
@@ -678,11 +691,19 @@ class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
     super.initState();
     _requestedIndex = _currentIndex;
     _pageController = PageController(initialPage: _requestedIndex);
+    MediaImage.sourceConfigurationChanges.addListener(
+      _onSourceConfigurationChanged,
+    );
   }
 
   @override
   void didUpdateWidget(covariant _SwipeablePlayerArtwork oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (!identical(widget.queue.items, oldWidget.queue.items) ||
+        widget.queue.currentIndex != oldWidget.queue.currentIndex ||
+        widget.coverUrl != oldWidget.coverUrl) {
+      _coverSources.clear();
+    }
     if (widget.queue.currentIndex == _requestedIndex) {
       _syncTimer?.cancel();
       _syncTimer = null;
@@ -699,9 +720,24 @@ class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
   @override
   void dispose() {
     _syncTimer?.cancel();
+    MediaImage.sourceConfigurationChanges.removeListener(
+      _onSourceConfigurationChanged,
+    );
     _pageController.dispose();
     super.dispose();
   }
+
+  // Native source-change events update MediaImage bytes; loader changes replace URLs.
+  void _onSourceConfigurationChanged() {
+    setState(_coverSources.clear);
+  }
+
+  String? _coverSource(int index) => _coverSources.putIfAbsent(index, () {
+    if (widget.queue.items.isEmpty || index == widget.queue.currentIndex) {
+      return widget.coverUrl;
+    }
+    return widget.queue.items[index].imageUriForSize(512);
+  });
 
   void _resetToCurrentIndex() {
     _isResetting = true;
@@ -764,14 +800,9 @@ class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
 
   @override
   Widget build(BuildContext context) {
-    final List<String?> covers = widget.queue.items.isEmpty
-        ? <String?>[widget.coverUrl]
-        : <String?>[
-            for (int index = 0; index < widget.queue.items.length; index++)
-              index == widget.queue.currentIndex
-                  ? widget.coverUrl
-                  : widget.queue.items[index].imageUriForSize(512),
-          ];
+    final int coverCount = widget.queue.items.isEmpty
+        ? 1
+        : widget.queue.items.length;
 
     return ClipRect(
       child: NotificationListener<ScrollEndNotification>(
@@ -780,22 +811,25 @@ class _SwipeablePlayerArtworkState extends State<_SwipeablePlayerArtwork> {
           onPointerDown: _handlePointerDown,
           child: PageView.builder(
             controller: _pageController,
-            itemCount: covers.length,
-            physics: covers.length == 1
+            itemCount: coverCount,
+            physics: coverCount == 1
                 ? const NeverScrollableScrollPhysics()
                 : const PageScrollPhysics(),
-            itemBuilder: (BuildContext context, int index) => Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 8),
-              child: Center(
-                child: AspectRatio(
-                  aspectRatio: 1,
-                  child: _PlayerOverlayArtwork(
-                    key: ValueKey(covers[index]),
-                    coverUrl: covers[index],
+            itemBuilder: (BuildContext context, int index) {
+              final coverSource = _coverSource(index);
+              return Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8),
+                child: Center(
+                  child: AspectRatio(
+                    aspectRatio: 1,
+                    child: _PlayerOverlayArtwork(
+                      key: ValueKey(coverSource),
+                      coverUrl: coverSource,
+                    ),
                   ),
                 ),
-              ),
-            ),
+              );
+            },
           ),
         ),
       ),

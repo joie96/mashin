@@ -3068,7 +3068,7 @@ class PlaybackAwareBuilder extends StatelessWidget {
     }
 
     return ListenableBuilder(
-      listenable: controller,
+      listenable: controller.currentMediaChanges,
       builder: (BuildContext context, Widget? child) {
         final MediaItem? currentItem =
             controller.mediaSessionState.displayedMedia;

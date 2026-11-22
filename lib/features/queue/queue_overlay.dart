@@ -28,6 +28,7 @@ class QueueOverlay extends StatefulWidget {
     this.desktopBottomInset = 0,
     this.mobileOpenProgress = 0,
     required this.onClose,
+    required this.onAnimationEnd,
     required this.onToggleDontStopTheMusic,
     this.onOpenArtist,
     this.onOpenAlbum,
@@ -50,6 +51,7 @@ class QueueOverlay extends StatefulWidget {
   final double desktopBottomInset;
   final double mobileOpenProgress;
   final VoidCallback onClose;
+  final VoidCallback onAnimationEnd;
   final Future<void> Function() onToggleDontStopTheMusic;
   final ValueChanged<Artist>? onOpenArtist;
   final ValueChanged<Album>? onOpenAlbum;
@@ -168,6 +170,7 @@ class _QueueOverlayState extends State<QueueOverlay> {
                           _dragOffset = 0;
                         });
                       }
+                      widget.onAnimationEnd();
                     },
                     child: AnimatedSlide(
                       duration: _dragOffsetAnimationDuration,
@@ -210,8 +213,7 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                   queueItems: widget.queueItems,
                                   currentQueueIndex: widget.currentQueueIndex,
                                   coreBridge: widget.coreBridge,
-                                  coreEvents:
-                                      widget.coreEvents,
+                                  coreEvents: widget.coreEvents,
                                   userDataController: widget.userDataController,
                                   onClose: widget.onClose,
                                   onToggleDontStopTheMusic:
@@ -230,8 +232,7 @@ class _QueueOverlayState extends State<QueueOverlay> {
                                     queueItems: widget.queueItems,
                                     currentQueueIndex: widget.currentQueueIndex,
                                     coreBridge: widget.coreBridge,
-                                    coreEvents:
-                                        widget.coreEvents,
+                                    coreEvents: widget.coreEvents,
                                     userDataController:
                                         widget.userDataController,
                                     onOpenArtist: widget.onOpenArtist,

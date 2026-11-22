@@ -69,9 +69,19 @@ class MediaImage extends StatefulWidget {
   static Stream<CatalogUpdate>? _artworkUpdates;
   static Stream<CatalogReadChange>? _artworkReadChanges;
   static int _artworkGeneration = 0;
+  static final ValueNotifier<int> _artworkConfigurationChanges =
+      ValueNotifier<int>(0);
   static Future<ImageReadSnapshot> Function(ImageRequest, bool)? _loadImage;
   static final ValueNotifier<int> _imageChanges = ValueNotifier<int>(0);
   static final ValueNotifier<int> _cacheChanges = ValueNotifier<int>(0);
+  static final Listenable _sourceConfigurationChanges = Listenable.merge([
+    _imageChanges,
+    _artworkConfigurationChanges,
+  ]);
+
+  /// Model source caches must be rebuilt when their loader generation changes.
+  static Listenable get sourceConfigurationChanges =>
+      _sourceConfigurationChanges;
   static StreamSubscription<void>? _imageInvalidationSubscription;
   static StreamSubscription<String>? _sourceChangeSubscription;
   static final ValueNotifier<(int, String)> _sourceChanges = ValueNotifier((
@@ -233,6 +243,7 @@ class MediaImage extends StatefulWidget {
     MediaItemImage.missingArtworkSource = loader == null
         ? null
         : _createArtworkSource;
+    _artworkConfigurationChanges.value++;
   }
 
   static String? _createArtworkSource(MediaItem item, int size) {

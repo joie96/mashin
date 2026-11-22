@@ -9,6 +9,7 @@ import '../../features/shared/context_menu/context_menu_controller.dart';
 import '../../features/shared/widgets/media_link_text.dart';
 import '../../features/core/core_bridge.dart';
 import '../../features/core/core_events.dart';
+import '../../features/shared/widgets/overlay_lifecycle.dart';
 import '../../features/core/core_models.dart';
 import '../../features/playerbar/playerbar_overlay.dart';
 import '../../features/playerbar/playback_seek_slider.dart';
@@ -222,17 +223,6 @@ class _AppShellState extends State<AppShell> {
       return '$hours:${minutes.toString().padLeft(2, '0')}:${seconds.toString().padLeft(2, '0')}';
     }
     return '$minutes:${seconds.toString().padLeft(2, '0')}';
-  }
-
-  double get _currentTrackPositionSeconds {
-    final positionFromStateSeconds =
-        ((_coreEvents.mediaSessionState.playerState.positionMillis ?? 0) / 1000)
-            .toDouble();
-    if (positionFromStateSeconds > 0) {
-      return positionFromStateSeconds;
-    }
-
-    return 0;
   }
 
   /// Initialization and lifecycle
@@ -495,6 +485,7 @@ class _AppShellState extends State<AppShell> {
               ),
               builder: (BuildContext context, Widget? currentTrackInfo) =>
                   _DesktopPlayerBar(
+                    coreEvents: _coreEvents,
                     shouldShowMultiDeviceButton:
                         widget.session.shouldShowMultiDeviceButton,
                     currentTrackInfo:
@@ -506,7 +497,6 @@ class _AppShellState extends State<AppShell> {
                     dontStopTheMusicEnabled:
                         _coreEvents.mediaSessionState.queue.autoplayEnabled,
                     maxSeconds: _currentTrackMaxSeconds,
-                    currentSeconds: _currentTrackPositionSeconds,
                     isQueueOpen: _isQueueOverlayOpen,
                     onTogglePlayPause: _togglePlayPause,
                     onPrevious: _playPrevious,
@@ -523,28 +513,33 @@ class _AppShellState extends State<AppShell> {
             ),
           ],
         ),
-        _QueueUiScope(
-          mediaSessionChanges: _coreEvents,
-          builder: (BuildContext context) => QueueOverlay(
-            isOpen: _isQueueOverlayOpen,
-            isDesktop: true,
-            desktopBottomInset: _DesktopPlayerBar.barHeight,
-            trackTitle: _currentTrackTitle,
-            trackSubtitle: _currentTrackSubtitle,
-            trackCoverUrl: _currentQueueCoverUrl,
-            queueTrackCountText: _queueTrackCountText,
-            queueTotalDurationText: _queueTotalDurationText,
-            dontStopTheMusicEnabled:
-                _coreEvents.mediaSessionState.queue.autoplayEnabled,
-            queueItems: _coreEvents.mediaSessionState.queue.items,
-            currentQueueIndex: _coreEvents.mediaSessionState.queue.currentIndex,
-            coreBridge: _coreBridge,
-            coreEvents: _coreEvents,
-            userDataController: _userDataController,
-            onClose: _closeQueueOverlay,
-            onToggleDontStopTheMusic: _toggleDontStopTheMusic,
-            onOpenArtist: _openArtistFromQueue,
-            onOpenAlbum: _openAlbumFromQueue,
+        OverlayLifecycle(
+          isActive: _isQueueOverlayOpen,
+          builder: (context, hasEntered, onAnimationEnd) => _QueueUiScope(
+            mediaSessionChanges: _coreEvents.queueChanges,
+            builder: (BuildContext context) => QueueOverlay(
+              isOpen: hasEntered && _isQueueOverlayOpen,
+              isDesktop: true,
+              desktopBottomInset: _DesktopPlayerBar.barHeight,
+              trackTitle: _currentTrackTitle,
+              trackSubtitle: _currentTrackSubtitle,
+              trackCoverUrl: _currentQueueCoverUrl,
+              queueTrackCountText: _queueTrackCountText,
+              queueTotalDurationText: _queueTotalDurationText,
+              dontStopTheMusicEnabled:
+                  _coreEvents.mediaSessionState.queue.autoplayEnabled,
+              queueItems: _coreEvents.mediaSessionState.queue.items,
+              currentQueueIndex:
+                  _coreEvents.mediaSessionState.queue.currentIndex,
+              coreBridge: _coreBridge,
+              coreEvents: _coreEvents,
+              userDataController: _userDataController,
+              onClose: _closeQueueOverlay,
+              onAnimationEnd: onAnimationEnd,
+              onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+              onOpenArtist: _openArtistFromQueue,
+              onOpenAlbum: _openAlbumFromQueue,
+            ),
           ),
         ),
       ],
@@ -573,11 +568,11 @@ class _AppShellState extends State<AppShell> {
               ),
               builder: (BuildContext context, Widget? currentTrackInfo) =>
                   _MobilePlayerBar(
+                    coreEvents: _coreEvents,
                     currentTrackInfo:
                         currentTrackInfo ?? const SizedBox.shrink(),
                     playbackState:
                         _coreEvents.mediaSessionState.playerState.playbackState,
-                    currentSeconds: _currentTrackPositionSeconds,
                     maxSeconds: _currentTrackMaxSeconds,
                     trackTransitionKey: _currentQueueItem?.queueItemId ?? '',
                     onTogglePlayPause: _togglePlayPause,
@@ -596,29 +591,31 @@ class _AppShellState extends State<AppShell> {
             ),
           ],
         ),
-        _QueueUiScope(
-          mediaSessionChanges: _coreEvents,
-          builder: (BuildContext context) => _MediaSessionScope(
+        OverlayLifecycle(
+          isActive:
+              _isMobilePlayerOverlayOpen ||
+              _mobilePlayerOverlayOpenProgress > 0,
+          builder: (context, hasEntered, onAnimationEnd) => _MediaSessionScope(
             mediaSessionChanges: _coreEvents,
             builder: (BuildContext context, Widget? child) => PlayerBarOverlay(
+              coreEvents: _coreEvents,
               shouldShowMultiDeviceButton:
                   widget.session.shouldShowMultiDeviceButton,
-              isOpen: _isMobilePlayerOverlayOpen,
-              openProgress: _mobilePlayerOverlayOpenProgress,
+              isOpen: hasEntered && _isMobilePlayerOverlayOpen,
+              openProgress: hasEntered ? _mobilePlayerOverlayOpenProgress : 0,
               trackTitle: _currentTrackTitle,
               trackSubtitle: _currentTrackSubtitle,
               trackCoverUrl: _currentQueueCoverUrl,
               currentTrack: _currentTrack,
               playbackStateType:
                   _coreEvents.mediaSessionState.playerState.playbackState,
-              playbackState: _coreEvents.mediaSessionState.playerState,
               playbackQueue: _coreEvents.mediaSessionState.queue,
               maxSeconds: _currentTrackMaxSeconds,
-              currentSeconds: _currentTrackPositionSeconds,
               dontStopTheMusicEnabled:
                   _coreEvents.mediaSessionState.queue.autoplayEnabled,
               userDataController: _userDataController,
               onClose: _closeMobilePlayerOverlay,
+              onAnimationEnd: onAnimationEnd,
               onOpenQueue: _openQueueFromMobilePlayerOverlay,
               onQueueDragUpdate: _updateMobileQueueOverlayDrag,
               onQueueDragEnd: _endMobileQueueOverlayDrag,
@@ -636,28 +633,35 @@ class _AppShellState extends State<AppShell> {
             ),
           ),
         ),
-        _QueueUiScope(
-          mediaSessionChanges: _coreEvents,
-          builder: (BuildContext context) => QueueOverlay(
-            isOpen: _isQueueOverlayOpen,
-            isDesktop: false,
-            mobileOpenProgress: _mobileQueueOverlayOpenProgress,
-            trackTitle: _currentTrackTitle,
-            trackSubtitle: _currentTrackSubtitle,
-            trackCoverUrl: _currentTrackCoverUrl,
-            queueTrackCountText: _queueTrackCountText,
-            queueTotalDurationText: _queueTotalDurationText,
-            dontStopTheMusicEnabled:
-                _coreEvents.mediaSessionState.queue.autoplayEnabled,
-            queueItems: _coreEvents.mediaSessionState.queue.items,
-            currentQueueIndex: _coreEvents.mediaSessionState.queue.currentIndex,
-            coreBridge: _coreBridge,
-            coreEvents: _coreEvents,
-            userDataController: _userDataController,
-            onClose: _closeQueueOverlay,
-            onToggleDontStopTheMusic: _toggleDontStopTheMusic,
-            onOpenArtist: _openArtistFromQueue,
-            onOpenAlbum: _openAlbumFromQueue,
+        OverlayLifecycle(
+          isActive: _isQueueOverlayOpen || _mobileQueueOverlayOpenProgress > 0,
+          builder: (context, hasEntered, onAnimationEnd) => _QueueUiScope(
+            mediaSessionChanges: _coreEvents.queueChanges,
+            builder: (BuildContext context) => QueueOverlay(
+              isOpen: hasEntered && _isQueueOverlayOpen,
+              isDesktop: false,
+              mobileOpenProgress: hasEntered
+                  ? _mobileQueueOverlayOpenProgress
+                  : 0,
+              trackTitle: _currentTrackTitle,
+              trackSubtitle: _currentTrackSubtitle,
+              trackCoverUrl: _currentTrackCoverUrl,
+              queueTrackCountText: _queueTrackCountText,
+              queueTotalDurationText: _queueTotalDurationText,
+              dontStopTheMusicEnabled:
+                  _coreEvents.mediaSessionState.queue.autoplayEnabled,
+              queueItems: _coreEvents.mediaSessionState.queue.items,
+              currentQueueIndex:
+                  _coreEvents.mediaSessionState.queue.currentIndex,
+              coreBridge: _coreBridge,
+              coreEvents: _coreEvents,
+              userDataController: _userDataController,
+              onClose: _closeQueueOverlay,
+              onAnimationEnd: onAnimationEnd,
+              onToggleDontStopTheMusic: _toggleDontStopTheMusic,
+              onOpenArtist: _openArtistFromQueue,
+              onOpenAlbum: _openAlbumFromQueue,
+            ),
           ),
         ),
         AnimatedBuilder(
@@ -1782,6 +1786,7 @@ class _DesktopSidebarPlaylistItemState
 class _DesktopPlayerBar extends StatelessWidget {
   static const double barHeight = 90;
 
+  final MashinCoreBridgeEvents coreEvents;
   final Widget currentTrackInfo;
   final bool shouldShowMultiDeviceButton;
   final PlayState playStateType;
@@ -1789,7 +1794,6 @@ class _DesktopPlayerBar extends StatelessWidget {
   final Queue playbackQueue;
   final bool dontStopTheMusicEnabled;
   final double maxSeconds;
-  final double currentSeconds;
   final bool isQueueOpen;
   final Future<void> Function() onTogglePlayPause;
   final Future<void> Function() onPrevious;
@@ -1804,6 +1808,7 @@ class _DesktopPlayerBar extends StatelessWidget {
   final ValueChanged<BuildContext> onOpenAudioOptions;
 
   const _DesktopPlayerBar({
+    required this.coreEvents,
     required this.shouldShowMultiDeviceButton,
     required this.currentTrackInfo,
     required this.playStateType,
@@ -1811,7 +1816,6 @@ class _DesktopPlayerBar extends StatelessWidget {
     required this.playbackQueue,
     required this.dontStopTheMusicEnabled,
     required this.maxSeconds,
-    required this.currentSeconds,
     required this.isQueueOpen,
     required this.onTogglePlayPause,
     required this.onPrevious,
@@ -1844,9 +1848,6 @@ class _DesktopPlayerBar extends StatelessWidget {
         ? colors.textSecondary
         : colors.accent;
     final double clampedMaxSeconds = maxSeconds.clamp(0, 36000).toDouble();
-    final double clampedCurrentSeconds = currentSeconds
-        .clamp(0, clampedMaxSeconds > 0 ? clampedMaxSeconds : 1)
-        .toDouble();
 
     return Container(
       height: barHeight,
@@ -1944,60 +1945,72 @@ class _DesktopPlayerBar extends StatelessWidget {
                   const SizedBox(height: 4),
                   ConstrainedBox(
                     constraints: const BoxConstraints(maxWidth: 500),
-                    child: Row(
-                      children: <Widget>[
-                        Text(
-                          _formatSeconds(clampedCurrentSeconds),
-                          style: TextStyle(
-                            color: colors.textTertiary,
-                            fontSize: 11,
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Expanded(
-                          child: SliderTheme(
-                            data: SliderTheme.of(context).copyWith(
-                              trackHeight: 3,
-                              thumbShape: const RoundSliderThumbShape(
-                                enabledThumbRadius: 7,
-                                disabledThumbRadius: 7,
+                    child: PlaybackProgressBuilder(
+                      coreEvents: coreEvents,
+                      builder: (context, state) {
+                        final clampedCurrentSeconds =
+                            ((state.positionMillis ?? 0) / 1000)
+                                .clamp(
+                                  0,
+                                  clampedMaxSeconds > 0 ? clampedMaxSeconds : 1,
+                                )
+                                .toDouble();
+                        return Row(
+                          children: <Widget>[
+                            Text(
+                              _formatSeconds(clampedCurrentSeconds),
+                              style: TextStyle(
+                                color: colors.textTertiary,
+                                fontSize: 11,
                               ),
-                              overlayShape: const RoundSliderOverlayShape(
-                                overlayRadius: 10,
+                            ),
+                            const SizedBox(width: 10),
+                            Expanded(
+                              child: SliderTheme(
+                                data: SliderTheme.of(context).copyWith(
+                                  trackHeight: 3,
+                                  thumbShape: const RoundSliderThumbShape(
+                                    enabledThumbRadius: 7,
+                                    disabledThumbRadius: 7,
+                                  ),
+                                  overlayShape: const RoundSliderOverlayShape(
+                                    overlayRadius: 10,
+                                  ),
+                                  thumbColor: colors.textSecondary,
+                                  activeTrackColor: colors.textSecondary,
+                                  secondaryActiveTrackColor:
+                                      colors.textTertiary,
+                                  inactiveTrackColor: colors.bgTertiary,
+                                ),
+                                child: PlaybackSeekSlider(
+                                  value: clampedCurrentSeconds,
+                                  bufferedValue:
+                                      clampedMaxSeconds > 0 &&
+                                          state.bufferedPositionMillis != null
+                                      ? state.bufferedPositionMillis! / 1000
+                                      : null,
+                                  min: 0,
+                                  max: clampedMaxSeconds > 0
+                                      ? clampedMaxSeconds
+                                      : 1,
+                                  enabled:
+                                      hasPlaybackSession &&
+                                      playbackState.requestedMedia == null,
+                                  onSeek: onSeek,
+                                ),
                               ),
-                              thumbColor: colors.textSecondary,
-                              activeTrackColor: colors.textSecondary,
-                              secondaryActiveTrackColor: colors.textTertiary,
-                              inactiveTrackColor: colors.bgTertiary,
                             ),
-                            child: PlaybackSeekSlider(
-                              value: clampedCurrentSeconds,
-                              bufferedValue:
-                                  clampedMaxSeconds > 0 &&
-                                      playbackState.bufferedPositionMillis !=
-                                          null
-                                  ? playbackState.bufferedPositionMillis! / 1000
-                                  : null,
-                              min: 0,
-                              max: clampedMaxSeconds > 0
-                                  ? clampedMaxSeconds
-                                  : 1,
-                              enabled:
-                                  hasPlaybackSession &&
-                                  playbackState.requestedMedia == null,
-                              onSeek: onSeek,
+                            const SizedBox(width: 10),
+                            Text(
+                              _formatSeconds(clampedMaxSeconds),
+                              style: TextStyle(
+                                color: colors.textTertiary,
+                                fontSize: 11,
+                              ),
                             ),
-                          ),
-                        ),
-                        const SizedBox(width: 10),
-                        Text(
-                          _formatSeconds(clampedMaxSeconds),
-                          style: TextStyle(
-                            color: colors.textTertiary,
-                            fontSize: 11,
-                          ),
-                        ),
-                      ],
+                          ],
+                        );
+                      },
                     ),
                   ),
                 ],
@@ -2434,9 +2447,9 @@ String _formatSeconds(double seconds) {
 
 /// Mobile UI components
 class _MobilePlayerBar extends StatefulWidget {
+  final MashinCoreBridgeEvents coreEvents;
   final Widget currentTrackInfo;
   final PlayState playbackState;
-  final double currentSeconds;
   final double maxSeconds;
   final String trackTransitionKey;
   final Future<void> Function() onTogglePlayPause;
@@ -2448,9 +2461,9 @@ class _MobilePlayerBar extends StatefulWidget {
   final ValueChanged<double> onPlayerOverlayDragEnd;
 
   const _MobilePlayerBar({
+    required this.coreEvents,
     required this.currentTrackInfo,
     required this.playbackState,
-    this.currentSeconds = 0,
     this.maxSeconds = 0,
     required this.trackTransitionKey,
     required this.onTogglePlayPause,
@@ -2513,9 +2526,6 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
     final bool isBusy =
         widget.playbackState == PlayState.buffering ||
         widget.playbackState == PlayState.seeking;
-    final double progress = widget.maxSeconds > 0
-        ? (widget.currentSeconds / widget.maxSeconds).clamp(0.0, 1.0)
-        : 0.0;
 
     return GestureDetector(
       onTap: widget.onOpenPlayerOverlay,
@@ -2565,12 +2575,20 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
                       children: <Widget>[
                         Positioned.fill(
                           left: 64,
-                          child: Align(
-                            alignment: Alignment.centerLeft,
-                            child: FractionallySizedBox(
-                              widthFactor: progress,
-                              heightFactor: 1,
-                              child: ColoredBox(color: colors.selection),
+                          child: PlaybackProgressBuilder(
+                            coreEvents: widget.coreEvents,
+                            builder: (context, state) => Align(
+                              alignment: Alignment.centerLeft,
+                              child: FractionallySizedBox(
+                                widthFactor: widget.maxSeconds > 0
+                                    ? ((state.positionMillis ?? 0) /
+                                              1000 /
+                                              widget.maxSeconds)
+                                          .clamp(0.0, 1.0)
+                                    : 0.0,
+                                heightFactor: 1,
+                                child: ColoredBox(color: colors.selection),
+                              ),
                             ),
                           ),
                         ),

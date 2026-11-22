@@ -2,6 +2,28 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 
+import '../core/core_events.dart';
+import '../core/core_models.dart';
+
+/// Restricts position and buffer updates to the rendered progress controls.
+class PlaybackProgressBuilder extends StatelessWidget {
+  const PlaybackProgressBuilder({
+    super.key,
+    required this.coreEvents,
+    required this.builder,
+  });
+
+  final MashinCoreBridgeEvents coreEvents;
+  final Widget Function(BuildContext context, PlayerState playerState) builder;
+
+  @override
+  Widget build(BuildContext context) => ListenableBuilder(
+    listenable: coreEvents.playbackProgressChanges,
+    builder: (context, child) =>
+        builder(context, coreEvents.mediaSessionState.playerState),
+  );
+}
+
 class PlaybackSeekSlider extends StatefulWidget {
   const PlaybackSeekSlider({
     super.key,
@@ -45,9 +67,9 @@ class _PlaybackSeekSliderState extends State<PlaybackSeekSlider> {
           widget.enabled && bufferedValue != null && bufferedValue > value
           ? bufferedValue
           : null,
-      secondaryActiveColor: Theme.of(context).colorScheme.onSurface.withValues(
-        alpha: 0.18,
-      ),
+      secondaryActiveColor: Theme.of(
+        context,
+      ).colorScheme.onSurface.withValues(alpha: 0.18),
       padding: EdgeInsets.zero,
       onChanged: widget.enabled
           ? (double next) => setState(() => _dragValue = next)

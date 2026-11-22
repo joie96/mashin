@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart' hide RepeatMode;
 
+import '../core/core_events.dart';
 import '../core/core_models.dart';
 import '../core/core_userdata.dart';
 import 'playerbar_overlay_mobile.dart';
@@ -7,6 +8,7 @@ import 'playerbar_overlay_mobile.dart';
 class PlayerBarOverlay extends StatelessWidget {
   const PlayerBarOverlay({
     super.key,
+    required this.coreEvents,
     required this.isOpen,
     required this.openProgress,
     required this.trackTitle,
@@ -14,13 +16,12 @@ class PlayerBarOverlay extends StatelessWidget {
     required this.trackCoverUrl,
     required this.currentTrack,
     required this.playbackStateType,
-    required this.playbackState,
     required this.playbackQueue,
     required this.maxSeconds,
-    required this.currentSeconds,
     required this.dontStopTheMusicEnabled,
     required this.userDataController,
     required this.onClose,
+    required this.onAnimationEnd,
     required this.onOpenQueue,
     required this.onQueueDragUpdate,
     required this.onQueueDragEnd,
@@ -38,6 +39,7 @@ class PlayerBarOverlay extends StatelessWidget {
     this.shouldShowMultiDeviceButton = true,
   });
 
+  final MashinCoreBridgeEvents coreEvents;
   final bool isOpen;
   final double openProgress;
   final String trackTitle;
@@ -45,14 +47,13 @@ class PlayerBarOverlay extends StatelessWidget {
   final String? trackCoverUrl;
   final Track? currentTrack;
   final PlayState playbackStateType;
-  final PlayerState playbackState;
   final Queue playbackQueue;
   final double maxSeconds;
-  final double currentSeconds;
   final bool dontStopTheMusicEnabled;
   final bool shouldShowMultiDeviceButton;
   final UserData? userDataController;
   final VoidCallback onClose;
+  final VoidCallback onAnimationEnd;
   final VoidCallback onOpenQueue;
   final void Function(double upwardDelta, double viewportHeight)
   onQueueDragUpdate;
@@ -72,6 +73,7 @@ class PlayerBarOverlay extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return PlayerBarOverlayMobile(
+      coreEvents: coreEvents,
       isOpen: isOpen,
       openProgress: openProgress,
       trackTitle: trackTitle,
@@ -79,14 +81,13 @@ class PlayerBarOverlay extends StatelessWidget {
       trackCoverUrl: trackCoverUrl,
       currentTrack: currentTrack,
       playbackStateType: playbackStateType,
-      playbackState: playbackState,
       playbackQueue: playbackQueue,
       maxSeconds: maxSeconds,
-      currentSeconds: currentSeconds,
       dontStopTheMusicEnabled: dontStopTheMusicEnabled,
       shouldShowMultiDeviceButton: shouldShowMultiDeviceButton,
       userDataController: userDataController,
       onClose: onClose,
+      onAnimationEnd: onAnimationEnd,
       onOpenQueue: onOpenQueue,
       onQueueDragUpdate: onQueueDragUpdate,
       onQueueDragEnd: onQueueDragEnd,
