@@ -236,7 +236,11 @@ class _MediaListSectionMobileState<T extends MediaItem>
           _selectionController.select(index, widget.items.length),
       onToggleSelection: () =>
           _selectionController.toggle(index, widget.items.length),
-      onTap: widget.onItemTap == null
+      onTap: _isTrackSection
+          ? widget.coreBridge != null && _isValidPlayable(widget.items[index])
+                ? () => unawaited(_playTracksFromIndex(index))
+                : null
+          : widget.onItemTap == null
           ? null
           : () => widget.onItemTap!(widget.items[index]),
       child: _buildTypedListTile(index),

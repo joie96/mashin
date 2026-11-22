@@ -1815,6 +1815,7 @@ void main() {
       final bridge = _RecommendationBridge();
       addTearDown(bridge.eventsController.close);
       List<Track>? menuItems;
+      Track? navigatedTrack;
       await tester.pumpWidget(
         MaterialApp(
           theme: AppTheme.light(),
@@ -1825,6 +1826,7 @@ void main() {
               isLoading: false,
               emptyText: 'Empty',
               coreBridge: bridge,
+              onItemTap: (track) => navigatedTrack = track,
               onSelectionMenuTap: (items) => menuItems = items,
             ),
           ),
@@ -1843,6 +1845,10 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(bridge.playedItems, tracks);
+      await tester.tap(find.text('Track 1'));
+      await tester.pumpAndSettle();
+      expect(bridge.playedItems, tracks.skip(1).toList());
+      expect(navigatedTrack, isNull);
       final first = find
           .ancestor(of: find.text('Track 0'), matching: find.byType(Material))
           .first;
