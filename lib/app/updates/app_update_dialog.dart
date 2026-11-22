@@ -10,7 +10,7 @@ import '../theme/app_theme.dart';
 import 'app_update_installer.dart';
 import 'app_update_service.dart';
 
-/// Checks once per app start without delaying session restoration or navigation.
+/// Checks after startup with bounded retries, without delaying navigation.
 class AppUpdateHost extends StatefulWidget {
   const AppUpdateHost({
     super.key,
@@ -32,47 +32,96 @@ class AppUpdateHost extends StatefulWidget {
 class _AppUpdateHostState extends State<AppUpdateHost> {
   late final _service = widget.service ?? AppUpdateService();
   AppUpdate? _pendingUpdate;
+  Timer? _checkRetryTimer;
+  Timer? _dialogRetryTimer;
+  int _checkAttempts = 0;
+  bool _isChecking = false;
+  bool _hasCompletedCheck = false;
   bool _hasScheduledDialog = false;
 
   // Startup and request lifetime.
   @override
   void initState() {
     super.initState();
-    WidgetsBinding.instance.addPostFrameCallback(
-      (_) => unawaited(_checkForUpdate()),
-    );
+    WidgetsBinding.instance.addPostFrameCallback((_) => _checkWhenReady());
   }
 
   @override
   void didUpdateWidget(covariant AppUpdateHost oldWidget) {
     super.didUpdateWidget(oldWidget);
+    _checkWhenReady();
     _showWhenReady();
   }
 
   @override
   void dispose() {
+    _checkRetryTimer?.cancel();
+    _dialogRetryTimer?.cancel();
     _service.cancelDownload();
     super.dispose();
   }
 
+  // Session restoration initializes the Android service and its native context.
+  void _checkWhenReady() {
+    if (!mounted ||
+        !widget.isReady ||
+        _isChecking ||
+        _hasCompletedCheck ||
+        _checkRetryTimer != null ||
+        _checkAttempts >= 3) {
+      return;
+    }
+    _isChecking = true;
+    _checkAttempts++;
+    unawaited(_checkForUpdate());
+  }
+
   Future<void> _checkForUpdate() async {
     try {
-      _pendingUpdate = await _service.checkForUpdate();
-      if (mounted) _showWhenReady();
+      final update = await _service.checkForUpdate();
+      if (!mounted) return;
+      _pendingUpdate = update;
+      _hasCompletedCheck = true;
+      _showWhenReady();
     } catch (error) {
-      debugPrint('Update check failed: $error');
+      debugPrint('Update check failed (attempt $_checkAttempts/3): $error');
+      if (mounted && _checkAttempts < 3) {
+        _checkRetryTimer = Timer(
+          Duration(seconds: _checkAttempts == 1 ? 2 : 5),
+          () {
+            _checkRetryTimer = null;
+            _checkWhenReady();
+          },
+        );
+      }
+    } finally {
+      _isChecking = false;
     }
   }
 
   // Pageless dialogs must wait until the router has replaced its loading page.
   void _showWhenReady() {
     final update = _pendingUpdate;
-    if (!widget.isReady || update == null || _hasScheduledDialog) return;
+    if (!mounted ||
+        !widget.isReady ||
+        update == null ||
+        _hasScheduledDialog ||
+        _dialogRetryTimer != null) {
+      return;
+    }
     _hasScheduledDialog = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
+      _hasScheduledDialog = false;
       if (!mounted) return;
+      if (!widget.isReady) return;
       final context = widget.navigatorKey.currentState?.overlay?.context;
-      if (context == null || !context.mounted) return;
+      if (context == null || !context.mounted) {
+        _dialogRetryTimer = Timer(const Duration(milliseconds: 250), () {
+          _dialogRetryTimer = null;
+          _showWhenReady();
+        });
+        return;
+      }
       unawaited(
         showDialog<void>(
           context: context,
@@ -80,6 +129,7 @@ class _AppUpdateHostState extends State<AppUpdateHost> {
           builder: (_) => AppUpdateDialog(update: update, service: _service),
         ),
       );
+      _pendingUpdate = null;
     });
     WidgetsBinding.instance.ensureVisualUpdate();
   }
