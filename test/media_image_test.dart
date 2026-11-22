@@ -3,7 +3,8 @@ import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart' show ScrollCacheExtent;
+import 'package:flutter/rendering.dart'
+  show RenderObject, RenderProxyBox, ScrollCacheExtent;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mashin/app/theme/app_theme.dart';
@@ -203,8 +204,7 @@ void main() {
         expect(find.byType(MediaImage), findsNothing);
         await tester.pumpWidget(const SizedBox.shrink());
       },
-    );
-  }
+    );  }
 
   testWidgets(
     'mobile playlist covers retain loaded states and resume at scroll end',
@@ -354,6 +354,218 @@ void main() {
         expect(reads['3' * 64], [false]);
         await tester.pumpWidget(const SizedBox.shrink());
         controller.dispose();
+      },
+    );
+  }
+
+  for (final sourceKind in [
+    'proxy',
+    'artwork',
+    'pending-artwork',
+    'empty-artwork',
+    'provider-icon',
+  ]) {
+    testWidgets('settled $sourceKind skips scroll geometry', (tester) async {
+      final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+      final controller = ScrollController();
+      final metadata = Completer<MediaItemImage?>();
+      final updates = StreamController<CatalogUpdate>.broadcast(sync: true);
+      addTearDown(controller.dispose);
+      addTearDown(updates.close);
+      var geometryChecks = 0;
+      var imageReads = 0;
+      var artworkReads = 0;
+      final proxy = MediaItemImage(
+        type: 'thumb',
+        path: '',
+        provider: 'builtin',
+        remotelyAccessible: false,
+        proxyId: 'a' * 64,
+      );
+      MediaImage.configureArtworkLoader(
+        (_) async {
+          artworkReads++;
+          if (sourceKind == 'pending-artwork') return metadata.future;
+          return sourceKind == 'empty-artwork' ? null : proxy;
+        },
+        catalogUpdates: updates.stream,
+      );
+      MediaImage.configureImageLoader((_, _) async {
+        imageReads++;
+        return ImageReadSnapshot(bytes: bytes);
+      });
+      ProviderManifestRegistry.registerOne(
+        const ProviderManifest(domain: 'source', iconSvg: '<svg/>', raw: {}),
+      );
+      final source = switch (sourceKind) {
+        'proxy' => proxy.getProxyPath()!,
+        'provider-icon' =>
+          ProviderManifestRegistry.iconSourceForProvider('source')!,
+        _ => Artist.fromJson({
+          'item_id': 'one',
+          'provider': 'library',
+          'name': 'Artist',
+          'provider_mappings': [
+            {
+              'provider_domain': 'source',
+              'provider_instance': 'source--one',
+              'item_id': 'other',
+            },
+          ],
+        }).imageUriForSize(80)!,
+      };
+      void publishArtwork(String proxyId) => updates.add(
+        CatalogUpdate(
+          kind: CatalogQueryKind.providerItem,
+          itemId: 'other',
+          provider: 'source--one',
+          mediaType: MediaType.artist,
+          item: Artist.fromJson({
+            'item_id': 'other',
+            'provider': 'source--one',
+            'name': 'Artist',
+            'metadata': {
+              'images': [
+                {
+                  'type': 'thumb',
+                  'provider': 'source',
+                  'path': '',
+                  'proxy_id': proxyId,
+                },
+              ],
+            },
+          }),
+        ),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Center(
+            child: SizedBox.square(
+              dimension: 100,
+              child: ListView(
+                controller: controller,
+                itemExtent: 100,
+                scrollCacheExtent: const ScrollCacheExtent.viewport(5),
+                children: [
+                  _ViewportTransformProbe(
+                    onTransform: () => geometryChecks++,
+                    child: MediaImage(
+                      source: source,
+                      fit: BoxFit.cover,
+                      fallback: const SizedBox.shrink(),
+                    ),
+                  ),
+                  for (var index = 0; index < 7; index++)
+                    const SizedBox.shrink(),
+                ],
+              ),
+            ),
+          ),
+        ),
+      );
+      if (sourceKind == 'pending-artwork') {
+        await tester.pump();
+        publishArtwork('a' * 64);
+      }
+      await tester.pumpAndSettle();
+      final initialChecks = geometryChecks;
+      expect(initialChecks, greaterThan(0));
+      final initialImageReads = imageReads;
+      final initialArtworkReads = artworkReads;
+      for (final offset in [100.0, 300.0, 0.0]) {
+        controller.jumpTo(offset);
+        await tester.pumpAndSettle();
+        expect(find.byType(MediaImage, skipOffstage: false), findsOneWidget);
+        expect(geometryChecks, initialChecks);
+        expect(imageReads, initialImageReads);
+        expect(artworkReads, initialArtworkReads);
+      }
+      expect(imageReads, sourceKind == 'empty-artwork' ? 0 : 1);
+      if (sourceKind == 'pending-artwork') {
+        expect(metadata.isCompleted, isFalse);
+        controller.jumpTo(300);
+        await tester.pumpAndSettle();
+        publishArtwork('b' * 64);
+        await tester.pumpAndSettle();
+        expect(imageReads, 1);
+        expect(geometryChecks, greaterThan(initialChecks));
+        controller.jumpTo(0);
+        await tester.pumpAndSettle();
+        expect(imageReads, 2);
+        metadata.complete(proxy);
+        await tester.pumpAndSettle();
+        expect(imageReads, 2);
+      }
+      await tester.pumpWidget(const SizedBox.shrink());
+    });
+  }
+
+  for (final boundary in ['source', 'cache']) {
+    testWidgets(
+      '$boundary invalidation resumes with current scroll geometry',
+      (tester) async {
+        final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+        final controller = ScrollController();
+        final changes = StreamController<String>.broadcast(sync: true);
+        final invalidations = StreamController<void>.broadcast(sync: true);
+        addTearDown(controller.dispose);
+        addTearDown(changes.close);
+        addTearDown(invalidations.close);
+        final reads = <bool>[];
+        MediaImage.configureImageLoader((request, _) async {
+          reads.add(request.isBackground);
+          return ImageReadSnapshot(bytes: bytes);
+        }, sourceChanges: changes.stream, invalidations: invalidations.stream);
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Center(
+              child: SizedBox.square(
+                dimension: 100,
+                child: ListView(
+                  controller: controller,
+                  itemExtent: 100,
+                  scrollCacheExtent: const ScrollCacheExtent.viewport(5),
+                  children: [
+                    MediaImage(
+                      source: MediaItemImage(
+                        type: 'thumb',
+                        path: '',
+                        provider: 'builtin',
+                        remotelyAccessible: false,
+                        proxyId: 'a' * 64,
+                      ).getProxyPath()!,
+                      fit: BoxFit.cover,
+                      fallback: const SizedBox.shrink(),
+                    ),
+                    for (var index = 0; index < 7; index++)
+                      const SizedBox.shrink(),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(reads, [false]);
+        controller.jumpTo(300);
+        await tester.pumpAndSettle();
+        expect(find.byType(MediaImage, skipOffstage: false), findsOneWidget);
+        if (boundary == 'source') {
+          changes.add('a' * 64);
+        } else {
+          invalidations.add(null);
+        }
+        await tester.pumpAndSettle();
+        expect(reads, [false]);
+        controller.jumpTo(100);
+        await tester.pumpAndSettle();
+        expect(reads, [false, true]);
+        controller.jumpTo(0);
+        await tester.pumpAndSettle();
+        expect(reads, [false, true]);
+        expect(find.byType(Image), findsOneWidget);
+        await tester.pumpWidget(const SizedBox.shrink());
+        expect(tester.takeException(), isNull);
       },
     );
   }
@@ -2247,6 +2459,36 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+}
+
+class _ViewportTransformProbe extends SingleChildRenderObjectWidget {
+  const _ViewportTransformProbe({required this.onTransform, required super.child});
+
+  final VoidCallback onTransform;
+
+  @override
+  RenderProxyBox createRenderObject(BuildContext context) =>
+      _ViewportTransformProbeRenderBox(onTransform);
+
+  @override
+  void updateRenderObject(
+    BuildContext context,
+    covariant _ViewportTransformProbeRenderBox renderObject,
+  ) {
+    renderObject.onTransform = onTransform;
+  }
+}
+
+class _ViewportTransformProbeRenderBox extends RenderProxyBox {
+  _ViewportTransformProbeRenderBox(this.onTransform);
+
+  VoidCallback onTransform;
+
+  @override
+  void applyPaintTransform(RenderObject child, Matrix4 transform) {
+    onTransform();
+    super.applyPaintTransform(child, transform);
+  }
 }
 
 class _ControlledDeferredLoadingPhysics extends ClampingScrollPhysics {

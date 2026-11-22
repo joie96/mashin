@@ -448,7 +448,7 @@ class _MediaImageState extends State<MediaImage>
     _hasPendingSourceChange = false;
     _hasCompletedLocalImageRead = false;
     _requiresImageRefresh = false;
-    if (_isVisible) unawaited(_loadMissingArtwork());
+    _resumeImageLoading();
   }
 
   void _onImageSessionChanged() {
@@ -464,7 +464,7 @@ class _MediaImageState extends State<MediaImage>
       _requiresImageRefresh = false;
       _hasLoadedArtwork = false;
     });
-    if (_isVisible) unawaited(_loadMissingArtwork());
+    _resumeImageLoading();
   }
 
   @override
@@ -497,18 +497,23 @@ class _MediaImageState extends State<MediaImage>
         (ModalRoute.of(context)?.isCurrent ?? true);
     onDetailPageVisibilityChanged(isVisible);
     if (isVisible) {
-      _scheduleViewportCheck();
-      unawaited(_loadMissingArtwork());
+      _resumeImageLoading();
     }
   }
 
   // Layout, not cache-extent construction, determines the interactive artwork lane.
   void _scheduleViewportCheck() {
-    if (_isViewportCheckQueued) return;
+    if (!_isVisible || !_requiresImageLoading || _isViewportCheckQueued) return;
     _isViewportCheckQueued = true;
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _isViewportCheckQueued = false;
       if (!mounted || !_isVisible) return;
+      if (!_requiresImageLoading) {
+        if (_initialLayout != null && !_initialLayout!.isCompleted) {
+          _initialLayout!.complete();
+        }
+        return;
+      }
       final render = context.findRenderObject();
       _isInViewport = true;
       _isNearViewport = true;
@@ -566,7 +571,7 @@ class _MediaImageState extends State<MediaImage>
       _hasCompletedLocalImageRead = false;
       _requiresImageRefresh = false;
       if (!shouldRetainBytes) _bytes = null;
-      unawaited(_loadMissingArtwork());
+      _resumeImageLoading();
     }
   }
 
@@ -579,7 +584,7 @@ class _MediaImageState extends State<MediaImage>
     } else {
       _queryScope = CoreQueryScope();
       _imageScope = _queryScope.createChild();
-      unawaited(_loadMissingArtwork());
+      _resumeImageLoading();
     }
   }
 
@@ -613,8 +618,30 @@ class _MediaImageState extends State<MediaImage>
     _isLoadingImage = false;
   }
 
+  // Read scheduling and viewport priority.
+  bool get _requiresImageLoading {
+    final isArtwork = widget.source.startsWith('mashin-artwork:');
+    return _hasPendingSourceChange ||
+        (isArtwork && !_hasLoadedArtwork) ||
+        ((!isArtwork || _resolvedSource != null) &&
+            (!_hasCompletedLocalImageRead || _requiresImageRefresh));
+  }
+
+  // Resuming reads must observe current geometry, not the last loaded viewport.
+  void _resumeImageLoading() {
+    if (!_isVisible || !_requiresImageLoading) return;
+    if (_scrollPositions.isNotEmpty &&
+        (_initialLayout == null || _initialLayout!.isCompleted)) {
+      _initialLayout = Completer<void>();
+    }
+    _scheduleViewportCheck();
+    WidgetsBinding.instance.ensureVisualUpdate();
+    unawaited(_loadMissingArtwork());
+  }
+
   // Every image subscribes separately, so hiding one cannot cancel another visible consumer.
   Future<void> _loadMissingArtwork() async {
+    if (!_isVisible || !_requiresImageLoading) return;
     final source = widget.source;
     if (!source.startsWith('mashin-artwork:')) {
       await _loadImageSource(source);
@@ -681,7 +708,7 @@ class _MediaImageState extends State<MediaImage>
           _hasLoadedArtwork = true;
           if (resolved == null) _bytes = null;
         });
-        if (resolved != null) unawaited(_loadImageSource(resolved));
+        if (resolved != null) _resumeImageLoading();
       }
 
       void applyObservedArtwork() {
@@ -878,7 +905,7 @@ class _MediaImageState extends State<MediaImage>
           _hasPendingSourceChange = false;
           _hasCompletedLocalImageRead = false;
           _requiresImageRefresh = false;
-          if (_isVisible) unawaited(_loadMissingArtwork());
+          _resumeImageLoading();
         }
       }
     }
