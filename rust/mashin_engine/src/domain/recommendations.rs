@@ -12,6 +12,7 @@ pub(crate) enum RecommendationView {
 }
 
 impl RecommendationView {
+    // View membership and item-order policy.
     pub(crate) fn folder_selection(self) -> (&'static [&'static str], &'static [&'static str]) {
         match self {
             Self::Home => (
@@ -49,6 +50,31 @@ impl RecommendationView {
     pub(crate) fn includes(self, item_id: &str) -> bool {
         let (identities, prefixes) = self.folder_selection();
         identities.contains(&item_id) || prefixes.iter().any(|prefix| item_id.starts_with(prefix))
+    }
+
+    pub(crate) fn should_shuffle_items(self, item_id: &str) -> bool {
+        match self {
+            Self::Home => {
+                matches!(item_id,
+                    "user_recommendations"
+                    | "user_genre_playlists_monthly"
+                    | "user_artist_playlists_monthly"
+                    | "user_artist_recommendations"
+                    | "user_album_recommendations"
+                    | "user_rediscovery_tracks"
+                ) || item_id.starts_with("user_genre_artists_")
+            }
+            Self::Explore => {
+                matches!(item_id,
+                    "global_artist_radio_playlists"
+                    | "global_mood_playlists"
+                    | "global_genre_playlists"
+                    | "global_popular_artist_albums"
+                    | "de_popular_artist_albums"
+                ) || item_id.starts_with("global_genre_artists_")
+                    || item_id.starts_with("global_genre_albums_")
+            }
+        }
     }
 }
 
@@ -100,6 +126,33 @@ pub(crate) struct RecommendationKnowledge {
 #[cfg(test)]
 mod tests {
     use super::RecommendationView;
+
+    #[test]
+    fn only_requested_recommendation_sections_shuffle_items() {
+        for (view, shuffled, unchanged) in [
+            (RecommendationView::Home,
+                vec!["user_recommendations", "user_genre_playlists_monthly", "user_artist_playlists_monthly",
+                    "user_artist_recommendations", "user_album_recommendations", "user_rediscovery_tracks",
+                    "user_genre_artists_rock", "user_genre_artists_pop", "user_genre_artists_jazz"],
+                vec!["user_top_tracks_monthly", "user_top_artists_monthly", "user_top_albums_monthly"]),
+            (RecommendationView::Explore,
+                vec!["global_artist_radio_playlists", "global_mood_playlists", "global_genre_playlists",
+                    "global_popular_artist_albums", "de_popular_artist_albums",
+                    "global_genre_artists_rock", "global_genre_artists_pop", "global_genre_artists_jazz",
+                    "global_genre_albums_rock", "global_genre_albums_pop", "global_genre_albums_jazz"],
+                vec!["global_top_tracks", "de_top_tracks", "global_top_artists", "de_top_artists", "global_decade_playlists"]),
+        ] {
+            for item_id in shuffled {
+                assert!(view.includes(item_id));
+                assert!(view.should_shuffle_items(item_id), "{item_id}");
+            }
+            for item_id in unchanged {
+                assert!(view.includes(item_id));
+                assert!(!view.should_shuffle_items(item_id), "{item_id}");
+            }
+            assert!(!view.should_shuffle_items("unknown_folder"));
+        }
+    }
 
     #[test]
     fn lastfm_folders_belong_to_exactly_one_view() {

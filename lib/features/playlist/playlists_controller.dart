@@ -9,17 +9,21 @@ class PlaylistsController extends ChangeNotifier {
     required this.coreBridge,
     required this.userDataController,
   }) {
-    userDataController.playlistsChanges.addListener(_onUserDataChanged);
+    _updatePlaylistSummaries();
+    userDataController.addListener(_onUserDataChanged);
   }
 
   final MashinCoreBridgeApi coreBridge;
   final UserData userDataController;
   bool _isDisposed = false;
   bool _isLoadingSnapshot = true;
-  bool _hasReadSnapshot = false;
   bool _hasLoadError = false;
+  List<Playlist> _observedPlaylists = const [];
+  bool _wasLoadingPlaylists = true;
+  final _playlistSummaries =
+      <String, ({List<Track> tracks, int totalSeconds})>{};
 
-  // Initial snapshot loading; live updates preserve already visible contents.
+  // Snapshot reads update status without gating cached or independently published playlists.
   Future<void> load() async {
     if (_isDisposed) return;
     _isLoadingSnapshot = true;
@@ -27,9 +31,11 @@ class PlaylistsController extends ChangeNotifier {
     notifyListeners();
     try {
       await userDataController.refreshLibrarySnapshot();
-      if (!_isDisposed) _hasReadSnapshot = true;
+      if (!_isDisposed) {
+        _updatePlaylistSummaries();
+      }
     } catch (_) {
-      if (!_isDisposed) _hasLoadError = true;
+      if (!_isDisposed) _hasLoadError = userDataController.playlists.isEmpty;
     } finally {
       _isLoadingSnapshot = false;
       if (!_isDisposed) notifyListeners();
@@ -37,12 +43,19 @@ class PlaylistsController extends ChangeNotifier {
   }
 
   // Current page projection.
-  List<Playlist> get playlists =>
-      _hasReadSnapshot ? userDataController.playlists : const [];
+  List<Playlist> get playlists => userDataController.playlists;
   bool get isLoading =>
       !_hasLoadError &&
       (_isLoadingSnapshot || userDataController.isLoadingPlaylists);
   bool get hasLoadError => _hasLoadError;
+
+  ({int trackCount, int totalSeconds}) summaryFor(Playlist playlist) {
+    final summary = _playlistSummaries[playlist.itemId];
+    return (
+      trackCount: summary?.tracks.length ?? 0,
+      totalSeconds: summary?.totalSeconds ?? 0,
+    );
+  }
 
   List<Track> tracksFor(List<Playlist> playlists) => playlists
       .expand(
@@ -78,14 +91,54 @@ class PlaylistsController extends ChangeNotifier {
     }
   }
 
-  void _onUserDataChanged() {
-    if (_hasReadSnapshot) notifyListeners();
-  }
-
   @override
   void dispose() {
     _isDisposed = true;
-    userDataController.playlistsChanges.removeListener(_onUserDataChanged);
+    userDataController.removeListener(_onUserDataChanged);
     super.dispose();
+  }
+
+  // Playlist observation and summary projection.
+  void _onUserDataChanged() {
+    final hasChanged = _updatePlaylistSummaries();
+    if (hasChanged) {
+      if (userDataController.playlists.isNotEmpty) _hasLoadError = false;
+      notifyListeners();
+    }
+  }
+
+  // UserData retains unchanged track lists, so unrelated updates do not rescan tracks.
+  bool _updatePlaylistSummaries() {
+    final playlists = userDataController.playlists;
+    final isLoadingPlaylists = userDataController.isLoadingPlaylists;
+    var hasChanged =
+        !identical(_observedPlaylists, playlists) ||
+        _wasLoadingPlaylists != isLoadingPlaylists;
+    _observedPlaylists = playlists;
+    _wasLoadingPlaylists = isLoadingPlaylists;
+    final retainedIds = {for (final playlist in playlists) playlist.itemId};
+    _playlistSummaries.removeWhere(
+      (itemId, _) => !retainedIds.contains(itemId),
+    );
+    for (final playlist in playlists) {
+      final tracks = userDataController.tracksForPlaylist(playlist.itemId);
+      final previous = _playlistSummaries[playlist.itemId];
+      if (identical(previous?.tracks, tracks)) {
+        continue;
+      }
+      final totalSeconds = tracks.fold<int>(
+        0,
+        (sum, track) => sum + track.duration,
+      );
+      _playlistSummaries[playlist.itemId] = (
+        tracks: tracks,
+        totalSeconds: totalSeconds,
+      );
+      hasChanged |=
+          previous == null ||
+          previous.tracks.length != tracks.length ||
+          previous.totalSeconds != totalSeconds;
+    }
+    return hasChanged;
   }
 }

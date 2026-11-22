@@ -872,6 +872,8 @@ class MashinCoreBridge implements MashinCoreBridgeApi {
     var observation = _imageObservations[key];
     if (observation == null) {
       final pending = _PendingImageRead();
+      // Refresh-only subscribers await completion, not the local delivery future.
+      pending.local.future.ignore();
       observation = pending;
       _imageObservations[key] = pending;
       final observationId = ++_nextImageObservationId;

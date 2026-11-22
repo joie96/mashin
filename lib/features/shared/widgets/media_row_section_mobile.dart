@@ -51,6 +51,8 @@ class MediaRowSectionMobile<T> extends StatefulWidget {
     this.playlistCoverBuilder,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaRowSectionMobile<T>> createState() =>
       _MediaRowSectionMobileState<T>();
@@ -60,7 +62,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   late final MobileSectionSelectionState _selectionController;
 
   String get title => widget.title;
-  bool get isLoading => widget.isLoading;
+  bool get shouldShowLoadingPlaceholder => widget.shouldShowLoadingPlaceholder;
   List<T> get items => widget.items;
   String get emptyText => widget.emptyText;
   double get itemWidth => widget.itemWidth;
@@ -239,7 +241,8 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
     final bool hasTitle = title.trim().isNotEmpty;
-    final bool hasPlayableContent = !isLoading && _hasPlayableItemsFromIndex(0);
+    final bool hasPlayableContent =
+        !shouldShowLoadingPlaceholder && _hasPlayableItemsFromIndex(0);
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -254,7 +257,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
             shuffleTooltip: 'Zufällig',
           ),
         if (hasTitle) const SizedBox(height: 10),
-        if (!isLoading && items.isEmpty)
+        if (!shouldShowLoadingPlaceholder && items.isEmpty)
           Text(emptyText, style: TextStyle(color: colors.textSecondary))
         else
           SizedBox(
@@ -267,7 +270,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
 
   // Row viewport layout
   double _sectionHeight(BuildContext context) {
-    if (isLoading) {
+    if (shouldShowLoadingPlaceholder) {
       final int lineCount = _skeletonLineCount;
       return coverSize + 8 + 10 + (lineCount - 1) * 16;
     }
@@ -339,7 +342,9 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
   }
 
   Widget _buildHorizontalRows() {
-    final int itemCount = isLoading ? skeletonCount : _visibleItemCount;
+    final int itemCount = shouldShowLoadingPlaceholder
+        ? skeletonCount
+        : _visibleItemCount;
 
     return ListView.builder(
       primary: false,
@@ -352,7 +357,7 @@ class _MediaRowSectionMobileState<T> extends State<MediaRowSectionMobile<T>> {
       addSemanticIndexes: false,
       itemBuilder: (BuildContext context, int index) {
         final bool isLastItem = index == itemCount - 1;
-        final Widget item = isLoading
+        final Widget item = shouldShowLoadingPlaceholder
             ? _buildMobileTypedRowSkeleton()
             : MobileSelectableSectionItem(
                 selectionModeActive: _selectionController.isSelectionModeActive,
@@ -660,7 +665,8 @@ Widget _buildMobileMediaRowItemBase({
                         width: coverSize,
                         height: coverSize,
                         color: colors.bgTertiary,
-                        child: coverContent ??
+                        child:
+                            coverContent ??
                             (coverUrl != null && coverUrl.trim().isNotEmpty
                                 ? _DeferredRowMediaImage(
                                     source: coverUrl,
@@ -671,7 +677,11 @@ Widget _buildMobileMediaRowItemBase({
                                       size: 56,
                                     ),
                                   )
-                                : Icon(icon, color: colors.textSecondary, size: 56)),
+                                : Icon(
+                                    icon,
+                                    color: colors.textSecondary,
+                                    size: 56,
+                                  )),
                       ),
                     ),
                   ),

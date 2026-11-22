@@ -1,4 +1,5 @@
-//! Session-bound view assembly from observed reads; working values live only for one request.
+//! Session-bound view assembly; payloads are request-local, item order belongs to the application.
+use super::recommendation_item_order::RecommendationItemOrder;
 use super::errors::ApplicationError;
 use super::repositories::CatalogClient;
 use super::Application;
@@ -120,6 +121,7 @@ impl Recommendations {
         &self,
         view: RecommendationView,
         force_refresh: bool,
+        item_order: &RecommendationItemOrder,
         mut on_update: impl FnMut(RecommendationSnapshot) + Send,
         mut on_read: impl FnMut(CatalogQuery, CatalogLoadSnapshot) + Send,
     ) -> Result<RecommendationSnapshot, String> {
@@ -283,7 +285,8 @@ impl Recommendations {
             let mut changed = Vec::new();
             for key in dirty_keys.unwrap_or_else(|| order.clone()) {
                 let Some(read) = selected.get(&key) else { continue; };
-                let folder = read.project();
+                let mut folder = read.project();
+                item_order.order_folder(view, &mut folder);
                 if projected.get(&key) != Some(&folder) {
                     changed.push(folder.clone());
                     projected.insert(key, folder);
@@ -444,6 +447,81 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn recommendation_order_survives_refresh_and_service_recreation_for_embedded_and_separate_reads() {
+        for view in [RecommendationView::Home, RecommendationView::Explore] {
+            for has_embedded_items in [false, true] {
+                let item_order = RecommendationItemOrder::default();
+                let (identities, prefixes) = view.folder_selection();
+                let folder_ids = identities.iter().map(|identity| identity.to_string())
+                    .chain(prefixes.iter().flat_map(|prefix| ["rock", "pop", "jazz"].map(|genre| format!("{prefix}{genre}"))))
+                    .collect::<Vec<_>>();
+                let mut reads = HashMap::<String, std::collections::VecDeque<_>>::new();
+                for round in 0..2 {
+                    let mut folders = Vec::new();
+                    for folder_id in &folder_ids {
+                        let media_type = if folder_id.contains("playlists") { "playlist" }
+                            else if folder_id.contains("artists") || folder_id.contains("artist_recommendations") { "artist" }
+                            else if folder_id.contains("albums") || folder_id.contains("album_recommendations") { "album" }
+                            else { "track" };
+                        let items: Vec<MediaItem> = serde_json::from_value(serde_json::Value::Array((0..6).map(|index| {
+                            let identity = if round == 0 { index } else { 5 - index };
+                            serde_json::json!({"media_type":media_type, "provider":"source", "item_id":identity.to_string(), "name":format!("Round {round}")})
+                        }).collect())).unwrap();
+                        let mut folder: RecommendationFolder = serde_json::from_value(serde_json::json!({
+                            "provider":"source", "item_id":folder_id, "name":folder_id, "items":[],
+                        })).unwrap();
+                        if has_embedded_items {
+                            folder.items = items;
+                        } else {
+                            let query = CatalogQuery::RecommendationItems { provider: "source".into(), item_id: folder.item_id.clone() };
+                            let (sender, receiver) = mpsc::unbounded_channel();
+                            sender.send(observation(Some(CatalogValue::RecommendationItems(items)), CatalogLoadPhase::Ready)).unwrap();
+                            reads.entry(format!("{query:?}")).or_default().push_back(receiver);
+                        }
+                        folders.push(folder);
+                    }
+                    let (sender, receiver) = mpsc::unbounded_channel();
+                    sender.send(observation(Some(CatalogValue::RecommendationFolders(folders)), CatalogLoadPhase::Ready)).unwrap();
+                    reads.entry(format!("{:?}", CatalogQuery::RecommendationFolders)).or_default().push_back(receiver);
+                }
+                let catalog = Arc::new(ObservedCatalog { reads: Mutex::new(reads), starts: Mutex::new(Vec::new()) });
+                let mut previous_orders = HashMap::new();
+                for round in 0..2 {
+                    let service = Recommendations::new(catalog.clone());
+                    let mut updates = Vec::new();
+                    let snapshot = service.get_recommendation_data(view, round > 0, &item_order, |update| updates.push(update), |_, _| {}).await.unwrap();
+                    assert_eq!(snapshot.folders.len(), folder_ids.len());
+                    let expected_server_order = if round == 0 { (0..6).map(|index| index.to_string()).collect::<Vec<_>>() }
+                        else { (0..6).rev().map(|index| index.to_string()).collect::<Vec<_>>() };
+                    for folder in &snapshot.folders {
+                        let order = folder.items.iter().map(|item| item.fields().item_id.as_str().to_owned()).collect::<Vec<_>>();
+                        if view.should_shuffle_items(folder.item_id.as_str()) {
+                            if round == 0 { previous_orders.insert(folder.item_id.clone(), order); }
+                            else { assert_eq!(order, previous_orders[&folder.item_id], "{:?}", folder.item_id); }
+                        } else {
+                            assert_eq!(order, expected_server_order);
+                        }
+                        assert!(folder.items.iter().all(|item| item.fields().name == format!("Round {round}")));
+                    }
+                    for update in updates {
+                        for folder in update.folders {
+                            if !folder.items.is_empty() && view.should_shuffle_items(folder.item_id.as_str()) {
+                                let order = folder.items.iter().map(|item| item.fields().item_id.as_str().to_owned()).collect::<Vec<_>>();
+                                assert_eq!(order, previous_orders[&folder.item_id]);
+                            }
+                        }
+                    }
+                }
+                let starts = catalog.starts.lock().unwrap();
+                let reads_per_round = if has_embedded_items { 1 } else { folder_ids.len() + 1 };
+                assert_eq!(starts.len(), reads_per_round * 2);
+                assert!(starts[..reads_per_round].iter().all(|(_, refresh)| !refresh));
+                assert!(starts[reads_per_round..].iter().all(|(_, refresh)| *refresh));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn home_loads_all_genre_artist_folders_and_excludes_other_views() {
         let folders: Vec<RecommendationFolder> = serde_json::from_value(serde_json::Value::Array(
             ["user_genre_artists_", "global_genre_artists_"].into_iter().flat_map(|prefix| {
@@ -476,7 +554,7 @@ mod tests {
         for _ in 0..2 {
             let mut publications = Vec::new();
             let snapshot = tokio::time::timeout(std::time::Duration::from_secs(2),
-                service.get_recommendation_data(RecommendationView::Home, false, |snapshot| publications.push(snapshot), |_, _| {})
+                service.get_recommendation_data(RecommendationView::Home, false, &RecommendationItemOrder::default(), |snapshot| publications.push(snapshot), |_, _| {})
             ).await.unwrap().unwrap();
             assert_eq!(snapshot.folders.len(), 6);
             assert!(!snapshot.is_loading);
@@ -519,7 +597,7 @@ mod tests {
             reads: Mutex::new(reads), starts: Mutex::new(Vec::new()),
         }));
         let mut updates = Vec::new();
-        let full = service.get_recommendation_data(RecommendationView::Explore, false, |snapshot| updates.push(snapshot), |_, _| {}).await.unwrap();
+        let full = service.get_recommendation_data(RecommendationView::Explore, false, &RecommendationItemOrder::default(), |snapshot| updates.push(snapshot), |_, _| {}).await.unwrap();
         assert_eq!(updates.len(), 3);
         for (index, update) in updates.iter().enumerate() {
             let delta = update.delta.as_ref().expect("Explore publishes section deltas");
@@ -758,6 +836,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Home,
                     false,
+                    &RecommendationItemOrder::default(),
                     collect_snapshots(updates),
                     |_, _| {},
                 )
@@ -872,6 +951,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Explore,
                     false,
+                    &RecommendationItemOrder::default(),
                     collect_snapshots(updates),
                     |_, _| {},
                 )
@@ -953,6 +1033,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Home,
                     true,
+                    &RecommendationItemOrder::default(),
                     collect_snapshots(updates),
                     |_, _| {},
                 )
@@ -1024,7 +1105,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn recommendation_playlist_folders_preserve_order_without_track_reads() {
+    async fn recommendation_playlist_folders_preserve_shuffled_order_without_track_reads() {
         let catalog = Arc::new(ObservedCatalog {
             reads: Mutex::new(HashMap::new()),
             starts: Mutex::new(Vec::new()),
@@ -1066,6 +1147,7 @@ mod tests {
                 .get_recommendation_data(
                     RecommendationView::Explore,
                     false,
+                    &RecommendationItemOrder::default(),
                     collect_snapshots(updates),
                     |_, _| {
                         count.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
@@ -1083,8 +1165,10 @@ mod tests {
         assert_eq!(catalog.starts.lock().unwrap().len(), 1);
         drop(senders);
         let result = task.await.unwrap().unwrap();
-        assert_eq!(result.folders[0].items[0].fields().item_id.as_str(), "slow");
-        assert_eq!(result.folders[0].items[1].fields().item_id.as_str(), "fast");
+        assert_eq!(result.folders[0].items, early.folders[0].items);
+        let mut identities = result.folders[0].items.iter().map(|item| item.fields().item_id.as_str()).collect::<Vec<_>>();
+        identities.sort();
+        assert_eq!(identities, ["fast", "slow"]);
         assert!(!result.has_load_error);
         assert!(!result.is_loading);
         assert_eq!(read_count.load(std::sync::atomic::Ordering::Relaxed), 1);
@@ -1110,9 +1194,11 @@ mod tests {
             .unwrap();
         let service = Recommendations::new(catalog);
         let (old_updates, mut old_observed) = mpsc::unbounded_channel();
+        let item_order = RecommendationItemOrder::default();
         let mut old_request = Box::pin(service.get_recommendation_data(
             RecommendationView::Home,
             false,
+            &item_order,
             |snapshot| {
                 old_updates.send(snapshot).unwrap();
             },
@@ -1135,6 +1221,7 @@ mod tests {
             .get_recommendation_data(
                 RecommendationView::Home,
                 true,
+                &item_order,
                 |snapshot| new_updates.push(materialize_update(&mut new_projection, snapshot)),
                 |_, _| {},
             )

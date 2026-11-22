@@ -19,6 +19,7 @@ pub(crate) mod playlist_artwork;
 pub(crate) mod queries;
 mod query_tasks;
 pub(crate) mod radio;
+mod recommendation_item_order;
 pub(crate) mod recommendations;
 pub(crate) mod repositories;
 pub(crate) mod session;
@@ -34,6 +35,7 @@ pub(crate) struct Application {
     pub(crate) coordinator: Arc<Mutex<ApplicationState>>,
     pub(crate) command_serializer: Arc<Mutex<()>>,
     pub(crate) environment: session::SessionEnvironment,
+    pub(crate) recommendation_item_order: Arc<recommendation_item_order::RecommendationItemOrder>,
 }
 
 impl Application {
@@ -54,6 +56,7 @@ impl Application {
             runtime,
             command_serializer: Arc::new(Mutex::new(())),
             environment,
+            recommendation_item_order: Arc::new(recommendation_item_order::RecommendationItemOrder::default()),
         }
     }
 

@@ -53,6 +53,8 @@ class MediaSlideSectionDesktop<T> extends StatefulWidget {
     this.onPlaylistTap,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaSlideSectionDesktop<T>> createState() =>
       _MediaSlideSectionDesktopState<T>();
@@ -228,14 +230,14 @@ class _MediaSlideSectionDesktopState<T>
     final colors = context.mashinColors;
     final bool hasTitle = widget.title.trim().isNotEmpty;
     final bool hasPlayableContent =
-        !widget.isLoading && _playableItems().isNotEmpty;
+        !widget.shouldShowLoadingPlaceholder && _playableItems().isNotEmpty;
 
     return MediaPageImagePreload(
       items: widget.items,
       pageStart: _currentIndex,
       pageSize: 1,
       imageSize: 512,
-      isEnabled: !widget.isLoading,
+      isEnabled: !widget.shouldShowLoadingPlaceholder,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: <Widget>[
@@ -248,7 +250,8 @@ class _MediaSlideSectionDesktopState<T>
                     fontWeight: FontWeight.w700,
                   ),
                 ),
-                if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
+                if (!widget.shouldShowLoadingPlaceholder &&
+                    widget.items.isNotEmpty) ...<Widget>[
                   const SizedBox(width: 10),
                   SectionCountBadge(count: widget.items.length),
                 ],
@@ -289,7 +292,7 @@ class _MediaSlideSectionDesktopState<T>
               ],
             ),
           if (hasTitle) const SizedBox(height: 10),
-          if (widget.isLoading)
+          if (widget.shouldShowLoadingPlaceholder)
             _DesktopSlideSkeleton(
               height: widget.height,
               coverSize: widget.coverSize,

@@ -36,6 +36,8 @@ class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
     this.onSelectionMenuTap,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaListSectionMobile<T>> createState() =>
       _MediaListSectionMobileState<T>();
@@ -174,10 +176,11 @@ class _MediaListSectionMobileState<T extends MediaItem>
   }
 
   Widget _buildHeader(BuildContext context) {
-    final hasPlayableContent = !widget.isLoading && _playableItems().isNotEmpty;
+    final hasPlayableContent =
+        !widget.shouldShowLoadingPlaceholder && _playableItems().isNotEmpty;
     return MobileSectionHeader(
       title: widget.title,
-      itemCount: !widget.isLoading && widget.items.isNotEmpty
+      itemCount: !widget.shouldShowLoadingPlaceholder && widget.items.isNotEmpty
           ? widget.items.length
           : null,
       showPlaybackActions: widget.coreBridge != null,
@@ -188,7 +191,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
   }
 
   Widget _buildContent(BuildContext context) {
-    if (widget.isLoading) return _buildTypedListSkeleton();
+    if (widget.shouldShowLoadingPlaceholder) return _buildTypedListSkeleton();
     if (widget.items.isEmpty) {
       return Text(
         widget.emptyText,

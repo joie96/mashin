@@ -8,12 +8,19 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:flutter_svg/flutter_svg.dart';
 import 'package:mashin/app/theme/app_theme.dart';
 import 'package:mashin/features/core/core_bridge.dart';
+import 'package:mashin/features/core/core_events.dart';
 import 'package:mashin/features/core/core_models.dart';
 import 'package:mashin/features/core/core_query_scope.dart';
+import 'package:mashin/features/shared/detail_page_lifecycle.dart';
 import 'package:mashin/features/shared/widgets/media_image.dart';
+import 'package:mashin/features/shared/widgets/media_list_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_list_section_mobile.dart';
 import 'package:mashin/features/shared/widgets/media_row_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_row_section_mobile.dart';
 import 'package:mashin/features/shared/widgets/media_slide_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_slide_section_mobile.dart';
 import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
 
 void main() {
   Future<Uint8List> bitmap(Color color) async {
@@ -35,6 +42,253 @@ void main() {
     ProviderManifestRegistry.clear();
     MediaItemImage.configureProxyBaseUrl(null);
   });
+
+  for (final variant in [
+    'mobile-slide',
+    'desktop-slide',
+    'mobile-list',
+    'desktop-list',
+    'mobile-row',
+    'desktop-row',
+    'mobile-table',
+    'desktop-table',
+  ]) {
+    testWidgets(
+      'section refresh keeps loaded image widgets mounted, variant=$variant',
+      (tester) async {
+        final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+        var reads = 0;
+        MediaImage.configureImageLoader((request, refresh) async {
+          reads++;
+          return ImageReadSnapshot(bytes: bytes);
+        });
+        final bridge = _UnusedCoreBridge();
+        final events = MashinCoreBridgeEvents(coreBridge: bridge);
+        addTearDown(events.dispose);
+        final items = [
+          Track.fromJson({
+            'media_type': 'track',
+            'item_id': 'one',
+            'provider': 'library',
+            'name': 'Retained track',
+            'duration': 120,
+            'artists': [],
+            'metadata': {
+              'images': [
+                {
+                  'type': 'thumb',
+                  'path': '',
+                  'provider': 'builtin',
+                  'proxy_id': 'a' * 64,
+                },
+              ],
+            },
+          }),
+        ];
+        Widget section(bool isLoading, {List<Track>? sectionItems}) {
+          final content = switch (variant) {
+            'mobile-slide' => MediaSlideSectionMobile<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+            ),
+            'desktop-slide' => MediaSlideSectionDesktop<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+            ),
+            'mobile-list' => MediaListSectionMobile<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+            ),
+            'desktop-list' => MediaListSectionDesktop<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+            ),
+            'mobile-row' => MediaRowSectionMobile<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              coreEvents: events,
+            ),
+            'desktop-row' => MediaRowSectionDesktop<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              coreEvents: events,
+            ),
+            'mobile-table' => MediaTableSectionMobile<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              coreEvents: events,
+            ),
+            'desktop-table' => MediaTableSectionDesktop<Track>(
+              title: 'Tracks',
+              items: sectionItems ?? items,
+              isLoading: isLoading,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              coreEvents: events,
+            ),
+            _ => throw StateError('Unsupported section variant'),
+          };
+          return MaterialApp(
+            theme: AppTheme.dark(),
+            home: Scaffold(
+              body: variant == 'mobile-table'
+                  ? CustomScrollView(slivers: [content])
+                  : content,
+            ),
+          );
+        }
+
+        await tester.pumpWidget(section(true, sectionItems: []));
+        await tester.pump();
+        expect(find.byType(MediaImage), findsNothing);
+        expect(reads, 0);
+        await tester.pumpWidget(section(false));
+        await tester.pumpAndSettle();
+        final imageStates = tester.stateList(find.byType(MediaImage)).toList();
+        final decodedImageStates = tester
+            .stateList(find.byType(Image))
+            .toList();
+        final imageBytes = tester
+            .widgetList<Image>(find.byType(Image))
+            .map((image) => (image.image as MemoryImage).bytes)
+            .toList();
+        final initialReads = reads;
+        expect(imageStates, isNotEmpty);
+        expect(initialReads, greaterThan(0));
+        await tester.pumpWidget(section(true));
+        await tester.pumpAndSettle();
+        expect(find.text('Retained track'), findsWidgets);
+        expect(
+          tester.stateList(find.byType(MediaImage)),
+          orderedEquals(imageStates.map(same)),
+        );
+        expect(
+          tester.stateList(find.byType(Image)),
+          orderedEquals(decodedImageStates.map(same)),
+        );
+        expect(
+          tester
+              .widgetList<Image>(find.byType(Image))
+              .map((image) => (image.image as MemoryImage).bytes),
+          orderedEquals(imageBytes.map(same)),
+        );
+        expect(reads, initialReads);
+        await tester.pumpWidget(section(false));
+        await tester.pumpAndSettle();
+        expect(
+          tester.stateList(find.byType(MediaImage)),
+          orderedEquals(imageStates.map(same)),
+        );
+        expect(reads, initialReads);
+        await tester.pumpWidget(section(false, sectionItems: []));
+        await tester.pumpAndSettle();
+        expect(find.text('Empty'), findsOneWidget);
+        expect(find.byType(MediaImage), findsNothing);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
+  testWidgets(
+    'mobile playlist covers retain loaded states and resume at scroll end',
+    (tester) async {
+      final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+      final reads = <String, int>{};
+      MediaImage.configureImageLoader((request, refresh) async {
+        final proxyId = request.image.proxyId;
+        if (proxyId != null)
+          reads.update(proxyId, (value) => value + 1, ifAbsent: () => 1);
+        return ImageReadSnapshot(bytes: bytes);
+      });
+      final bridge = _UnusedCoreBridge();
+      final events = MashinCoreBridgeEvents(coreBridge: bridge);
+      final scroll = ScrollController();
+      addTearDown(events.dispose);
+      addTearDown(scroll.dispose);
+      Playlist playlist(String itemId, String proxyId) => Playlist.fromJson({
+        'item_id': itemId,
+        'provider': 'library',
+        'name': itemId,
+        'metadata': {
+          'images': [
+            {
+              'type': 'thumb',
+              'path': '',
+              'provider': 'builtin',
+              'proxy_id': proxyId,
+            },
+          ],
+        },
+      });
+      final first = playlist('first', 'a' * 64);
+      final second = playlist('second', 'b' * 64);
+      var shouldDefer = false;
+      Widget table(List<Playlist> items) => MaterialApp(
+        theme: AppTheme.dark(),
+        home: Scaffold(
+          body: CustomScrollView(
+            controller: scroll,
+            physics: _ControlledDeferredLoadingPhysics(() => shouldDefer),
+            slivers: [
+              MediaTableSectionMobile<Playlist>(
+                title: '',
+                items: items,
+                isLoading: false,
+                emptyText: 'Empty',
+                maxItemsPerPage: 0,
+                coreBridge: bridge,
+                coreEvents: events,
+              ),
+            ],
+          ),
+        ),
+      );
+      final coverImages = find.descendant(
+        of: find.byType(MediaTableCover),
+        matching: find.byType(MediaImage),
+      );
+      await tester.pumpWidget(table([first]));
+      await tester.pumpAndSettle();
+      expect(coverImages, findsOneWidget);
+      final firstState = tester.state(coverImages);
+      final firstReads = reads['a' * 64];
+      expect(firstReads, greaterThan(0));
+      shouldDefer = true;
+      scroll.position.isScrollingNotifier.value = true;
+      await tester.pumpWidget(table([first, second]));
+      await tester.pump(const Duration(milliseconds: 250));
+      expect(coverImages, findsOneWidget);
+      expect(tester.state(coverImages), same(firstState));
+      expect(reads['a' * 64], firstReads);
+      expect(reads['b' * 64], isNull);
+      shouldDefer = false;
+      scroll.position.isScrollingNotifier.value = false;
+      await tester.pumpAndSettle();
+      expect(coverImages, findsNWidgets(2));
+      expect(tester.stateList(coverImages).first, same(firstState));
+      expect(reads['a' * 64], firstReads);
+      expect(reads['b' * 64], 1);
+      await tester.pumpWidget(const SizedBox.shrink());
+      expect(tester.takeException(), isNull);
+    },
+  );
 
   for (final isNested in [false, true]) {
     testWidgets(
@@ -342,6 +596,13 @@ void main() {
       await tester.pumpAndSettle();
       final original =
           tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+      await tester.pumpWidget(image('updated-path', 40));
+      expect(find.text('fallback'), findsNothing);
+      expect(
+        (tester.widget<Image>(find.byType(Image)).image as MemoryImage).bytes,
+        same(original.bytes),
+      );
+      expect(requests, hasLength(2));
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpWidget(image('new-path', 40));
       expect(find.byType(Image), findsOneWidget);
@@ -349,12 +610,12 @@ void main() {
         (tester.widget<Image>(find.byType(Image)).image as MemoryImage).bytes,
         same(original.bytes),
       );
-      expect(requests, hasLength(2));
+      expect(requests, hasLength(3));
       expect(requests.last.image.path, 'new-path');
       await tester.pumpWidget(const SizedBox.shrink());
       await tester.pumpWidget(image('new-path', 512));
       expect(find.text('fallback'), findsOneWidget);
-      expect(requests, hasLength(3));
+      expect(requests, hasLength(4));
       expect(requests.last.size, 512);
       pending.complete(ImageReadSnapshot(bytes: bytes));
       await tester.pumpAndSettle();
@@ -598,6 +859,59 @@ void main() {
     },
   );
 
+  testWidgets('remounted inline slots retain bytes across content revisions', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    final pending = Completer<ImageReadSnapshot>();
+    final requests = <ImageRequest>[];
+    MediaImage.configureImageLoader((request, refresh) async {
+      requests.add(request);
+      return requests.length == 1
+          ? ImageReadSnapshot(bytes: bytes)
+          : pending.future;
+    });
+    Widget image(String hash, {String owner = 'library://playlist/42'}) =>
+        MaterialApp(
+          home: MediaImage(
+            source: MediaItemImage(
+              type: 'thumb',
+              path: '',
+              provider: 'builtin',
+              remotelyAccessible: false,
+              cachedInline: CachedInlineImage(
+                ownerUri: owner,
+                position: 0,
+                contentHash: hash,
+              ),
+            ).getProxyPath(size: 160, ownerUri: owner)!,
+            fit: BoxFit.cover,
+            fallback: const Text('fallback'),
+          ),
+        );
+    await tester.pumpWidget(image('old-content'));
+    await tester.pumpAndSettle();
+    final original =
+        tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(image('new-content'));
+    expect(find.text('fallback'), findsNothing);
+    expect(
+      (tester.widget<Image>(find.byType(Image)).image as MemoryImage).bytes,
+      same(original.bytes),
+    );
+    expect(requests, hasLength(2));
+    expect(requests.last.image.cachedInline!.contentHash, 'new-content');
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(
+      image('new-content', owner: 'library://playlist/43'),
+    );
+    expect(find.text('fallback'), findsOneWidget);
+    pending.complete(ImageReadSnapshot(bytes: bytes));
+    await tester.pumpAndSettle();
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
   testWidgets('same-slot content changes reload visible native images', (
     tester,
   ) async {
@@ -786,6 +1100,70 @@ void main() {
     pending.complete(null);
     await tester.pumpAndSettle();
     expect(find.text('fallback'), findsOneWidget);
+    await tester.pumpWidget(const SizedBox.shrink());
+  });
+
+  testWidgets('artwork identity survives metadata revisions and remounts', (
+    tester,
+  ) async {
+    final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+    final pending = Completer<MediaItemImage?>();
+    final requests = <String>[];
+    MediaImage.configureArtworkLoader((item) async {
+      requests.add(item.name);
+      if (requests.length > 1) return pending.future;
+      return MediaItemImage(
+        type: 'thumb',
+        path: '',
+        provider: 'source',
+        remotelyAccessible: false,
+        proxyId: 'a' * 64,
+      );
+    });
+    MediaImage.configureImageLoader(
+      (_, _) async => ImageReadSnapshot(bytes: bytes),
+    );
+    Widget image(String name, {String itemId = 'one'}) => MaterialApp(
+      home: MediaImage(
+        source: Artist.fromJson({
+          'item_id': itemId,
+          'provider': 'library',
+          'name': name,
+          'provider_mappings': [
+            {
+              'provider_domain': 'source',
+              'provider_instance': 'source--one',
+              'item_id': 'other',
+            },
+          ],
+        }).imageUriForSize(256)!,
+        fit: BoxFit.cover,
+        fallback: const Text('fallback'),
+      ),
+    );
+    await tester.pumpWidget(image('Original'));
+    await tester.pumpAndSettle();
+    final original =
+        tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+    await tester.pumpWidget(image('Updated'));
+    expect(find.text('fallback'), findsNothing);
+    expect(
+      (tester.widget<Image>(find.byType(Image)).image as MemoryImage).bytes,
+      same(original.bytes),
+    );
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(image('Remounted'));
+    expect(find.text('fallback'), findsNothing);
+    expect(
+      (tester.widget<Image>(find.byType(Image)).image as MemoryImage).bytes,
+      same(original.bytes),
+    );
+    expect(requests, ['Original', 'Updated', 'Remounted']);
+    await tester.pumpWidget(const SizedBox.shrink());
+    await tester.pumpWidget(image('Different', itemId: 'two'));
+    expect(find.text('fallback'), findsOneWidget);
+    pending.complete(null);
+    await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox.shrink());
   });
 
@@ -1356,6 +1734,83 @@ void main() {
     },
   );
 
+  for (final hasRefresh in [false, true]) {
+    testWidgets(
+      'back navigation retains images without repeating local reads, refresh=$hasRefresh',
+      (tester) async {
+        final bytes = (await tester.runAsync(() => bitmap(Colors.red)))!;
+        final navigator = GlobalKey<NavigatorState>();
+        var localReads = 0;
+        var refreshReads = 0;
+        var canceled = 0;
+        MediaImage.configureImageLoader((request, refresh) {
+          if (!refresh) {
+            localReads++;
+            return Future.value(
+              ImageReadSnapshot(bytes: bytes, hasRefresh: hasRefresh),
+            );
+          }
+          refreshReads++;
+          return CoreQueryScope.current!.execute(
+            () => Completer<ImageReadSnapshot>().future,
+            onCancel: () => canceled++,
+          );
+        });
+        await tester.pumpWidget(
+          MaterialApp(
+            navigatorKey: navigator,
+            navigatorObservers: [detailPageRouteObserver],
+            home: MediaImage(
+              source: MediaItemImage(
+                type: 'thumb',
+                path: '',
+                provider: 'builtin',
+                remotelyAccessible: false,
+                proxyId: 'a' * 64,
+              ).getProxyPath()!,
+              fit: BoxFit.cover,
+              fallback: const Text('fallback'),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final original =
+            tester.widget<Image>(find.byType(Image)).image as MemoryImage;
+        await tester.runAsync(
+          () =>
+              precacheImage(original, tester.element(find.byType(MediaImage))),
+        );
+        await tester.pump();
+        expect(localReads, 1);
+        expect(refreshReads, hasRefresh ? 1 : 0);
+        for (var visit = 1; visit <= 2; visit++) {
+          unawaited(
+            navigator.currentState!.push(
+              MaterialPageRoute<void>(
+                builder: (_) => const Scaffold(body: Text('Detail')),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          expect(canceled, hasRefresh ? visit : 0);
+          navigator.currentState!.pop();
+          await tester.pumpAndSettle();
+          expect(find.text('fallback'), findsNothing);
+          expect(
+            (tester.widget<Image>(find.byType(Image)).image as MemoryImage)
+                .bytes,
+            same(original.bytes),
+          );
+          expect(localReads, 1);
+          expect(refreshReads, hasRefresh ? visit + 1 : 0);
+        }
+        await tester.pumpWidget(const SizedBox.shrink());
+        expect(canceled, hasRefresh ? 3 : 0);
+        expect(tester.takeException(), isNull);
+      },
+    );
+  }
+
   testWidgets(
     'hidden refresh cancels only its subscriber and resumes on visibility',
     (tester) async {
@@ -1732,7 +2187,7 @@ void main() {
       expect(canceled, 1);
       await tester.pumpWidget(icon(true));
       await tester.pump();
-      expect(reads, 2);
+      expect(reads, 1);
       expect(metadataReads, 0);
       await tester.pumpWidget(const SizedBox.shrink());
       expect(canceled, 2);
@@ -1792,6 +2247,26 @@ void main() {
       await tester.pumpWidget(const SizedBox.shrink());
     },
   );
+}
+
+class _ControlledDeferredLoadingPhysics extends ClampingScrollPhysics {
+  const _ControlledDeferredLoadingPhysics(this.shouldDefer, {super.parent});
+
+  final bool Function() shouldDefer;
+
+  @override
+  _ControlledDeferredLoadingPhysics applyTo(ScrollPhysics? ancestor) =>
+      _ControlledDeferredLoadingPhysics(
+        shouldDefer,
+        parent: buildParent(ancestor),
+      );
+
+  @override
+  bool recommendDeferredLoading(
+    double velocity,
+    ScrollMetrics metrics,
+    BuildContext context,
+  ) => shouldDefer();
 }
 
 class _UnusedCoreBridge extends Fake implements MashinCoreBridgeApi {}

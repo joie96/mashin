@@ -48,6 +48,8 @@ class MediaListSectionDesktop<T extends MediaItem> extends StatefulWidget {
     this.onItemSelectionContextMenu,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaListSectionDesktop<T>> createState() =>
       _MediaListSectionDesktopState<T>();
@@ -265,7 +267,9 @@ class _MediaListSectionDesktopState<T extends MediaItem>
 
   // Expansion resets paging and cancels any in-flight page transition.
   void _toggleExpanded() {
-    if (widget.isLoading || widget.items.length <= _lastVisibleCount) return;
+    if (widget.shouldShowLoadingPlaceholder ||
+        widget.items.length <= _lastVisibleCount)
+      return;
     setState(() {
       _isExpanded = !_isExpanded;
       _expandLoadRunId++;
@@ -428,7 +432,8 @@ class _MediaListSectionDesktopState<T extends MediaItem>
                 1,
                 (widget.items.length / pageSize).ceil(),
               );
-              final canToggleExpand = !widget.isLoading && pageCount > 1;
+              final canToggleExpand =
+                  !widget.shouldShowLoadingPlaceholder && pageCount > 1;
               return Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: <Widget>[
@@ -468,7 +473,8 @@ class _MediaListSectionDesktopState<T extends MediaItem>
     required int visibleCount,
     required int pageCount,
   }) {
-    final hasPlayableContent = !widget.isLoading && _playableItems().isNotEmpty;
+    final hasPlayableContent =
+        !widget.shouldShowLoadingPlaceholder && _playableItems().isNotEmpty;
     return Row(
       children: <Widget>[
         Text(
@@ -477,7 +483,8 @@ class _MediaListSectionDesktopState<T extends MediaItem>
             context,
           ).textTheme.titleMedium?.copyWith(fontWeight: FontWeight.w700),
         ),
-        if (!widget.isLoading && widget.items.isNotEmpty) ...<Widget>[
+        if (!widget.shouldShowLoadingPlaceholder &&
+            widget.items.isNotEmpty) ...<Widget>[
           const SizedBox(width: 10),
           SectionCountBadge(count: widget.items.length),
         ],
@@ -497,7 +504,9 @@ class _MediaListSectionDesktopState<T extends MediaItem>
             onTap: hasPlayableContent ? _onShuffleAllTap : null,
           ),
         ],
-        if (pageCount > 1 && !widget.isLoading && !_isExpanded) ...<Widget>[
+        if (pageCount > 1 &&
+            !widget.shouldShowLoadingPlaceholder &&
+            !_isExpanded) ...<Widget>[
           if (widget.coreBridge != null) ...<Widget>[
             const SizedBox(width: 4),
             const SectionHeaderVerticalDivider(),
@@ -513,7 +522,7 @@ class _MediaListSectionDesktopState<T extends MediaItem>
   }
 
   Widget _buildContent(BuildContext context, {required int columnCount}) {
-    if (widget.isLoading) {
+    if (widget.shouldShowLoadingPlaceholder) {
       return _buildTypedListSkeleton(columnCount: columnCount);
     }
     if (widget.items.isEmpty) {

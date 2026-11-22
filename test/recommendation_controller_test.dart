@@ -1363,13 +1363,13 @@ void main() {
               section = isTrackSection
                   ? MediaListSectionMobile<Track>(
                       title: '',
-                      items: [track],
+                      items: isLoading ? const [] : [track],
                       isLoading: isLoading,
                       emptyText: 'Empty',
                     )
                   : MediaListSectionMobile<MediaItem>(
                       title: '',
-                      items: [track],
+                      items: isLoading ? const [] : [track],
                       isLoading: isLoading,
                       emptyText: 'Empty',
                     );
@@ -1377,13 +1377,13 @@ void main() {
               section = isTrackSection
                   ? MediaListSectionDesktop<Track>(
                       title: '',
-                      items: [track],
+                      items: isLoading ? const [] : [track],
                       isLoading: isLoading,
                       emptyText: 'Empty',
                     )
                   : MediaListSectionDesktop<MediaItem>(
                       title: '',
-                      items: [track],
+                      items: isLoading ? const [] : [track],
                       isLoading: isLoading,
                       emptyText: 'Empty',
                     );
@@ -2327,6 +2327,110 @@ void main() {
     }
   }
 
+  for (final view in RecommendationView.values) {
+    test(
+      '${view.name} preserves native item order across favorites, reload and new controllers',
+      () async {
+        final bridge = _RecommendationBridge();
+        final home = view == RecommendationView.home
+            ? HomeController(coreBridge: bridge)
+            : null;
+        final explore = view == RecommendationView.explore
+            ? ExploreController(coreBridge: bridge)
+            : null;
+        HomeController? reopenedHome;
+        ExploreController? reopenedExplore;
+        addTearDown(() async {
+          home?.dispose();
+          explore?.dispose();
+          reopenedHome?.dispose();
+          reopenedExplore?.dispose();
+          await bridge.eventsController.close();
+        });
+        final identities = view == RecommendationView.home
+            ? <(String, String)>[
+                ('user_recommendations', 'track'),
+                ('user_genre_playlists_monthly', 'playlist'),
+                ('user_artist_playlists_monthly', 'playlist'),
+                ('user_artist_recommendations', 'artist'),
+                ('user_album_recommendations', 'album'),
+                ('user_rediscovery_tracks', 'track'),
+                for (final genre in ['rock', 'pop', 'jazz'])
+                  ('user_genre_artists_$genre', 'artist'),
+              ]
+            : <(String, String)>[
+                ('global_artist_radio_playlists', 'playlist'),
+                ('global_mood_playlists', 'playlist'),
+                ('global_genre_playlists', 'playlist'),
+                ('global_popular_artist_albums', 'album'),
+                ('de_popular_artist_albums', 'album'),
+                for (final genre in ['rock', 'pop', 'jazz']) ...[
+                  ('global_genre_artists_$genre', 'artist'),
+                  ('global_genre_albums_$genre', 'album'),
+                ],
+              ];
+        final folders = [
+          for (final (identity, type) in identities)
+            _folder(identity, type, ['third', 'first', 'second']),
+        ];
+        Map<String, List<MediaItem>> homeItems(HomeController controller) => {
+          'user_recommendations': controller.recommendationItems,
+          'user_genre_playlists_monthly': controller.genrePlaylists,
+          'user_artist_playlists_monthly': controller.artistPlaylists,
+          'user_artist_recommendations': controller.artistRecommendations,
+          'user_album_recommendations': controller.albumRecommendations,
+          'user_rediscovery_tracks': controller.rediscoveryTracks,
+          for (final section in controller.artistSections)
+            section.title: section.artists,
+        };
+        void expectOrder(
+          HomeController? homeController,
+          ExploreController? exploreController,
+        ) {
+          for (final (identity, _) in identities) {
+            final items = homeController != null
+                ? homeItems(homeController)[identity]!
+                : exploreController!.itemsForFolder<MediaItem>(identity);
+            expect(items.map((item) => item.itemId), [
+              'third',
+              'first',
+              'second',
+            ], reason: identity);
+          }
+        }
+
+        final loading = home?.load() ?? explore!.load();
+        await bridge.requested.future;
+        bridge.emitFolders(view, folders);
+        expectOrder(home, explore);
+        home?.refreshFavoriteStatuses();
+        explore?.refreshFavoriteStatuses();
+        expectOrder(home, explore);
+        bridge.result.complete(
+          RecommendationSnapshot.fromJson({
+            'folders': folders,
+            'is_loading': false,
+            'has_load_error': false,
+          }),
+        );
+        await loading;
+        await Future<void>.delayed(Duration.zero);
+        await (home?.load(refresh: true) ?? explore!.load(refresh: true));
+        await Future<void>.delayed(Duration.zero);
+        expectOrder(home, explore);
+        if (view == RecommendationView.home) {
+          reopenedHome = HomeController(coreBridge: bridge);
+          await reopenedHome.load();
+        } else {
+          reopenedExplore = ExploreController(coreBridge: bridge);
+          await reopenedExplore.load();
+        }
+        await Future<void>.delayed(Duration.zero);
+        expectOrder(reopenedHome, reopenedExplore);
+      },
+    );
+  }
+
   test(
     'home exposes all personal Last.fm sections in provider order',
     () async {
@@ -2969,7 +3073,9 @@ class _RecommendationBridge implements MashinCoreBridgeApi {
     required RecommendationView view,
     bool refresh = true,
   }) {
-    requested.complete();
+    if (!requested.isCompleted) {
+      requested.complete();
+    }
     return result.future;
   }
 

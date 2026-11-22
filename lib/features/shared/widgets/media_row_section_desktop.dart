@@ -76,6 +76,8 @@ class MediaRowSectionDesktop<T> extends StatefulWidget {
     this.playlistCoverBuilder,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaRowSectionDesktop<T>> createState() =>
       _MediaRowSectionDesktopState<T>();
@@ -431,7 +433,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
 
   _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
     // While loading, items is still empty, so fall back to skeletonCount to keep skeleton items visibly sized.
-    final int itemCount = widget.isLoading
+    final int itemCount = widget.shouldShowLoadingPlaceholder
         ? widget.skeletonCount
         : widget.items.length;
 
@@ -884,7 +886,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   bool get _canToggleExpand =>
-      !widget.isLoading &&
+      !widget.shouldShowLoadingPlaceholder &&
       widget.items.length >
           math.max(1, _lastVisibleCount ?? _pageStartIndex + 1);
 
@@ -1052,11 +1054,11 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         final bool isPagingEnabled = pageCount > 1;
         _pageStartIndex = _clampStartIndex(visibleCount: visibleCount);
         final bool hasPlayableContent =
-            !widget.isLoading && widget.items.isNotEmpty;
+            !widget.shouldShowLoadingPlaceholder && widget.items.isNotEmpty;
         final bool showHeaderRow =
             hasTitle || widget.coreEvents != null || isPagingEnabled;
         final bool canToggleExpand = _canToggleExpand;
-        final Widget collapsedContent = widget.isLoading
+        final Widget collapsedContent = widget.shouldShowLoadingPlaceholder
             ? SizedBox(
                 height: sectionHeight,
                 child: ListView.separated(
@@ -1182,7 +1184,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
               pageStart: _pageStartIndex,
               pageSize: visibleCount,
               imageSize: 256,
-              isEnabled: !widget.isLoading && !_isExpanded,
+              isEnabled: !widget.shouldShowLoadingPlaceholder && !_isExpanded,
               child: bodyContent,
             ),
             // Always reserve the toggle's space so sections without one

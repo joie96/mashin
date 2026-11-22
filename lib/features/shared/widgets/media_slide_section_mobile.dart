@@ -46,6 +46,8 @@ class MediaSlideSectionMobile<T> extends StatefulWidget {
     this.onSelectionMenuTap,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaSlideSectionMobile<T>> createState() =>
       _MediaSlideSectionMobileState<T>();
@@ -193,9 +195,10 @@ class _MediaSlideSectionMobileState<T>
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final shouldShowLoadingPlaceholder = widget.shouldShowLoadingPlaceholder;
     final bool hasTitle = widget.title.trim().isNotEmpty;
     final bool hasPlayableContent =
-        !widget.isLoading && _playableItems().isNotEmpty;
+        !shouldShowLoadingPlaceholder && _playableItems().isNotEmpty;
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
@@ -203,7 +206,7 @@ class _MediaSlideSectionMobileState<T>
         if (hasTitle)
           MobileSectionHeader(
             title: widget.title,
-            itemCount: !widget.isLoading && widget.items.isNotEmpty
+            itemCount: !shouldShowLoadingPlaceholder && widget.items.isNotEmpty
                 ? widget.items.length
                 : null,
             showPlaybackActions: widget.coreBridge != null,
@@ -212,12 +215,14 @@ class _MediaSlideSectionMobileState<T>
             shuffleTooltip: 'Zufällig abspielen',
           ),
         if (hasTitle) const SizedBox(height: 10),
-        if (!widget.isLoading && widget.items.isEmpty)
+        if (!shouldShowLoadingPlaceholder && widget.items.isEmpty)
           Text(widget.emptyText, style: TextStyle(color: colors.textSecondary))
         else
           SizedBox(
             height: widget.itemHeight,
-            child: widget.isLoading ? _buildSkeletonList() : _buildItemList(),
+            child: shouldShowLoadingPlaceholder
+                ? _buildSkeletonList()
+                : _buildItemList(),
           ),
       ],
     );

@@ -76,6 +76,8 @@ class MediaTableSectionDesktop<T> extends StatefulWidget {
     this.onPlaylistTap,
   }) : assert(maxItemsPerPage >= 0);
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaTableSectionDesktop<T>> createState() =>
       _MediaTableSectionDesktopState<T>();
@@ -603,7 +605,7 @@ class _MediaTableSectionDesktopState<T>
         : const <int>[];
 
     if (widget.maxItemsPerPage == 0) {
-      final Widget rows = widget.isLoading
+      final Widget rows = widget.shouldShowLoadingPlaceholder
           ? SliverFixedExtentList.builder(
               itemExtent: _desktopRowExtent,
               itemCount: widget.skeletonRowCount,
@@ -776,7 +778,7 @@ class _MediaTableSectionDesktopState<T>
                 padding: const EdgeInsets.only(bottom: 10),
                 child: Text(widget.title),
               ),
-            if (widget.isLoading || widget.items.isNotEmpty)
+            if (widget.shouldShowLoadingPlaceholder || widget.items.isNotEmpty)
               _buildDesktopTypedHeader(),
           ],
         ),
@@ -822,7 +824,7 @@ class _MediaTableSectionDesktopState<T>
     final int visibleRowCount = _isExpanded ? widget.items.length : _chunkSize;
     final double pagedContentHeight = visibleRowCount * _desktopRowExtent;
 
-    if (widget.isLoading) {
+    if (widget.shouldShowLoadingPlaceholder) {
       final Widget body = ListView.builder(
         primary: false,
         shrinkWrap: !useInternalScroll,

@@ -204,14 +204,8 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
             coreBridge: widget.coreBridge,
             coreEvents: widget.coreEvents,
             playlistSubtitleBuilder: (Playlist playlist) {
-              final List<Track> tracks = _controller.tracksFor(<Playlist>[
-                playlist,
-              ]);
-              final int totalSeconds = tracks.fold<int>(
-                0,
-                (int sum, Track track) => sum + track.duration,
-              );
-              return '${tracks.length} Titel • ${_formatPlaylistDuration(totalSeconds)}';
+              final summary = _controller.summaryFor(playlist);
+              return '${summary.trackCount} Titel • ${_formatPlaylistDuration(summary.totalSeconds)}';
             },
             onRowTap: (Playlist playlist, int _) =>
                 widget.onOpenPlaylist(playlist),

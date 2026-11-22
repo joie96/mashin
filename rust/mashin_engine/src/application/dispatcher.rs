@@ -483,7 +483,7 @@ impl Application {
                     coordinator.session_events()
                 };
                 recommendations
-                    .get_recommendation_data(view, refresh, |snapshot| {
+                    .get_recommendation_data(view, refresh, &self.recommendation_item_order, |snapshot| {
                         events.publish(
                             crate::application::events::ApplicationEvent::RecommendationsUpdated { view, snapshot },
                         );

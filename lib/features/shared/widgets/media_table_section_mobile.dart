@@ -50,6 +50,8 @@ class MediaTableSectionMobile<T> extends StatefulWidget {
     this.playlistSubtitleBuilder,
   });
 
+  bool get shouldShowLoadingPlaceholder => isLoading && items.isEmpty;
+
   @override
   State<MediaTableSectionMobile<T>> createState() =>
       _MediaTableSectionMobileState<T>();
@@ -373,7 +375,8 @@ class _MediaTableSectionMobileState<T>
   Widget build(BuildContext context) {
     final bool hasTitle = widget.title.trim().isNotEmpty;
     final bool hasPlayableContent =
-        !widget.isLoading && _playableItemsFromIndex(0).isNotEmpty;
+        !widget.shouldShowLoadingPlaceholder &&
+        _playableItemsFromIndex(0).isNotEmpty;
     final queueItemNumbers = T == QueueItem
         ? widget.items.cast<QueueItem>().normalizedItemNumbers
         : const <int>[];
@@ -386,7 +389,9 @@ class _MediaTableSectionMobileState<T>
               padding: const EdgeInsets.only(bottom: 10),
               child: MobileSectionHeader(
                 title: widget.title,
-                itemCount: !widget.isLoading && widget.items.isNotEmpty
+                itemCount:
+                    !widget.shouldShowLoadingPlaceholder &&
+                        widget.items.isNotEmpty
                     ? widget.items.length
                     : null,
                 showPlaybackActions: true,
@@ -396,7 +401,7 @@ class _MediaTableSectionMobileState<T>
               ),
             ),
           ),
-        if (widget.isLoading)
+        if (widget.shouldShowLoadingPlaceholder)
           SliverFixedExtentList.builder(
             itemExtent: _mobileRowExtent,
             itemCount: _effectiveSkeletonRowCount,
@@ -462,7 +467,7 @@ class _MediaTableSectionMobileState<T>
   }) {
     final bool useInternalScroll = fillScrollableViewport || constrainToHeight;
 
-    if (widget.isLoading) {
+    if (widget.shouldShowLoadingPlaceholder) {
       // Keep loading skeletons scrollable inside bounded viewports to avoid overflow.
       final Widget body = ListView.builder(
         primary: false,
@@ -1136,27 +1141,51 @@ class _DeferredMobileTableCover extends StatefulWidget {
 }
 
 class _DeferredMobileTableCoverState extends State<_DeferredMobileTableCover> {
-  Timer? _recheckTimer;
+  ScrollPosition? _scrollPosition;
+  bool _hasStartedCoverLoading = false;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    final position = Scrollable.maybeOf(context)?.position;
+    if (identical(position, _scrollPosition)) return;
+    _scrollPosition?.isScrollingNotifier.removeListener(_onScrollingChanged);
+    _scrollPosition = position;
+    position?.isScrollingNotifier.addListener(_onScrollingChanged);
+  }
+
+  @override
+  void didUpdateWidget(covariant _DeferredMobileTableCover oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.coverUrl != widget.coverUrl) {
+      _hasStartedCoverLoading = false;
+    }
+  }
 
   @override
   void dispose() {
-    _recheckTimer?.cancel();
+    _scrollPosition?.isScrollingNotifier.removeListener(_onScrollingChanged);
     super.dispose();
+  }
+
+  // Deferred covers resume at scroll end; started covers never revert to placeholders.
+  void _onScrollingChanged() {
+    if (mounted &&
+        !_hasStartedCoverLoading &&
+        widget.coverUrl?.trim().isNotEmpty == true &&
+        _scrollPosition?.isScrollingNotifier.value == false) {
+      setState(() {});
+    }
   }
 
   @override
   Widget build(BuildContext context) {
+    final hasCover = widget.coverUrl?.trim().isNotEmpty == true;
     final bool shouldDefer =
-        widget.coverUrl?.trim().isNotEmpty == true &&
+        !_hasStartedCoverLoading &&
+        hasCover &&
         Scrollable.recommendDeferredLoadingForContext(context);
-    if (shouldDefer && _recheckTimer == null) {
-      _recheckTimer = Timer(const Duration(milliseconds: 80), () {
-        _recheckTimer = null;
-        if (mounted) {
-          setState(() {});
-        }
-      });
-    }
+    if (hasCover && !shouldDefer) _hasStartedCoverLoading = true;
 
     return MediaTableCover(
       coverUrl: shouldDefer ? null : widget.coverUrl,
