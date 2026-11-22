@@ -13,6 +13,7 @@ class _StartupBridge extends Fake implements MashinCoreBridge {
   final restoration = Completer<bool>();
   int settingsReads = 0;
   bool hasStartedRestoration = false;
+  SessionSettingsUpdate? savedSettings;
 
   // Local settings and session restoration remain independent.
   @override
@@ -34,6 +35,11 @@ class _StartupBridge extends Fake implements MashinCoreBridge {
   }
 
   // Settings persistence and bridge cleanup.
+  @override
+  Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
+    savedSettings = settings;
+  }
+
   @override
   Future<void> setPreferredProvider(
     PreferredProvider? preferredProvider,
@@ -92,7 +98,110 @@ Widget _settings(_CacheBridge bridge) => SettingsEditor(
   onLogout: () async {},
 );
 
+Future<void> _scrollTo(WidgetTester tester, Finder finder) =>
+    tester.scrollUntilVisible(
+      finder,
+      120,
+      scrollable: find
+          .descendant(
+            of: find.byType(ListView).first,
+            matching: find.byType(Scrollable),
+          )
+          .first,
+    );
+
 void main() {
+  test('theme changes preserve the session accent preference', () async {
+    final bridge = _StartupBridge();
+    final session = AppSessionController(coreBridge: bridge);
+    addTearDown(session.dispose);
+    const accent = AccentColorPreference(
+      mode: AccentColorMode.manual,
+      manualColor: 0xFF00796B,
+    );
+    bridge.settings.complete(
+      const SessionSettings(
+        musicAssistantUrl: '',
+        username: null,
+        audioProfile: '',
+        themePreference: ThemePreference.light,
+        logLevel: LogLevelPreference.info,
+        accentColor: accent,
+      ),
+    );
+    await session.initializeSettings();
+    await session.setThemePreference(ThemePreference.dark);
+    expect(bridge.savedSettings!.accentColor, accent);
+    expect(session.accentColor, accent);
+  });
+
+  for (final width in [390.0, 1200.0]) {
+    testWidgets(
+      'accent colors persist and roll back on save failure at width $width',
+      (tester) async {
+        tester.view.physicalSize = Size(width, 1000);
+        tester.view.devicePixelRatio = 1;
+        addTearDown(tester.view.resetPhysicalSize);
+        addTearDown(tester.view.resetDevicePixelRatio);
+        final saved = <SessionSettingsUpdate>[];
+        var shouldFailSave = false;
+        await tester.pumpWidget(
+          _app(
+            SettingsEditor(
+              coreBridge: _CacheBridge(),
+              musicAssistantUrl: 'https://music.example',
+              settings: const SessionSettingsUpdate(
+                themePreference: ThemePreference.dark,
+                logLevel: LogLevelPreference.warn,
+                shouldShowMultiDeviceButton: false,
+              ),
+              onSave: (update) async {
+                if (shouldFailSave) {
+                  throw StateError('synthetic settings write failure');
+                }
+                saved.add(update);
+              },
+              onLogout: () async {},
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final modes = find.byType(SegmentedButton<AccentColorMode>);
+        await _scrollTo(tester, modes);
+        await tester.tap(
+          find.descendant(of: modes, matching: find.text('Manuell')),
+        );
+        await tester.pumpAndSettle();
+        await _scrollTo(tester, find.byTooltip('Petrol'));
+        await tester.tap(find.byTooltip('Petrol'));
+        await tester.pumpAndSettle();
+        expect(saved.last.accentColor.manualColor, 0xFF00796B);
+        expect(saved.last.themePreference, ThemePreference.dark);
+        expect(saved.last.logLevel, LogLevelPreference.warn);
+        expect(saved.last.shouldShowMultiDeviceButton, isFalse);
+        shouldFailSave = true;
+        await _scrollTo(tester, modes);
+        await tester.tap(
+          find.descendant(of: modes, matching: find.text('Auto')),
+        );
+        await tester.pumpAndSettle();
+        expect(
+          tester.widget<SegmentedButton<AccentColorMode>>(modes).selected,
+          {AccentColorMode.manual},
+        );
+        expect(saved, hasLength(2));
+        expect(
+          find.text(
+            'Einstellungen konnten nicht gespeichert werden. Verbindung und Eingaben pruefen.',
+          ),
+          findsOneWidget,
+        );
+        expect(tester.takeException(), isNull);
+        await tester.pumpWidget(const SizedBox.shrink());
+      },
+    );
+  }
+
   for (final preference in ThemePreference.values) {
     for (final brightness in Brightness.values) {
       testWidgets('$preference uses $brightness on the first startup frame', (
@@ -217,6 +326,10 @@ void main() {
               themePreference: ThemePreference.dark,
               logLevel: LogLevelPreference.warn,
               shouldShowMultiDeviceButton: false,
+              accentColor: AccentColorPreference(
+                mode: AccentColorMode.manual,
+                manualColor: 0xFF00796B,
+              ),
             ),
             onSave: (update) async => saved.add(update),
             onLogout: () async {},
@@ -225,7 +338,7 @@ void main() {
       );
       await tester.pumpAndSettle();
       for (final entry in {
-        'System': ThemePreference.system,
+        'Auto': ThemePreference.system,
         'Hell': ThemePreference.light,
         'Dunkel': ThemePreference.dark,
       }.entries) {
@@ -246,14 +359,20 @@ void main() {
           }
           await tester.tap(find.text(entry.key).last);
         } else {
-          await tester.ensureVisible(find.text(entry.key));
-          await tester.tap(find.text(entry.key));
+          final option = find.descendant(
+            of: find.byType(SegmentedButton<ThemePreference>),
+            matching: find.text(entry.key),
+          );
+          await _scrollTo(tester, option);
+          await tester.tap(option);
         }
         await tester.pumpAndSettle();
         expect(saved.last.themePreference, entry.value);
         expect(saved.last.toJson()['theme'], entry.value.name);
         expect(saved.last.logLevel, LogLevelPreference.warn);
         expect(saved.last.shouldShowMultiDeviceButton, isFalse);
+        expect(saved.last.accentColor.manualColor, 0xFF00796B);
+        expect(saved.last.accentColor.mode, AccentColorMode.manual);
         if (width == 1200) {
           expect(
             tester
@@ -318,7 +437,7 @@ void main() {
         ),
       );
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Bild-Cache'));
+      await _scrollTo(tester, find.text('Bild-Cache'));
       await tester.pump();
       expect(find.text('Metadaten-Cache'), findsOneWidget);
       expect(find.text('2,0 KiB'), findsOneWidget);
@@ -340,7 +459,7 @@ void main() {
       final bridge = _CacheBridge();
       await tester.pumpWidget(_app(_settings(bridge)));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Bild-Cache'));
+      await _scrollTo(tester, find.text('Bild-Cache'));
       await tester.pump();
       await tester.tap(
         find.byTooltip(
@@ -366,7 +485,7 @@ void main() {
     final bridge = _CacheBridge()..pendingClear = Completer<void>();
     await tester.pumpWidget(_app(_settings(bridge)));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Bild-Cache'));
+    await _scrollTo(tester, find.text('Bild-Cache'));
     await tester.pump();
     await tester.tap(find.byTooltip('Metadaten-Cache leeren'));
     await tester.pump();
@@ -393,7 +512,7 @@ void main() {
       final bridge = _CacheBridge()..shouldFailRead = true;
       await tester.pumpWidget(_app(_settings(bridge)));
       await tester.pumpAndSettle();
-      await tester.ensureVisible(find.text('Cache-Größe nicht verfügbar.'));
+      await _scrollTo(tester, find.text('Cache-Größe nicht verfügbar.'));
       await tester.pump();
       expect(find.text('Nicht verfügbar'), findsNWidgets(2));
       expect(find.text('0 B'), findsNothing);
@@ -412,7 +531,7 @@ void main() {
     final bridge = _CacheBridge()..shouldFailClear = true;
     await tester.pumpWidget(_app(_settings(bridge)));
     await tester.pumpAndSettle();
-    await tester.ensureVisible(find.text('Bild-Cache'));
+    await _scrollTo(tester, find.text('Bild-Cache'));
     await tester.pump();
     await tester.tap(find.byTooltip('Bild-Cache leeren'));
     await tester.pumpAndSettle();
@@ -430,6 +549,7 @@ void main() {
         _app(TickerMode(enabled: isEnabled, child: _settings(bridge)));
     await tester.pumpWidget(view(false));
     await tester.pumpAndSettle();
+    await _scrollTo(tester, find.text('Bild-Cache'));
     bridge.usage = const CacheUsage(metadataBytes: 512, imageBytes: 1024);
     await tester.pump(const Duration(seconds: 5));
     expect(bridge.reads, 1);

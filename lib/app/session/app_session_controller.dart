@@ -58,6 +58,7 @@ class AppSessionController extends ChangeNotifier {
   bool _isLoading = true;
   bool _isDisposed = false;
   ThemePreference _themePreference = ThemePreference.system;
+  AccentColorPreference _accentColor = const AccentColorPreference();
   bool _shouldShowMultiDeviceButton = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
 
@@ -68,6 +69,7 @@ class AppSessionController extends ChangeNotifier {
   bool get isLoading => _isLoading;
   bool get isAuthenticated => _isAuthenticated;
   ThemePreference get themePreference => _themePreference;
+  AccentColorPreference get accentColor => _accentColor;
   bool get shouldShowMultiDeviceButton => _shouldShowMultiDeviceButton;
   LogLevelPreference get logLevel => _logLevel;
   PreferredProvider? get preferredProvider =>
@@ -163,6 +165,7 @@ class AppSessionController extends ChangeNotifier {
     await saveSessionSettings(
       SessionSettingsUpdate(
         themePreference: themePreference,
+        accentColor: _accentColor,
         logLevel: _logLevel,
         shouldShowMultiDeviceButton: _shouldShowMultiDeviceButton,
       ),
@@ -172,6 +175,7 @@ class AppSessionController extends ChangeNotifier {
   Future<void> saveSessionSettings(SessionSettingsUpdate settings) async {
     await coreBridge.saveSessionSettings(settings);
     _themePreference = settings.themePreference;
+    _accentColor = settings.accentColor;
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     notifyListeners();
@@ -208,6 +212,7 @@ class AppSessionController extends ChangeNotifier {
     _username = settings.username;
     _audioProfile = settings.audioProfile;
     _themePreference = settings.themePreference;
+    _accentColor = settings.accentColor;
     _logLevel = settings.logLevel;
     _shouldShowMultiDeviceButton = settings.shouldShowMultiDeviceButton;
     PreferredProviderController.instance.initialize(

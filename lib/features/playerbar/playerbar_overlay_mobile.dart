@@ -414,12 +414,12 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                                     const RoundSliderOverlayShape(
                                                       overlayRadius: 10,
                                                     ),
-                                                thumbColor:
-                                                    colors.textSecondary,
-                                                activeTrackColor:
-                                                    colors.textSecondary,
+                                                thumbColor: colors.accent,
+                                                activeTrackColor: colors.accent,
                                                 secondaryActiveTrackColor:
-                                                    colors.textTertiary,
+                                                    colors.accent.withValues(
+                                                      alpha: 0.35,
+                                                    ),
                                                 inactiveTrackColor:
                                                     colors.bgTertiary,
                                               ),
@@ -492,8 +492,8 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                         : () => unawaited(
                                             widget.onTogglePlayPause(),
                                           ),
-                                    color: colors.bgPrimary,
-                                    backgroundColor: colors.textPrimary,
+                                    color: colors.onAccent,
+                                    backgroundColor: colors.accent,
                                     child: isBusy
                                         ? SizedBox(
                                             width: 24,
@@ -502,7 +502,7 @@ class _PlayerBarOverlayMobileState extends State<PlayerBarOverlayMobile> {
                                               strokeWidth: 2,
                                               valueColor:
                                                   AlwaysStoppedAnimation<Color>(
-                                                    colors.bgPrimary,
+                                                    colors.onAccent,
                                                   ),
                                             ),
                                           )

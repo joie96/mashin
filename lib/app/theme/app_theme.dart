@@ -1,3 +1,4 @@
+import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 
 import '../../features/core/core_models.dart';
@@ -43,72 +44,128 @@ class AppTheme {
   static const Color _overlayPlayButtonForeground = Color(0xFF000000);
   static const Color _overlayIcon = Color(0xFFFFFFFF);
 
-  static ThemeData dark() {
-    final base = ThemeData.dark(useMaterial3: true);
+  static ThemeData dark({ColorScheme? colorScheme, Color? seedColor}) {
+    return _build(
+      colorScheme ??
+          ColorScheme.fromSeed(
+            seedColor: seedColor ?? _darkAccent,
+            brightness: Brightness.dark,
+          ),
+    );
+  }
+
+  static ThemeData light({ColorScheme? colorScheme, Color? seedColor}) {
+    return _build(
+      colorScheme ??
+          ColorScheme.fromSeed(
+            seedColor: seedColor ?? _darkAccent,
+            brightness: Brightness.light,
+          ),
+    );
+  }
+
+  // Material controls and custom widgets share the same tonal palette.
+  static ThemeData _build(ColorScheme source) {
+    final foregroundScheme = source.copyWith(
+      onSurface: _neutralTextColor(source.onSurface),
+      onSurfaceVariant: _neutralTextColor(source.onSurfaceVariant),
+      onInverseSurface: _neutralTextColor(source.onInverseSurface),
+    );
+    final scheme = defaultTargetPlatform == TargetPlatform.windows
+        ? _softenWindowsSurfaces(foregroundScheme)
+        : foregroundScheme;
+    final colors = MashinColors.fromColorScheme(scheme);
+    final base = ThemeData(useMaterial3: true, colorScheme: scheme);
+    final tableStyles = scheme.brightness == Brightness.dark
+        ? const MashinTableTextStyles.dark()
+        : const MashinTableTextStyles.light();
     return base.copyWith(
       tooltipTheme: const TooltipThemeData(waitDuration: tooltipWaitDuration),
-      scaffoldBackgroundColor: _darkBgPrimary,
-      colorScheme: const ColorScheme.dark(
-        primary: _darkAccent,
-        secondary: _darkAccent,
-        surface: _darkBgSecondary,
-        onPrimary: Colors.white,
-        onSecondary: Colors.white,
-        onSurface: _darkTextPrimary,
-      ),
-      appBarTheme: const AppBarTheme(
+      scaffoldBackgroundColor: colors.bgPrimary,
+      appBarTheme: AppBarTheme(
         elevation: 0,
-        backgroundColor: _darkBgPrimary,
-        foregroundColor: _darkTextPrimary,
-      ),
-      dividerColor: _darkBorder,
-      cardTheme: const CardThemeData(
-        color: _darkBgSecondary,
+        backgroundColor: colors.bgPrimary,
+        foregroundColor: colors.textPrimary,
         surfaceTintColor: Colors.transparent,
       ),
-      textTheme: base.textTheme.apply(
-        bodyColor: _darkTextPrimary,
-        displayColor: _darkTextPrimary,
+      dividerColor: colors.border,
+      cardTheme: CardThemeData(
+        color: colors.bgSecondary,
+        surfaceTintColor: Colors.transparent,
       ),
-      extensions: const <ThemeExtension<dynamic>>[
-        MashinColors.dark(),
-        MashinTableTextStyles.dark(),
+      inputDecorationTheme: InputDecorationTheme(
+        filled: true,
+        fillColor: colors.bgSecondary,
+      ),
+      sliderTheme: SliderThemeData(
+        activeTrackColor: scheme.primary,
+        thumbColor: scheme.primary,
+        inactiveTrackColor: scheme.surfaceContainerHighest,
+      ),
+      textTheme: base.textTheme.apply(
+        bodyColor: colors.textPrimary,
+        displayColor: colors.textPrimary,
+      ),
+      extensions: <ThemeExtension<dynamic>>[
+        colors,
+        tableStyles.copyWith(
+          header: tableStyles.header.copyWith(color: colors.textSecondary),
+          bodyPrimary: tableStyles.bodyPrimary.copyWith(
+            color: colors.textPrimary,
+          ),
+          bodySecondary: tableStyles.bodySecondary.copyWith(
+            color: colors.textSecondary,
+          ),
+          bodyTertiary: tableStyles.bodyTertiary.copyWith(
+            color: colors.textTertiary,
+          ),
+          mobileTitle: tableStyles.mobileTitle.copyWith(
+            color: colors.textPrimary,
+          ),
+          mobileSubtitle: tableStyles.mobileSubtitle.copyWith(
+            color: colors.textSecondary,
+          ),
+          mobileTrailing: tableStyles.mobileTrailing.copyWith(
+            color: colors.textSecondary,
+          ),
+          emptyState: tableStyles.emptyState.copyWith(
+            color: colors.textSecondary,
+          ),
+          providerFallback: tableStyles.providerFallback.copyWith(
+            color: colors.textSecondary,
+          ),
+        ),
       ],
     );
   }
 
-  static ThemeData light() {
-    final base = ThemeData.light(useMaterial3: true);
-    return base.copyWith(
-      tooltipTheme: const TooltipThemeData(waitDuration: tooltipWaitDuration),
-      scaffoldBackgroundColor: _lightBgPrimary,
-      colorScheme: const ColorScheme.light(
-        primary: _lightAccent,
-        secondary: _lightAccent,
-        surface: _lightBgSecondary,
-        onPrimary: Colors.white,
-        onSecondary: Colors.white,
-        onSurface: _lightTextPrimary,
-      ),
-      appBarTheme: const AppBarTheme(
-        elevation: 0,
-        backgroundColor: _lightBgPrimary,
-        foregroundColor: _lightTextPrimary,
-      ),
-      dividerColor: _lightBorder,
-      cardTheme: const CardThemeData(
-        color: _lightBgSecondary,
-        surfaceTintColor: Colors.transparent,
-      ),
-      textTheme: base.textTheme.apply(
-        bodyColor: _lightTextPrimary,
-        displayColor: _lightTextPrimary,
-      ),
-      extensions: const <ThemeExtension<dynamic>>[
-        MashinColors.light(),
-        MashinTableTextStyles.light(),
-      ],
-    );
+  // Normal text stays neutral; explicit accent roles retain their palette colors.
+  static Color _neutralTextColor(Color color) =>
+      HSLColor.fromColor(color).withSaturation(0).toColor();
+
+  // Windows backgrounds stay subdued without muting explicit accents.
+  static ColorScheme _softenWindowsSurfaces(ColorScheme scheme) =>
+      scheme.copyWith(
+        surface: _softenSurfaceColor(scheme.surface),
+        surfaceDim: _softenSurfaceColor(scheme.surfaceDim),
+        surfaceBright: _softenSurfaceColor(scheme.surfaceBright),
+        surfaceContainerLowest: _softenSurfaceColor(
+          scheme.surfaceContainerLowest,
+        ),
+        surfaceContainerLow: _softenSurfaceColor(scheme.surfaceContainerLow),
+        surfaceContainer: _softenSurfaceColor(scheme.surfaceContainer),
+        surfaceContainerHigh: _softenSurfaceColor(scheme.surfaceContainerHigh),
+        surfaceContainerHighest: _softenSurfaceColor(
+          scheme.surfaceContainerHighest,
+        ),
+        outline: _softenSurfaceColor(scheme.outline),
+        outlineVariant: _softenSurfaceColor(scheme.outlineVariant),
+        inverseSurface: _softenSurfaceColor(scheme.inverseSurface),
+      );
+
+  static Color _softenSurfaceColor(Color color) {
+    final hsl = HSLColor.fromColor(color);
+    return hsl.withSaturation(hsl.saturation * 0.35).toColor();
   }
 }
 
@@ -181,6 +238,39 @@ class MashinColors extends ThemeExtension<MashinColors> {
       overlayPlayButtonBackground = AppTheme._overlayPlayButtonBackground,
       overlayPlayButtonForeground = AppTheme._overlayPlayButtonForeground,
       overlayIcon = AppTheme._overlayIcon;
+
+  factory MashinColors.fromColorScheme(ColorScheme scheme) {
+    final base = scheme.brightness == Brightness.dark
+        ? const MashinColors.dark()
+        : const MashinColors.light();
+    return base.copyWith(
+      bgPrimary: scheme.surface,
+      bgSecondary: scheme.surfaceContainer,
+      bgTertiary: scheme.surfaceContainerHigh,
+      textPrimary: scheme.onSurface,
+      textSecondary: scheme.onSurfaceVariant,
+      textTertiary: scheme.onSurfaceVariant,
+      accent: scheme.primary,
+      border: scheme.outlineVariant,
+      hover: Color.alphaBlend(
+        scheme.onSurface.withValues(alpha: 0.08),
+        scheme.surfaceContainer,
+      ),
+      selection: scheme.primaryContainer,
+    );
+  }
+
+  Color get onAccent => _contrastingForeground(accent);
+  Color get onSelection => _contrastingForeground(selection);
+  Color get playbackProgress =>
+      Color.alphaBlend(accent.withValues(alpha: 0.12), bgSecondary);
+
+  static Color _contrastingForeground(Color background) {
+    final luminance = background.computeLuminance();
+    return (luminance + 0.05) / 0.05 >= 1.05 / (luminance + 0.05)
+        ? Colors.black
+        : Colors.white;
+  }
 
   @override
   MashinColors copyWith({

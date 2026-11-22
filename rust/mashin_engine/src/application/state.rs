@@ -339,6 +339,7 @@ pub(super) mod tests {
     fn settings_update() -> crate::domain::settings::SessionSettingsUpdate {
         crate::domain::settings::SessionSettingsUpdate {
             theme: ThemePreference::Light,
+            accent_color: crate::domain::settings::AccentColorPreference::default(),
             log_level: LogLevelPreference::Warn,
             should_show_multi_device_button: false,
         }
@@ -354,6 +355,7 @@ pub(super) mod tests {
             local: crate::domain::settings::default_local_output("Mashin (Test)".into()),
             volume: 100,
             theme: ThemePreference::Dark,
+            accent_color: crate::domain::settings::AccentColorPreference::default(),
             log_level: LogLevelPreference::Info,
             should_show_multi_device_button: true,
             preferred_provider: None,

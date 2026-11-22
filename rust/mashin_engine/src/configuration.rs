@@ -23,6 +23,8 @@ pub(crate) struct SessionPreferences {
     pub(crate) local: LocalOutputConfig,
     pub(crate) volume: u8,
     pub(crate) theme: ThemePreference,
+    #[serde(default)]
+    pub(crate) accent_color: crate::domain::settings::AccentColorPreference,
     pub(crate) log_level: LogLevelPreference,
     pub(crate) should_show_multi_device_button: bool,
     pub(crate) preferred_provider: Option<PreferredProvider>,
@@ -40,6 +42,7 @@ impl SessionPreferences {
             local: self.local,
             volume: self.volume,
             theme: self.theme,
+            accent_color: self.accent_color,
             log_level: self.log_level,
             should_show_multi_device_button: self.should_show_multi_device_button,
             preferred_provider: self.preferred_provider,
@@ -57,6 +60,7 @@ impl From<&SessionConfig> for SessionPreferences {
             local: session.local.clone(),
             volume: session.volume,
             theme: session.theme,
+            accent_color: session.accent_color,
             log_level: session.log_level,
             should_show_multi_device_button: session.should_show_multi_device_button,
             preferred_provider: session.preferred_provider.clone(),
@@ -290,6 +294,51 @@ pub(crate) mod tests {
         }
     }
 
+    #[test]
+    fn accent_color_preferences_survive_reopen_and_default_for_old_documents() {
+        use crate::domain::settings::{AccentColorMode, AccentColorPreference};
+        let directory = TestDirectory::new();
+        let path = directory.0.join("configuration.json");
+        let mut session = session_config();
+        for mode in [AccentColorMode::Manual, AccentColorMode::Auto] {
+            session.accent_color = AccentColorPreference {
+                mode,
+                manual_color: 0xFF00796B,
+            };
+            let preferences = SessionPreferences::from(&session);
+            ConfigurationFile::with_path(path.clone())
+                .save(&preferences)
+                .unwrap();
+            let restored = ConfigurationFile::with_path(path.clone())
+                .load()
+                .unwrap()
+                .unwrap();
+            assert_eq!(restored.accent_color, session.accent_color);
+            assert_eq!(
+                restored.into_session(None).accent_color,
+                session.accent_color
+            );
+        }
+        let mut old = serde_json::to_value(SessionPreferences::from(&session)).unwrap();
+        old.as_object_mut().unwrap().remove("accentColor");
+        let restored: SessionPreferences = serde_json::from_value(old).unwrap();
+        assert_eq!(restored.accent_color, AccentColorPreference::default());
+        assert_eq!(restored.theme, session.theme);
+        let update = serde_json::json!({
+            "theme": "system", "logLevel": "info", "shouldShowMultiDeviceButton": true,
+            "accentColor": {"mode": "manual", "manualColor": 0xFF00796Bu32}
+        });
+        let parsed: crate::domain::settings::SessionSettingsUpdate =
+            serde_json::from_value(update.clone()).unwrap();
+        assert_eq!(parsed.accent_color.manual_color, 0xFF00796B);
+        let mut invalid = update;
+        invalid["accentColor"]["manualColor"] = serde_json::json!(0x0000796B);
+        assert!(
+            serde_json::from_value::<crate::domain::settings::SessionSettingsUpdate>(invalid)
+                .is_err()
+        );
+    }
+
     pub(crate) struct TestDirectory(pub(crate) PathBuf);
 
     impl TestDirectory {
@@ -314,6 +363,7 @@ pub(crate) mod tests {
             local: crate::domain::settings::default_local_output("Mashin (Test)".into()),
             volume: 70,
             theme: ThemePreference::Light,
+            accent_color: crate::domain::settings::AccentColorPreference::default(),
             log_level: LogLevelPreference::Warn,
             should_show_multi_device_button: false,
             preferred_provider: None,

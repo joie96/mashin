@@ -22,6 +22,7 @@ import 'package:go_router/go_router.dart';
 import '../navigation/app_router.dart';
 import '../session/app_session_controller.dart';
 import '../theme/app_theme.dart';
+import '../theme/platform_color_theme_builder.dart';
 import '../updates/app_update_dialog.dart';
 
 class AppShell extends StatefulWidget {
@@ -1495,6 +1496,11 @@ class _DesktopNavItemState extends State<_DesktopNavItem> {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final shouldHighlightSelectionBackground =
+        Theme.of(context).platform != TargetPlatform.windows;
+    final selectedForeground = shouldHighlightSelectionBackground
+        ? colors.onSelection
+        : colors.accent;
 
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 2),
@@ -1507,8 +1513,12 @@ class _DesktopNavItemState extends State<_DesktopNavItem> {
           onTap: widget.onTap,
           child: Container(
             decoration: BoxDecoration(
-              color: _isHovered ? colors.hover : Colors.transparent,
-              borderRadius: BorderRadius.circular(10),
+              color: widget.selected && shouldHighlightSelectionBackground
+                  ? colors.selection
+                  : _isHovered
+                  ? colors.hover
+                  : Colors.transparent,
+              borderRadius: BorderRadius.circular(8),
             ),
             padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
             child: Row(
@@ -1516,17 +1526,21 @@ class _DesktopNavItemState extends State<_DesktopNavItem> {
                 Icon(
                   widget.icon,
                   size: 20,
-                  color: widget.selected ? colors.accent : colors.textSecondary,
+                  color: widget.selected
+                      ? selectedForeground
+                      : colors.textSecondary,
                 ),
                 const SizedBox(width: 10),
                 Text(
                   widget.label,
                   style: TextStyle(
                     color: widget.selected
-                        ? colors.accent
+                        ? selectedForeground
                         : colors.textSecondary,
                     fontWeight: widget.selected
-                        ? FontWeight.w600
+                        ? shouldHighlightSelectionBackground
+                              ? FontWeight.w600
+                              : FontWeight.w700
                         : FontWeight.w500,
                   ),
                 ),
@@ -1899,11 +1913,12 @@ class _DesktopPlayerBar extends StatelessWidget {
                         style: ElevatedButton.styleFrom(
                           padding: EdgeInsets.zero,
                           shape: const CircleBorder(),
-                          backgroundColor: colors.textPrimary,
-                          foregroundColor: colors.bgPrimary,
-                          disabledBackgroundColor: colors.textPrimary
-                              .withValues(alpha: 0.45),
-                          disabledForegroundColor: colors.bgPrimary,
+                          backgroundColor: colors.accent,
+                          foregroundColor: colors.onAccent,
+                          disabledBackgroundColor: colors.accent.withValues(
+                            alpha: 0.45,
+                          ),
+                          disabledForegroundColor: colors.onAccent,
                           elevation: 0,
                         ),
                         child: isBusy
@@ -1913,7 +1928,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                                 child: CircularProgressIndicator(
                                   strokeWidth: 2,
                                   valueColor: AlwaysStoppedAnimation<Color>(
-                                    colors.bgPrimary,
+                                    colors.onAccent,
                                   ),
                                 ),
                               )
@@ -1976,10 +1991,10 @@ class _DesktopPlayerBar extends StatelessWidget {
                                   overlayShape: const RoundSliderOverlayShape(
                                     overlayRadius: 10,
                                   ),
-                                  thumbColor: colors.textSecondary,
-                                  activeTrackColor: colors.textSecondary,
-                                  secondaryActiveTrackColor:
-                                      colors.textTertiary,
+                                  thumbColor: colors.accent,
+                                  activeTrackColor: colors.accent,
+                                  secondaryActiveTrackColor: colors.accent
+                                      .withValues(alpha: 0.35),
                                   inactiveTrackColor: colors.bgTertiary,
                                 ),
                                 child: PlaybackSeekSlider(
@@ -2065,7 +2080,7 @@ class _DesktopPlayerBar extends StatelessWidget {
                         value: playbackState.volume.toDouble().clamp(0, 100),
                         min: 0,
                         max: 100,
-                        activeColor: colors.textSecondary,
+                        activeColor: colors.accent,
                         inactiveColor: colors.bgTertiary,
                         onChanged: onVolumeChanged,
                       ),
@@ -2566,7 +2581,7 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
                               .clamp(0.0, 1.0)
                         : 0.0,
                     heightFactor: 1,
-                    child: ColoredBox(color: colors.selection),
+                    child: ColoredBox(color: colors.playbackProgress),
                   ),
                 ),
               ),
@@ -2640,7 +2655,7 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
                           child: CircularProgressIndicator(
                             strokeWidth: 2,
                             valueColor: AlwaysStoppedAnimation<Color>(
-                              colors.bgPrimary,
+                              colors.onAccent,
                             ),
                           ),
                         )
@@ -2651,12 +2666,12 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
                         ),
                   style: IconButton.styleFrom(
                     shape: const CircleBorder(),
-                    backgroundColor: colors.textPrimary,
-                    foregroundColor: colors.bgPrimary,
-                    disabledBackgroundColor: colors.textPrimary.withValues(
+                    backgroundColor: colors.accent,
+                    foregroundColor: colors.onAccent,
+                    disabledBackgroundColor: colors.accent.withValues(
                       alpha: 0.45,
                     ),
-                    disabledForegroundColor: colors.bgPrimary,
+                    disabledForegroundColor: colors.onAccent,
                   ),
                 ),
                 const SizedBox(width: 8),
@@ -2832,7 +2847,7 @@ class _MobileNavButton extends StatelessWidget {
               width: selected ? 56 : 42,
               height: 34,
               decoration: BoxDecoration(
-                color: selected ? colors.hover : Colors.transparent,
+                color: selected ? colors.selection : Colors.transparent,
                 borderRadius: BorderRadius.circular(17),
               ),
               alignment: Alignment.center,
@@ -2849,7 +2864,7 @@ class _MobileNavButton extends StatelessWidget {
                 child: Icon(
                   selected ? selectedIcon : icon,
                   key: ValueKey<bool>(selected),
-                  color: selected ? colors.accent : colors.textSecondary,
+                  color: selected ? colors.onSelection : colors.textSecondary,
                 ),
               ),
             ),
@@ -2901,20 +2916,30 @@ class _MashinAppState extends State<MashinApp> {
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp.router(
-      routerConfig: _appRouter.router,
-      title: 'Mashin',
-      debugShowCheckedModeBanner: false,
-      themeMode: _themeMode,
-      theme: AppTheme.light(),
-      darkTheme: AppTheme.dark(),
-      builder: (BuildContext context, Widget? child) {
-        return AppUpdateHost(
-          navigatorKey: _appRouter.router.routerDelegate.navigatorKey,
-          isReady: !_session.isLoading,
-          child: ExcludeSemantics(child: child ?? const SizedBox.shrink()),
-        );
-      },
+    final accent = _session.accentColor;
+    final isAutomatic = accent.mode == AccentColorMode.auto;
+    return PlatformColorThemeBuilder(
+      builder: (light, dark) => MaterialApp.router(
+        routerConfig: _appRouter.router,
+        title: 'Mashin',
+        debugShowCheckedModeBanner: false,
+        themeMode: _themeMode,
+        theme: AppTheme.light(
+          colorScheme: isAutomatic ? light : null,
+          seedColor: isAutomatic ? null : Color(accent.manualColor),
+        ),
+        darkTheme: AppTheme.dark(
+          colorScheme: isAutomatic ? dark : null,
+          seedColor: isAutomatic ? null : Color(accent.manualColor),
+        ),
+        builder: (BuildContext context, Widget? child) {
+          return AppUpdateHost(
+            navigatorKey: _appRouter.router.routerDelegate.navigatorKey,
+            isReady: !_session.isLoading,
+            child: ExcludeSemantics(child: child ?? const SizedBox.shrink()),
+          );
+        },
+      ),
     );
   }
 }

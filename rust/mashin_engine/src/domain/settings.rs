@@ -91,6 +91,49 @@ impl Default for ThemePreference {
     }
 }
 
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum AccentColorMode {
+    #[default]
+    Auto,
+    Manual,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub(crate) struct AccentColorPreference {
+    #[serde(default)]
+    pub(crate) mode: AccentColorMode,
+    #[serde(
+        default = "default_manual_color",
+        deserialize_with = "deserialize_manual_color"
+    )]
+    pub(crate) manual_color: u32,
+}
+
+impl Default for AccentColorPreference {
+    fn default() -> Self {
+        Self {
+            mode: AccentColorMode::Auto,
+            manual_color: default_manual_color(),
+        }
+    }
+}
+
+fn default_manual_color() -> u32 {
+    0xFFFF5A6F
+}
+
+fn deserialize_manual_color<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<u32, D::Error> {
+    let color = u32::deserialize(deserializer)?;
+    if color >> 24 != 0xFF {
+        return Err(serde::de::Error::custom("manual color must be opaque ARGB"));
+    }
+    Ok(color)
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub(crate) enum UpdateChannel {
@@ -147,6 +190,8 @@ pub(crate) struct SessionConfig {
     #[serde(default)]
     pub(crate) theme: ThemePreference,
     #[serde(default)]
+    pub(crate) accent_color: AccentColorPreference,
+    #[serde(default)]
     pub(crate) log_level: LogLevelPreference,
     #[serde(default = "default_should_show_multi_device_button")]
     pub(crate) should_show_multi_device_button: bool,
@@ -158,6 +203,8 @@ pub(crate) struct SessionConfig {
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub(crate) struct SessionSettingsUpdate {
     pub(crate) theme: ThemePreference,
+    #[serde(default)]
+    pub(crate) accent_color: AccentColorPreference,
     pub(crate) log_level: LogLevelPreference,
     pub(crate) should_show_multi_device_button: bool,
 }
@@ -213,6 +260,7 @@ pub(crate) struct SessionSettings {
     pub(crate) username: Option<String>,
     pub(crate) audio_profile: AudioProfileId,
     pub(crate) theme: ThemePreference,
+    pub(crate) accent_color: AccentColorPreference,
     pub(crate) log_level: LogLevelPreference,
     pub(crate) should_show_multi_device_button: bool,
     pub(crate) preferred_provider: Option<PreferredProvider>,
@@ -240,6 +288,9 @@ pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettin
         username,
         audio_profile,
         theme,
+        accent_color: session.map_or_else(AccentColorPreference::default, |session| {
+            session.accent_color
+        }),
         log_level,
         should_show_multi_device_button: session
             .map_or(true, |session| session.should_show_multi_device_button),

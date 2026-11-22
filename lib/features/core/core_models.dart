@@ -2991,20 +2991,82 @@ class CacheUsage {
 
 enum ThemePreference { dark, light, system }
 
+enum AccentColorMode { auto, manual }
+
+@immutable
+class AccentColorPreference {
+  const AccentColorPreference({
+    this.mode = AccentColorMode.auto,
+    this.manualColor = 0xFFFF5A6F,
+  });
+
+  final AccentColorMode mode;
+  final int manualColor;
+
+  AccentColorPreference copyWith({AccentColorMode? mode, int? manualColor}) =>
+      AccentColorPreference(
+        mode: mode ?? this.mode,
+        manualColor: manualColor ?? this.manualColor,
+      );
+
+  Map<String, Object> toJson() => {
+    'mode': mode.name,
+    'manualColor': manualColor,
+  };
+
+  factory AccentColorPreference.fromJson(Map<String, dynamic> json) {
+    final color = json['manualColor'] ?? 0xFFFF5A6F;
+    if (color is! int || color < 0xFF000000 || color > 0xFFFFFFFF) {
+      throw const FormatException('manual color must be opaque ARGB');
+    }
+    final mode = switch (json['mode']) {
+      null || 'auto' => AccentColorMode.auto,
+      'manual' => AccentColorMode.manual,
+      _ => throw const FormatException('unknown accent color mode'),
+    };
+    return AccentColorPreference(mode: mode, manualColor: color);
+  }
+
+  @override
+  bool operator ==(Object other) =>
+      other is AccentColorPreference &&
+      other.mode == mode &&
+      other.manualColor == manualColor;
+
+  @override
+  int get hashCode => Object.hash(mode, manualColor);
+}
+
 class SessionSettingsUpdate {
   const SessionSettingsUpdate({
     required this.themePreference,
     required this.logLevel,
     this.shouldShowMultiDeviceButton = true,
+    this.accentColor = const AccentColorPreference(),
   });
 
   final ThemePreference themePreference;
   final LogLevelPreference logLevel;
+  final AccentColorPreference accentColor;
 
   final bool shouldShowMultiDeviceButton;
 
+  SessionSettingsUpdate copyWith({
+    ThemePreference? themePreference,
+    LogLevelPreference? logLevel,
+    bool? shouldShowMultiDeviceButton,
+    AccentColorPreference? accentColor,
+  }) => SessionSettingsUpdate(
+    themePreference: themePreference ?? this.themePreference,
+    logLevel: logLevel ?? this.logLevel,
+    shouldShowMultiDeviceButton:
+        shouldShowMultiDeviceButton ?? this.shouldShowMultiDeviceButton,
+    accentColor: accentColor ?? this.accentColor,
+  );
+
   Map<String, Object?> toJson() => <String, Object?>{
     'theme': themePreference.name,
+    'accentColor': accentColor.toJson(),
     'logLevel': logLevel.name,
     'shouldShowMultiDeviceButton': shouldShowMultiDeviceButton,
   };
@@ -3019,6 +3081,7 @@ class SessionSettings {
     required this.logLevel,
     this.shouldShowMultiDeviceButton = true,
     this.preferredProvider,
+    this.accentColor = const AccentColorPreference(),
   });
 
   final String musicAssistantUrl;
@@ -3027,6 +3090,7 @@ class SessionSettings {
   final ThemePreference themePreference;
   final LogLevelPreference logLevel;
   final PreferredProvider? preferredProvider;
+  final AccentColorPreference accentColor;
   final bool shouldShowMultiDeviceButton;
 
   factory SessionSettings.fromJson(Map<String, dynamic> json) {
@@ -3040,6 +3104,11 @@ class SessionSettings {
         _ => ThemePreference.system,
       },
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
+      accentColor: json['accentColor'] == null
+          ? const AccentColorPreference()
+          : AccentColorPreference.fromJson(
+              json['accentColor'] as Map<String, dynamic>,
+            ),
       shouldShowMultiDeviceButton:
           json['shouldShowMultiDeviceButton'] as bool? ?? true,
       preferredProvider: switch (json['preferredProvider']) {

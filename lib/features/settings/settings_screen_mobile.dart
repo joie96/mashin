@@ -9,6 +9,7 @@ class SettingsScreenMobile extends StatelessWidget {
   const SettingsScreenMobile({
     super.key,
     required this.cacheContent,
+    required this.accentColorContent,
     required this.musicAssistantUrl,
     required this.onLogout,
     required this.themePreference,
@@ -20,6 +21,7 @@ class SettingsScreenMobile extends StatelessWidget {
   });
 
   final Widget cacheContent;
+  final Widget accentColorContent;
   final String musicAssistantUrl;
   final VoidCallback? onLogout;
   final ThemePreference themePreference;
@@ -89,8 +91,10 @@ class SettingsScreenMobile extends StatelessWidget {
                           ? colors.selection
                           : colors.bgSecondary,
                     ),
-                    foregroundColor: WidgetStatePropertyAll<Color>(
-                      colors.textPrimary,
+                    foregroundColor: WidgetStateProperty.resolveWith<Color?>(
+                      (states) => states.contains(WidgetState.selected)
+                          ? colors.onSelection
+                          : colors.textPrimary,
                     ),
                   ),
                   segments: const <ButtonSegment<ThemePreference>>[
@@ -107,13 +111,15 @@ class SettingsScreenMobile extends StatelessWidget {
                     ButtonSegment<ThemePreference>(
                       value: ThemePreference.system,
                       icon: Icon(Icons.brightness_auto_outlined),
-                      label: Text('System'),
+                      label: Text('Auto'),
                     ),
                   ],
                   selected: <ThemePreference>{themePreference},
                   onSelectionChanged: (Set<ThemePreference> selection) =>
                       onThemeChanged(selection.first),
                 ),
+                const SizedBox(height: 24),
+                accentColorContent,
                 const SizedBox(height: 24),
                 MergeSemantics(
                   child: ListTile(

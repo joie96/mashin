@@ -2549,6 +2549,7 @@ void main() {
       ).toJson(),
       {
         'theme': 'dark',
+        'accentColor': {'mode': 'auto', 'manualColor': 0xFFFF5A6F},
         'logLevel': 'info',
         'shouldShowMultiDeviceButton': false,
       },
@@ -2565,7 +2566,10 @@ void main() {
       expect(update.toJson()['theme'], preference.name);
       expect(settings.themePreference, preference);
     }
-    expect(SessionSettings.fromJson({}).themePreference, ThemePreference.system);
+    expect(
+      SessionSettings.fromJson({}).themePreference,
+      ThemePreference.system,
+    );
   });
 
   test('artwork requires an observed proxy ID or inline content', () {

@@ -37,6 +37,7 @@ class SettingsScreenDesktop extends StatelessWidget {
   const SettingsScreenDesktop({
     super.key,
     required this.cacheContent,
+    required this.accentColorContent,
     required this.musicAssistantUrl,
     required this.themePreference,
     required this.logLevel,
@@ -47,6 +48,7 @@ class SettingsScreenDesktop extends StatelessWidget {
   });
 
   final Widget cacheContent;
+  final Widget accentColorContent;
   final String musicAssistantUrl;
   final ThemePreference themePreference;
   final LogLevelPreference logLevel;
@@ -99,6 +101,7 @@ class SettingsScreenDesktop extends StatelessWidget {
                   children: <Widget>[
                     _DesktopSettingsForm(
                       cacheContent: cacheContent,
+                      accentColorContent: accentColorContent,
                       musicAssistantUrl: musicAssistantUrl,
                       themePreference: themePreference,
                       onThemeChanged: onThemeChanged,
@@ -167,6 +170,7 @@ class _DesktopLogTab extends StatelessWidget {
 class _DesktopSettingsForm extends StatelessWidget {
   const _DesktopSettingsForm({
     required this.cacheContent,
+    required this.accentColorContent,
     required this.musicAssistantUrl,
     required this.themePreference,
     required this.onThemeChanged,
@@ -175,6 +179,7 @@ class _DesktopSettingsForm extends StatelessWidget {
   });
 
   final Widget cacheContent;
+  final Widget accentColorContent;
   final String musicAssistantUrl;
   final ThemePreference themePreference;
   final ValueChanged<ThemePreference> onThemeChanged;
@@ -187,7 +192,7 @@ class _DesktopSettingsForm extends StatelessWidget {
     const themeOptions = [
       (ThemePreference.light, 'Hell', Icons.light_mode_outlined),
       (ThemePreference.dark, 'Dunkel', Icons.dark_mode_outlined),
-      (ThemePreference.system, 'System', Icons.brightness_auto_outlined),
+      (ThemePreference.system, 'Auto', Icons.brightness_auto_outlined),
     ];
     return ListView(
       padding: const EdgeInsets.only(top: 12, bottom: 32),
@@ -253,6 +258,11 @@ class _DesktopSettingsForm extends StatelessWidget {
               ),
             ),
           ),
+        ),
+        const SizedBox(height: 24),
+        Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 24),
+          child: accentColorContent,
         ),
         const SizedBox(height: 24),
         Padding(

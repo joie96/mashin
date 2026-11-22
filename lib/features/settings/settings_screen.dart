@@ -6,6 +6,7 @@ import '../../app/layout/layout_utils.dart';
 import '../../app/session/app_session_controller.dart';
 import '../core/core_bridge.dart';
 import '../core/core_models.dart';
+import 'accent_color_settings.dart';
 import 'settings_screen_desktop.dart';
 import 'settings_screen_mobile.dart';
 
@@ -20,6 +21,7 @@ class SettingsScreen extends StatelessWidget {
     musicAssistantUrl: session.baseUrl,
     settings: SessionSettingsUpdate(
       themePreference: session.themePreference,
+      accentColor: session.accentColor,
       logLevel: session.logLevel,
       shouldShowMultiDeviceButton: session.shouldShowMultiDeviceButton,
     ),
@@ -86,6 +88,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
   // Ordered settings persistence.
   void _saveSettings(SessionSettingsUpdate update) {
     if (update.themePreference == _settings.themePreference &&
+        update.accentColor == _settings.accentColor &&
         update.logLevel == _settings.logLevel &&
         update.shouldShowMultiDeviceButton ==
             _settings.shouldShowMultiDeviceButton) {
@@ -110,38 +113,17 @@ class _SettingsEditorState extends State<SettingsEditor> {
   }
 
   void _saveTheme(ThemePreference value) {
-    setState(
-      () => _saveSettings(
-        SessionSettingsUpdate(
-          themePreference: value,
-          logLevel: _settings.logLevel,
-          shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
-        ),
-      ),
-    );
+    setState(() => _saveSettings(_settings.copyWith(themePreference: value)));
   }
 
   void _saveLogLevel(LogLevelPreference value) {
-    setState(
-      () => _saveSettings(
-        SessionSettingsUpdate(
-          themePreference: _settings.themePreference,
-          logLevel: value,
-          shouldShowMultiDeviceButton: _settings.shouldShowMultiDeviceButton,
-        ),
-      ),
-    );
+    setState(() => _saveSettings(_settings.copyWith(logLevel: value)));
   }
 
   void _saveMultiDeviceButtonVisibility(bool value) {
     setState(
-      () => _saveSettings(
-        SessionSettingsUpdate(
-          themePreference: _settings.themePreference,
-          logLevel: _settings.logLevel,
-          shouldShowMultiDeviceButton: value,
-        ),
-      ),
+      () =>
+          _saveSettings(_settings.copyWith(shouldShowMultiDeviceButton: value)),
     );
   }
 
@@ -206,8 +188,14 @@ class _SettingsEditorState extends State<SettingsEditor> {
   // Responsive presentation with shared settings across tabs and layouts.
   @override
   Widget build(BuildContext context) {
+    final accentColorContent = AccentColorSettings(
+      preference: _settings.accentColor,
+      onChanged: (value) =>
+          setState(() => _saveSettings(_settings.copyWith(accentColor: value))),
+    );
     final screen = isCompactLayout(context)
         ? SettingsScreenMobile(
+            accentColorContent: accentColorContent,
             cacheContent: _buildCacheContent(),
             musicAssistantUrl: widget.musicAssistantUrl,
             onLogout: _isLoggingOut ? null : _logout,
@@ -220,6 +208,7 @@ class _SettingsEditorState extends State<SettingsEditor> {
                 _saveMultiDeviceButtonVisibility,
           )
         : SettingsScreenDesktop(
+            accentColorContent: accentColorContent,
             cacheContent: _buildCacheContent(),
             musicAssistantUrl: widget.musicAssistantUrl,
             themePreference: _settings.themePreference,

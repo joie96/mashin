@@ -44,6 +44,7 @@ impl ApplicationState {
             .clone()
             .ok_or_else(|| "a restored session is required before saving settings".to_string())?;
         session.theme = update.theme;
+        session.accent_color = update.accent_color;
         session.log_level = update.log_level;
         session.should_show_multi_device_button = update.should_show_multi_device_button;
         self.configure_and_persist_session(&session)?;
