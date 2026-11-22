@@ -2552,6 +2552,25 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
         ),
         child: Stack(
           children: <Widget>[
+            Positioned.fill(
+              left: 64,
+              child: PlaybackProgressBuilder(
+                coreEvents: widget.coreEvents,
+                builder: (context, state) => Align(
+                  alignment: Alignment.centerLeft,
+                  child: FractionallySizedBox(
+                    widthFactor: widget.maxSeconds > 0
+                        ? ((state.positionMillis ?? 0) /
+                                  1000 /
+                                  widget.maxSeconds)
+                              .clamp(0.0, 1.0)
+                        : 0.0,
+                    heightFactor: 1,
+                    child: ColoredBox(color: colors.selection),
+                  ),
+                ),
+              ),
+            ),
             Row(
               children: <Widget>[
                 Expanded(
@@ -2573,25 +2592,6 @@ class _MobilePlayerBarState extends State<_MobilePlayerBar> {
                     },
                     child: Stack(
                       children: <Widget>[
-                        Positioned.fill(
-                          left: 64,
-                          child: PlaybackProgressBuilder(
-                            coreEvents: widget.coreEvents,
-                            builder: (context, state) => Align(
-                              alignment: Alignment.centerLeft,
-                              child: FractionallySizedBox(
-                                widthFactor: widget.maxSeconds > 0
-                                    ? ((state.positionMillis ?? 0) /
-                                              1000 /
-                                              widget.maxSeconds)
-                                          .clamp(0.0, 1.0)
-                                    : 0.0,
-                                heightFactor: 1,
-                                child: ColoredBox(color: colors.selection),
-                              ),
-                            ),
-                          ),
-                        ),
                         AnimatedSwitcher(
                           duration: const Duration(milliseconds: 220),
                           // The incoming track travels opposite to the swipe direction.

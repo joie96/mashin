@@ -289,7 +289,7 @@ pub(crate) async fn authenticate(
         selected_output: SelectedOutput::Local,
         local: default_local_output((environment.client_name)()),
         volume: DEFAULT_LOCAL_VOLUME,
-        theme: ThemePreference::Dark,
+        theme: ThemePreference::default(),
         log_level: LogLevelPreference::Info,
         should_show_multi_device_button: true,
         preferred_provider: None,

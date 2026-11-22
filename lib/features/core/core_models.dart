@@ -3035,9 +3035,9 @@ class SessionSettings {
       username: json['username'] as String?,
       audioProfile: json['audioProfile'] as String? ?? '',
       themePreference: switch (json['theme']) {
+        'dark' => ThemePreference.dark,
         'light' => ThemePreference.light,
-        'system' => ThemePreference.system,
-        _ => ThemePreference.dark,
+        _ => ThemePreference.system,
       },
       logLevel: LogLevelPreference.parse(json['logLevel'] as String? ?? 'info'),
       shouldShowMultiDeviceButton:

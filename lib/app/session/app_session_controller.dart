@@ -57,7 +57,7 @@ class AppSessionController extends ChangeNotifier {
   bool _isAuthenticated = false;
   bool _isLoading = true;
   bool _isDisposed = false;
-  ThemePreference _themePreference = ThemePreference.dark;
+  ThemePreference _themePreference = ThemePreference.system;
   bool _shouldShowMultiDeviceButton = true;
   LogLevelPreference _logLevel = LogLevelPreference.info;
 

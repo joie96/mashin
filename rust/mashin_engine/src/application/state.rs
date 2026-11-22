@@ -327,8 +327,13 @@ pub(super) mod tests {
         let application = test_application();
         assert_eq!(
             application.read_session_settings().unwrap().theme,
-            ThemePreference::Dark
+            ThemePreference::System
         );
+
+        let mut configuration = serde_json::to_value(session_config()).unwrap();
+        configuration.as_object_mut().unwrap().remove("theme");
+        let session: SessionConfig = serde_json::from_value(configuration).unwrap();
+        assert_eq!(session.theme, ThemePreference::System);
     }
 
     fn settings_update() -> crate::domain::settings::SessionSettingsUpdate {

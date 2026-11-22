@@ -2565,7 +2565,7 @@ void main() {
       expect(update.toJson()['theme'], preference.name);
       expect(settings.themePreference, preference);
     }
-    expect(SessionSettings.fromJson({}).themePreference, ThemePreference.dark);
+    expect(SessionSettings.fromJson({}).themePreference, ThemePreference.system);
   });
 
   test('artwork requires an observed proxy ID or inline content', () {

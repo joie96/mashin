@@ -87,7 +87,7 @@ pub(crate) enum ThemePreference {
 
 impl Default for ThemePreference {
     fn default() -> Self {
-        Self::Dark
+        Self::System
     }
 }
 
@@ -231,7 +231,7 @@ pub(crate) fn session_settings(session: Option<&SessionConfig>) -> SessionSettin
             DEFAULT_MUSIC_ASSISTANT_URL.to_string(),
             None,
             AudioProfileId::default(),
-            ThemePreference::Dark,
+            ThemePreference::default(),
             LogLevelPreference::Info,
         ),
     };
