@@ -185,6 +185,102 @@ class RustSessionPlayerTest {
     }
 
     @Test
+    fun identicalFullSnapshotsAndPositionTicksNeverPublishTimelineChanges() {
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","name":"Artist - Song","media_item":{"media_type":"track","name":"Song","duration":60,"artists":[{"name":"Artist"}]}}]}""")
+        val state = JSONObject("""{"currentQueueItemId":"queue:1","playbackState":"playing","durationMillis":60000}""")
+        val initial = PlaybackSnapshotMapper.fromPlayerState(state, queue)
+        player.updateState(initial)
+        val playlist = projectedPlaylist()
+        var timelineChanges = 0
+        player.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                timelineChanges++
+            }
+        })
+        var previous = initial
+        repeat(20) { tick ->
+            state.put("positionMillis", tick * 250L).put("bufferedPositionMillis", tick * 250L + 1000)
+            val refreshed = if (tick % 2 == 0) {
+                PlaybackSnapshotMapper.fromPlayerState(state, JSONObject(queue.toString())).also {
+                    assertNotSame(previous.mediaItems, it.mediaItems)
+                }
+            } else requireNotNull(PlaybackSnapshotMapper.updatePlayerState(previous, state))
+            player.updateState(refreshed)
+            assertSame(playlist, projectedPlaylist())
+            previous = refreshed
+        }
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertEquals(0, timelineChanges)
+        assertEquals(4750L, player.currentPosition)
+        assertEquals(5750L, player.bufferedPosition)
+    }
+
+    @Test
+    fun selectionChangesKeepPlaylistWhenItemDurationsStayTheSame() {
+        val mediaItems = listOf("queue-1", "queue-2").map { id ->
+            media(id).buildUpon().setMediaMetadata(androidx.media3.common.MediaMetadata.Builder()
+                .setDurationMs(60000).build()).build()
+        }
+        val initial = PlaybackSnapshot.empty().copy(mediaItems = mediaItems, durationMillis = 60000)
+        player.updateState(initial)
+        val playlist = projectedPlaylist()
+        var timelineChanges = 0
+        var itemTransitions = 0
+        player.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                timelineChanges++
+            }
+            override fun onMediaItemTransition(mediaItem: MediaItem?, reason: Int) {
+                itemTransitions++
+            }
+        })
+        player.updateState(initial.copy(currentIndex = 1))
+        org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+        assertSame(playlist, projectedPlaylist())
+        assertEquals(1, player.currentMediaItemIndex)
+        assertEquals(0, timelineChanges)
+        assertEquals(1, itemTransitions)
+    }
+
+    @Test
+    fun realQueueEditsAndPresentationChangesPublishTimelineUpdates() {
+        val initial = PlaybackSnapshot.empty().copy(
+            mediaItems = listOf(media("queue-1"), media("queue-2")), durationMillis = 60000,
+        )
+        val renamed = initial.mediaItems.first().buildUpon().setMediaMetadata(
+            androidx.media3.common.MediaMetadata.Builder().setTitle("Updated title").build()).build()
+        val newCover = renamed.buildUpon().setMediaMetadata(renamed.mediaMetadata.buildUpon()
+            .setArtworkUri(android.net.Uri.parse("content://com.joie96.mashin.mediaart/updated")).build()).build()
+        var timelineChanges = 0
+        player.updateState(initial)
+        player.addListener(object : Player.Listener {
+            override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+                timelineChanges++
+            }
+        })
+        val updates = listOf(
+            initial.copy(mediaItems = initial.mediaItems + media("queue-3")),
+            initial.copy(mediaItems = initial.mediaItems.reversed()),
+            initial.copy(mediaItems = listOf(initial.mediaItems.first())),
+            initial.copy(mediaItems = listOf(renamed)),
+            initial.copy(mediaItems = listOf(newCover)),
+            initial.copy(mediaItems = listOf(newCover), durationMillis = 90000),
+        )
+        updates.forEachIndexed { index, updated ->
+            val previousPlaylist = projectedPlaylist()
+            player.updateState(updated)
+            org.robolectric.Shadows.shadowOf(android.os.Looper.getMainLooper()).idle()
+            assertNotSame(previousPlaylist, projectedPlaylist())
+            assertEquals(index + 1, timelineChanges)
+            assertEquals(updated.mediaItems.map { it.mediaId },
+                (0 until player.mediaItemCount).map { player.getMediaItemAt(it).mediaId })
+            assertEquals(updated.mediaItems.first().mediaMetadata.title, player.mediaMetadata.title)
+            assertEquals(updated.mediaItems.first().mediaMetadata.artworkUri, player.mediaMetadata.artworkUri)
+            assertEquals(updated.durationMillis, player.duration)
+        }
+    }
+
+    @Test
     fun changedMetadataDurationAndSelectionRebuildProjectedPlaylist() {
         val snapshot = PlaybackSnapshot.empty().copy(
             mediaItems = listOf(media("queue-1"), media("queue-2")), durationMillis = 60000,

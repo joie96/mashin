@@ -14,6 +14,34 @@ import org.robolectric.annotation.Config
 class PlaybackSnapshotMapperTest {
     // Canonical state and metadata projection.
     @Test
+    fun playerMetadataSeparatesTrackTitleFromQueueDisplayNameAndArtists() {
+        val state = JSONObject("""{"currentQueueItemId":"queue:1","playbackState":"playing"}""")
+        val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","name":"First Artist, Second Artist - Song - Live","media_item":{"media_type":"track","name":"Song - Live","artists":[{"name":"First Artist"},{"name":"Second Artist"}]}}]}""")
+        val metadata = PlaybackSnapshotMapper.fromPlayerState(state, queue).mediaItems.single().mediaMetadata
+        assertEquals("Song - Live", metadata.title)
+        assertEquals("First Artist, Second Artist", metadata.artist)
+        assertEquals("queue:1", PlaybackSnapshotMapper.fromPlayerState(state, queue).mediaItems.single().mediaId)
+    }
+
+    @Test
+    fun requestedTrackMetadataKeepsTitleAndArtistSeparateWithoutAQueue() {
+        val state = JSONObject("""{"currentQueueItemId":"queue:1","playbackState":"buffering","requestedMedia":{"media_type":"track","name":"Chosen Song","artists":[{"name":"Chosen Artist"}]}}""")
+        val metadata = PlaybackSnapshotMapper.fromPlayerState(state, JSONObject("{}")).mediaItems.single().mediaMetadata
+        assertEquals("Chosen Song", metadata.title)
+        assertEquals("Chosen Artist", metadata.artist)
+    }
+
+    @Test
+    fun missingTrackTitleRetainsQueueNameWithoutInventingAnArtist() {
+        for (mediaItem in listOf("{}", """{"name":""}""", """{"name":"   "}""")) {
+            val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","name":"Queue title","media_item":$mediaItem}]}""")
+            val metadata = PlaybackSnapshotMapper.fromPlayerState(JSONObject("{}"), queue).mediaItems.single().mediaMetadata
+            assertEquals("Queue title", metadata.title)
+            assertNull(metadata.artist)
+        }
+    }
+
+    @Test
     fun playerStateUpdatesRetainQueueMetadataAndFavorites() {
         val state = JSONObject("""{"activeMode":"local","playbackState":"playing","currentQueueItemId":"queue:1","durationMillis":60000,"positionMillis":1000}""")
         val queue = JSONObject("""{"items":[{"queue_item_id":"queue:1","name":"Track","media_item":{"media_type":"track","item_id":"1","uri":"library://track/1"}}],"shuffleEnabled":true,"repeatMode":"one"}""")

@@ -55,7 +55,7 @@ internal object PlaybackSnapshotMapper {
                 .setMediaId(currentItem.optString("queue_item_id"))
                 .setMediaMetadata(
                     MediaMetadata.Builder()
-                        .setTitle(currentItem.optString("name"))
+                        .setTitle(mediaItem?.optString("name")?.takeIf(String::isNotBlank) ?: currentItem.optString("name"))
                         .setArtist(mediaItem?.artistNames())
                         .setAlbumTitle(mediaItem?.optJSONObject("album")?.optString("name"))
                         .setArtworkUri(MediaArtworkContentProvider.buildUri(currentItem)?.let(android.net.Uri::parse))

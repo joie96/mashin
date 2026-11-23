@@ -24,9 +24,10 @@ internal class RustSessionPlayer(
 
     // Snapshot projection is confined to the Media3 player looper.
     fun updateState(nextSnapshot: PlaybackSnapshot) {
-        if (snapshot.mediaItems !== nextSnapshot.mediaItems || snapshot.currentIndex != nextSnapshot.currentIndex ||
+        if (snapshot.mediaItems != nextSnapshot.mediaItems || snapshot.currentIndex != nextSnapshot.currentIndex ||
             snapshot.durationMillis != nextSnapshot.durationMillis) {
-            playlist = projectPlaylist(nextSnapshot)
+            val projected = projectPlaylist(nextSnapshot)
+            if (playlist != projected) playlist = projected
         }
         snapshot = nextSnapshot
         invalidateState()

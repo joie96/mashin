@@ -559,13 +559,10 @@ internal class MediaLibraryBrowser(
         "discover:artistRadio" -> discoverRecommendationItems(parentId, "global_artist_radio_playlists", "playlist")
         "discover:globalTracks" -> discoverRecommendationItems(parentId, "global_top_tracks", "track")
         "discover:globalArtists" -> discoverRecommendationItems(parentId, "global_top_artists", "artist")
-        "discover:germanTracks" -> discoverRecommendationItems(parentId, "de_top_tracks", "track")
-        "discover:germanArtists" -> discoverRecommendationItems(parentId, "de_top_artists", "artist")
         "discover:moods" -> discoverRecommendationItems(parentId, "global_mood_playlists", "playlist")
         "discover:genres" -> discoverRecommendationItems(parentId, "global_genre_playlists", "playlist")
         "discover:decades" -> discoverRecommendationItems(parentId, "global_decade_playlists", "playlist")
         "discover:globalAlbums" -> discoverRecommendationItems(parentId, "global_popular_artist_albums", "album")
-        "discover:germanAlbums" -> discoverRecommendationItems(parentId, "de_popular_artist_albums", "album")
         "favorites:tracks" -> userDataItems("tracks", "track", true)
         "favorites:albums" -> userDataItems("albums", "album")
         "favorites:playlists" -> userDataItems("playlists", "playlist")
@@ -574,36 +571,33 @@ internal class MediaLibraryBrowser(
     }
 
     private fun homeItems(): List<MediaItem> = listOf(
-        libraryItem("home:recommendations", "Empfehlungen", false, iconResource = R.drawable.music_note_2),
-        libraryItem("home:favoriteGenres", "Lieblingsgenres", false, iconResource = R.drawable.genres),
-        libraryItem("home:playlistSuggestions", "Playlist-Empfehlungen", false, iconResource = R.drawable.playlist_play),
-        libraryItem("home:topTracks", "Top-Tracks", false, iconResource = R.drawable.music_note),
-        libraryItem("home:topArtists", "Top-Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
-        libraryItem("home:artistRecommendations", "Künstler-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.person_add),
+        libraryItem("home:recommendations", "Lied-Empfehlungen", false, iconResource = R.drawable.music_note_2),
+        libraryItem("home:favoriteGenres", "Lieblingsgenres", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.genres),
+        libraryItem("home:playlistSuggestions", "Playlist-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.playlist_play),
+        libraryItem("home:topTracks", "Lieblingslieder", false, iconResource = R.drawable.music_note),
+        libraryItem("home:topArtists", "Lieblingskünstler:innen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("home:artistRecommendations", "Künstler:innen-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.person_add),
         libraryItem("home:topAlbums", "Top-Alben", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
         libraryItem("home:albumRecommendations", "Album-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.auto_awesome),
-        libraryItem("home:rediscovery", "Wiederentdecken", false, iconResource = R.drawable.history),
+        libraryItem("home:rediscovery", "Lange nicht gehört", false, iconResource = R.drawable.history),
         libraryItem("home:recent", "Kürzlich gespielt", false, iconResource = R.drawable.music_history),
     )
 
     private fun favoriteCategoryItems(): List<MediaItem> = listOf(
-        libraryItem("favorites:tracks", "Tracks", false, iconResource = R.drawable.music_note),
+        libraryItem("favorites:tracks", "Lieder", false, iconResource = R.drawable.music_note),
         libraryItem("favorites:albums", "Alben", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
         libraryItem("favorites:playlists", "Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.playlist_play),
-        libraryItem("favorites:artists", "Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("favorites:artists", "Künstler:innen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
     )
 
     private fun discoverItems(): List<MediaItem> = listOf(
         libraryItem("discover:artistRadio", "Das hören andere", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.groups),
-        libraryItem("discover:globalTracks", "Track-Charts weltweit", false, iconResource = R.drawable.globe),
-        libraryItem("discover:globalArtists", "Künstler-Charts weltweit", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.globe),
-        libraryItem("discover:germanTracks", "Track-Charts Deutschland", false, iconResource = R.drawable.flag),
-        libraryItem("discover:germanArtists", "Künstler-Charts Deutschland", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.flag),
-        libraryItem("discover:moods", "Musik für deine Stimmung", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.mood),
-        libraryItem("discover:genres", "Genre-Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.genres),
-        libraryItem("discover:decades", "Jahrzehnt-Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.calendar_month),
-        libraryItem("discover:globalAlbums", "Alben weltweit beliebter Künstler:innen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
-        libraryItem("discover:germanAlbums", "Alben in Deutschland beliebter Künstler:innen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
+        libraryItem("discover:globalTracks", "Track-Charts weltweit", false, iconResource = R.drawable.music_note),
+        libraryItem("discover:globalArtists", "Künstler:innen-Charts", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("discover:moods", "Musik für deine Stimmung", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.sentiment_satisfied),
+        libraryItem("discover:genres", "Genres entdecken", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.genres),
+        libraryItem("discover:decades", "Dekadenmixe", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.calendar_month),
+        libraryItem("discover:globalAlbums", "Album-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
     )
 
     private fun playlistItems(): LibraryChildren {

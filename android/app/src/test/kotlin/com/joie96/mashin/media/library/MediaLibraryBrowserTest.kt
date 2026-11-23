@@ -169,13 +169,10 @@ class MediaLibraryBrowserTest {
             Triple("discover:artistRadio", "global_artist_radio_playlists", "playlist"),
             Triple("discover:globalTracks", "global_top_tracks", "track"),
             Triple("discover:globalArtists", "global_top_artists", "artist"),
-            Triple("discover:germanTracks", "de_top_tracks", "track"),
-            Triple("discover:germanArtists", "de_top_artists", "artist"),
             Triple("discover:moods", "global_mood_playlists", "playlist"),
             Triple("discover:genres", "global_genre_playlists", "playlist"),
             Triple("discover:decades", "global_decade_playlists", "playlist"),
             Triple("discover:globalAlbums", "global_popular_artist_albums", "album"),
-            Triple("discover:germanAlbums", "de_popular_artist_albums", "album"),
         )) {
             isLoadingRecommendations = true
             val pending = browser.onGetChildren(session, controller, parent, 0, Int.MAX_VALUE, null)
@@ -215,6 +212,8 @@ class MediaLibraryBrowserTest {
             assertThrows(TimeoutException::class.java) { result.get(100, TimeUnit.MILLISECONDS) }
         }
         assertEquals(categories.map { "favorites:${it.first}" }, children("node:favorites").map { it.mediaId })
+        assertEquals(listOf("Lieder", "Alben", "Playlists", "Künstler:innen"),
+            children("node:favorites").map { it.mediaMetadata.title.toString() })
         val favorites = JSONObject()
         categories.forEach { (category, mediaType) -> favorites.put(category, JSONArray().put(item(category, mediaType))) }
         userData = JSONObject().put("is_loading_favorites", false).put("favorites", favorites)
@@ -320,8 +319,7 @@ class MediaLibraryBrowserTest {
                     "home:topTracks", "home:topArtists", "home:artistRecommendations", "home:topAlbums",
                     "home:albumRecommendations", "home:rediscovery", "home:recent"),
                 "node:discover" to listOf("discover:artistRadio", "discover:globalTracks", "discover:globalArtists",
-                    "discover:germanTracks", "discover:germanArtists", "discover:moods", "discover:genres",
-                    "discover:decades", "discover:globalAlbums", "discover:germanAlbums"),
+                    "discover:moods", "discover:genres", "discover:decades", "discover:globalAlbums"),
                 "node:favorites" to listOf("favorites:tracks", "favorites:albums", "favorites:playlists", "favorites:artists"),
             )) {
                 val result = blockedBrowser.onGetChildren(session, controller, parent, 0, Int.MAX_VALUE, null)
@@ -336,25 +334,91 @@ class MediaLibraryBrowserTest {
     }
 
     @Test
-    fun discoverListsCurrentSectionsInAppOrderWithoutGenreSpecificFolders() {
-        val sections = children("node:discover")
-        assertEquals(listOf("Das hören andere", "Track-Charts weltweit", "Künstler-Charts weltweit",
-            "Track-Charts Deutschland", "Künstler-Charts Deutschland", "Musik für deine Stimmung",
-            "Genre-Playlists", "Jahrzehnt-Playlists", "Alben weltweit beliebter Künstler:innen",
-            "Alben in Deutschland beliebter Künstler:innen"), sections.map { it.mediaMetadata.title.toString() })
+    fun homeListsRecommendationSectionsWithGridStylesForBrowsableCollections() {
+        val sections = children("node:home")
+        assertEquals(listOf("Lied-Empfehlungen", "Lieblingsgenres", "Playlist-Empfehlungen",
+            "Lieblingslieder", "Lieblingskünstler:innen", "Künstler:innen-Empfehlungen", "Top-Alben",
+            "Album-Empfehlungen", "Lange nicht gehört", "Kürzlich gespielt"),
+            sections.map { it.mediaMetadata.title.toString() })
         assertTrue(sections.all { it.mediaMetadata.isBrowsable == true && it.mediaMetadata.isPlayable == false })
-        assertEquals("android.resource://com.joie96.mashin/drawable/groups",
-            sections[0].mediaMetadata.artworkUri.toString())
-        assertEquals(MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
-            sections[0].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
-        assertEquals(MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
-            sections[2].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
+        val gridSections = setOf("home:favoriteGenres", "home:playlistSuggestions", "home:topArtists",
+            "home:artistRecommendations", "home:topAlbums", "home:albumRecommendations")
+        sections.forEach { section ->
+            assertEquals(section.mediaId, section.mediaId in gridSections,
+                section.mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE) ==
+                    MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM)
+        }
+        assertTrue(recommendationViews.isEmpty())
+    }
+
+    @Test
+    fun homeArtistRecommendationsAndRediscoveryExposeTheirMediaAndPlayback() {
+        folders.put(folder("user_artist_recommendations", item("recommended-artist", "artist")))
+        folders.put(folder("user_rediscovery_tracks", item("rediscovered-track", "track")))
+        val artist = children("home:artistRecommendations").single()
+        assertEquals("recommended-artist", artist.mediaMetadata.title)
+        assertEquals(true, artist.mediaMetadata.isBrowsable)
+        assertEquals(false, artist.mediaMetadata.isPlayable)
+        assertEquals(listOf("Artist-Radio", "Alben", "Ähnliche Artists", "Top-Tracks"),
+            children(artist.mediaId).map { it.mediaMetadata.title.toString() })
+        val tracks = children("home:rediscovery")
+        assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "rediscovered-track"),
+            tracks.map { it.mediaMetadata.title.toString() })
+        assertEquals(true, tracks.last().mediaMetadata.isPlayable)
+        browser.startPlayback(tracks.first().mediaId).get(5, TimeUnit.SECONDS)
+        val mediaItems = JSONObject(requests.single().arguments).getJSONObject("request").getJSONArray("mediaItems")
+        assertEquals(1, mediaItems.length())
+        assertEquals("rediscovered-track", mediaItems.getJSONObject(0).getString("item_id"))
+    }
+
+    @Test
+    fun discoverListsRequestedSectionsWithMatchingIconsAndGridStyles() {
+        val sections = children("node:discover")
+        assertEquals(listOf("Das hören andere", "Track-Charts weltweit", "Künstler:innen-Charts",
+            "Musik für deine Stimmung", "Genres entdecken", "Dekadenmixe",
+            "Album-Empfehlungen"), sections.map { it.mediaMetadata.title.toString() })
+        assertTrue(sections.all { it.mediaMetadata.isBrowsable == true && it.mediaMetadata.isPlayable == false })
+        val icons = listOf("groups", "music_note", "artist", "sentiment_satisfied", "genres", "calendar_month", "album")
+        sections.take(icons.size).zip(icons).forEach { (section, icon) ->
+            assertEquals("android.resource://com.joie96.mashin/drawable/$icon",
+                section.mediaMetadata.artworkUri.toString())
+        }
+        sections.forEach { section ->
+            assertEquals(section.mediaId, section.mediaId != "discover:globalTracks",
+                section.mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE) ==
+                    MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM)
+        }
         assertTrue(references.isEmpty())
     }
 
     @Test
+    fun discoverPlaylistGridsAndTrackChartsExposeOnlyTheirCorrespondingMedia() {
+        for ((parent, folderId) in listOf(
+            "discover:artistRadio" to "global_artist_radio_playlists",
+            "discover:genres" to "global_genre_playlists",
+            "discover:decades" to "global_decade_playlists",
+        )) {
+            folders.put(folder(folderId, item(parent, "playlist"), item("wrong", "track")))
+            publishRecommendations()
+            val playlist = children(parent).single()
+            assertEquals(parent, playlist.mediaMetadata.title)
+            assertEquals(true, playlist.mediaMetadata.isBrowsable)
+            assertEquals(false, playlist.mediaMetadata.isPlayable)
+        }
+        folders.put(folder("global_top_tracks", item("chart-track", "track"), item("wrong", "artist")))
+        publishRecommendations()
+        val tracks = children("discover:globalTracks")
+        assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "chart-track"),
+            tracks.map { it.mediaMetadata.title.toString() })
+        assertEquals(true, tracks.last().mediaMetadata.isPlayable)
+    }
+
+    @Test
     fun moodPlaylistsExposeLocalCoverUrisInsteadOfServerArtwork() {
-        folders.put(folder("global_mood_playlists", item("global_mood_playlist_focus", "playlist")))
+        val playlist = item("global_mood_playlist_focus", "playlist").put("metadata", JSONObject()
+            .put("images", JSONArray().put(JSONObject().put("type", "thumb")
+                .put("path", "https://example.com/playlist.jpg").put("provider", "test"))))
+        folders.put(folder("global_mood_playlists", playlist))
         assertEquals("content://com.joie96.mashin.mediaart/mood/focus",
             children("discover:moods").single().mediaMetadata.artworkUri.toString())
     }
