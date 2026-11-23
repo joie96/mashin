@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 
 import '../../core/core_models.dart';
+import 'desktop_item_action.dart';
 
 /// Renders a comma-separated list of media items (artists, albums, playlists, ...)
 /// where each name is individually tappable and underlines only while hovered,
@@ -12,7 +13,6 @@ class MediaLinkText extends StatefulWidget {
   final TextAlign textAlign;
   final int maxLines;
   final ValueChanged<MediaItem>? onItemTap;
-  final ValueChanged<int>? onItemPointerDown;
 
   const MediaLinkText({
     super.key,
@@ -22,7 +22,6 @@ class MediaLinkText extends StatefulWidget {
     this.textAlign = TextAlign.left,
     this.maxLines = 1,
     this.onItemTap,
-    this.onItemPointerDown,
   });
 
   @override
@@ -78,9 +77,7 @@ class _MediaLinkTextState extends State<MediaLinkText> {
                     cursor: SystemMouseCursors.click,
                     onEnter: (_) => _setHovered(i),
                     onExit: (_) => _setHovered(null),
-                    child: Listener(
-                      onPointerDown: (PointerDownEvent event) =>
-                          widget.onItemPointerDown?.call(event.pointer),
+                    child: DesktopItemAction(
                       child: GestureDetector(
                         onTap: () => widget.onItemTap!(item),
                         child: Text(

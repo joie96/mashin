@@ -211,6 +211,7 @@ class _SearchScreenMobileState extends State<SearchScreenMobile> {
           label: allFavorite
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+            clearsSelectionOnSuccess: allFavorite,
           icon: allFavorite
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,

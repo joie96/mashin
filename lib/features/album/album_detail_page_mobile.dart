@@ -192,6 +192,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile>
           label: allFavorite
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+            clearsSelectionOnSuccess: allFavorite,
           icon: allFavorite
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,
@@ -250,6 +251,7 @@ class _AlbumDetailPageMobileState extends State<AlbumDetailPageMobile>
       label: _controller.isAlbumFavorite
           ? 'Aus Favoriten entfernen'
           : 'Zu Favoriten hinzufügen',
+        clearsSelectionOnSuccess: _controller.isAlbumFavorite,
       icon: _controller.isAlbumFavorite
           ? Icons.favorite_outlined
           : Icons.favorite_border_outlined,

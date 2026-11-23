@@ -6,6 +6,7 @@ import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/selection/selection_controller.dart';
 import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_mobile.dart';
 import 'playlist_name_dialog.dart';
@@ -154,7 +155,9 @@ class _PlaylistsPageMobileState extends State<PlaylistsPageMobile> {
       playlistName: playlistName,
     );
     if (confirmed) {
-      await _controller.deletePlaylists(playlists);
+      await SelectionController.instance.runAndClearSelection(
+        () => _controller.deletePlaylists(playlists),
+      );
     }
   }
 

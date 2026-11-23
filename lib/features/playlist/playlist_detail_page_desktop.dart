@@ -8,6 +8,7 @@ import '../core/core_bridge.dart';
 import '../core/core_models.dart';
 import '../core/core_events.dart';
 import '../shared/context_menu/context_menu_controller.dart';
+import '../shared/selection/selection_controller.dart';
 import '../shared/detail_page_lifecycle.dart';
 import '../core/core_userdata.dart';
 import '../shared/widgets/media_table_section_desktop.dart';
@@ -216,6 +217,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
         ContextMenuAction(
           label: 'Aus Wiedergabeliste entfernen',
           icon: Icons.playlist_remove_outlined,
+          clearsSelectionOnSuccess: true,
           onSelected: () async {
             for (final Track selectedTrack in tracks) {
               await _controller.removeTrack(selectedTrack);
@@ -231,6 +233,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
         label: isFavorite
             ? 'Aus Favoriten entfernen'
             : 'Zu Favoriten hinzufügen',
+        clearsSelectionOnSuccess: isFavorite,
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
@@ -286,6 +289,7 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
           label: _controller.isPlaylistFavorite
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+          clearsSelectionOnSuccess: _controller.isPlaylistFavorite,
           icon: _controller.isPlaylistFavorite
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,
@@ -352,7 +356,9 @@ class _PlaylistDetailPageDesktopState extends State<PlaylistDetailPageDesktop>
       return;
     }
 
-    await userData.removePlaylist(playlist);
+    await SelectionController.instance.runAndClearSelection(
+      () => userData.removePlaylist(playlist),
+    );
   }
 
   Future<void> _showItemMenu(MediaItem item, {BuildContext? anchorContext}) {

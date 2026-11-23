@@ -224,6 +224,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         label: isFavorite
             ? 'Aus Favoriten entfernen'
             : 'Zu Favoriten hinzufügen',
+        clearsSelectionOnSuccess: isFavorite,
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
@@ -276,6 +277,7 @@ class _ArtistDetailPageDesktopState extends State<ArtistDetailPageDesktop>
         label: isFavorite
             ? 'Aus Favoriten entfernen'
             : 'Zu Favoriten hinzufügen',
+        clearsSelectionOnSuccess: isFavorite,
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,

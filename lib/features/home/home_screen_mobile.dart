@@ -220,6 +220,7 @@ class _HomeScreenMobileState extends State<HomeScreenMobile> {
           label: allFavorite
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+            clearsSelectionOnSuccess: allFavorite,
           icon: allFavorite
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,

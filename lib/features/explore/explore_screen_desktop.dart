@@ -188,6 +188,7 @@ class _ExploreScreenDesktopState extends State<ExploreScreenDesktop> {
           label: areAllFavorites
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+            clearsSelectionOnSuccess: areAllFavorites,
           icon: areAllFavorites ? Icons.favorite : Icons.favorite_border,
           isEnabled: userData != null,
           onSelected: () async {

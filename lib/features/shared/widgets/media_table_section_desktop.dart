@@ -12,6 +12,7 @@ import '../../core/core_models.dart';
 import '../../core/core_query_scope.dart';
 import '../detail_page_lifecycle.dart';
 import '../selection/selection_controller.dart';
+import 'desktop_item_action.dart';
 import 'media_link_text.dart';
 import 'media_image.dart';
 
@@ -95,7 +96,6 @@ class _MediaTableSectionDesktopState<T>
   final Object _selectionSessionOwner = Object();
   final SelectionController _selectionSessionController =
       SelectionController.instance;
-  final Set<int> _suppressedSelectionPointers = <int>{};
   int? _selectionAnchorIndex;
   int _currentPage = 0;
   bool _isPageFading = false;
@@ -187,6 +187,16 @@ class _MediaTableSectionDesktopState<T>
         : (BuildContext anchorContext) {
             _ensureItemSelectedForMenu(index);
             handler(item, index, anchorContext);
+          };
+  }
+
+  VoidCallback? _moreTapHandler(T item, int index) {
+    final handler = widget.onRowMoreTap;
+    return handler == null
+        ? null
+        : () {
+            _ensureItemSelectedForMenu(index);
+            handler(item, index);
           };
   }
 
@@ -413,7 +423,6 @@ class _MediaTableSectionDesktopState<T>
     if (MediaItemProviderIcon.handlesPointer(event)) return;
     if (event.kind == PointerDeviceKind.mouse &&
         (event.buttons & kSecondaryMouseButton) != 0) {
-      _suppressedSelectionPointers.remove(event.pointer);
       final DesktopRowContextMenuAction<T>? handler = widget.onRowContextMenu;
       final DesktopRowSelectionContextMenuAction<T>? selectionHandler =
           widget.onRowSelectionContextMenu;
@@ -435,7 +444,7 @@ class _MediaTableSectionDesktopState<T>
       return;
     }
 
-    if (_suppressedSelectionPointers.remove(event.pointer)) {
+    if (DesktopItemAction.handlesPointer(event)) {
       return;
     }
 
@@ -469,10 +478,6 @@ class _MediaTableSectionDesktopState<T>
     // Perform single selection on pointer down to avoid tap-delay caused by
     // double-tap recognizers and to snapshot modifier state immediately.
     _selectSingleIndex(index);
-  }
-
-  void _suppressSelectionForPointer(int pointer) {
-    _suppressedSelectionPointers.add(pointer);
   }
 
   void _toggleAllSelectedIndexes() {
@@ -1075,9 +1080,7 @@ class _MediaTableSectionDesktopState<T>
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item, index),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item, index),
+        onMoreTap: _moreTapHandler(item, index),
         onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
@@ -1095,9 +1098,7 @@ class _MediaTableSectionDesktopState<T>
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item, index),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item, index),
+        onMoreTap: _moreTapHandler(item, index),
         onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
@@ -1116,9 +1117,7 @@ class _MediaTableSectionDesktopState<T>
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item, index),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item, index),
+        onMoreTap: _moreTapHandler(item, index),
         onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
@@ -1137,14 +1136,11 @@ class _MediaTableSectionDesktopState<T>
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item, index),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item, index),
+        onMoreTap: _moreTapHandler(item, index),
         onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
-        onArtistPointerDown: _suppressSelectionForPointer,
         onAlbumTap: widget.onAlbumTap,
       );
     }
@@ -1161,14 +1157,11 @@ class _MediaTableSectionDesktopState<T>
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item, index),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item, index),
+        onMoreTap: _moreTapHandler(item, index),
         onMoreAnchorTap: _moreAnchorHandler(item, index),
         onDoubleTap: () => _onRowActivated(item: item, index: index),
         onPointerDown: onPointerDown,
         onArtistTap: widget.onArtistTap,
-        onArtistPointerDown: _suppressSelectionForPointer,
         onAlbumTap: widget.onAlbumTap,
       );
     }
@@ -1183,9 +1176,7 @@ class _MediaTableSectionDesktopState<T>
       onFavoriteTap: widget.onRowFavoriteTap == null
           ? null
           : () => widget.onRowFavoriteTap!(item, index),
-      onMoreTap: widget.onRowMoreTap == null
-          ? null
-          : () => widget.onRowMoreTap!(item, index),
+      onMoreTap: _moreTapHandler(item, index),
       onMoreAnchorTap: _moreAnchorHandler(item, index),
       onDoubleTap: () => _onRowActivated(item: item, index: index),
       onPointerDown: onPointerDown,
@@ -1483,7 +1474,6 @@ Widget _buildDesktopTableRowTrack({
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
-  ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
   return Opacity(
@@ -1539,7 +1529,6 @@ Widget _buildDesktopTableRowTrack({
             artists: item.artists,
             fallbackText: _trackSubtitle(item),
             onArtistTap: onArtistTap,
-            onArtistPointerDown: onArtistPointerDown,
           ),
         ),
         _buildDesktopTableSizedCell(
@@ -1824,7 +1813,6 @@ Widget _buildDesktopTableRowQueue({
   required VoidCallback? onDoubleTap,
   required ValueChanged<PointerDownEvent>? onPointerDown,
   ValueChanged<Artist>? onArtistTap,
-  ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
   final String provider = item.playbackProvider;
@@ -1896,7 +1884,6 @@ Widget _buildDesktopTableRowQueue({
                 ? '-'
                 : artistsFallbackText,
             onArtistTap: onArtistTap,
-            onArtistPointerDown: onArtistPointerDown,
           ),
         ),
         _buildDesktopTableSizedCell(
@@ -2313,15 +2300,12 @@ class _DesktopTableRowBaseState extends State<_DesktopTableRowBase> {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
-    final Color selectedBackground = colors.selection;
-    final Color hoverBackground = colors.hover;
-
-    Color rowBackground = Colors.transparent;
-    if (widget.isSelected) {
-      rowBackground = _isHovered ? hoverBackground : selectedBackground;
-    } else if (_isHovered) {
-      rowBackground = hoverBackground;
-    }
+    final baseBackground = widget.isSelected
+        ? colors.selection
+        : Colors.transparent;
+    final rowBackground = _isHovered
+        ? Color.alphaBlend(Theme.of(context).hoverColor, baseBackground)
+        : baseBackground;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
@@ -2568,7 +2552,6 @@ Widget _buildDesktopArtistLinkCell({
   required List<Artist> artists,
   required String fallbackText,
   required ValueChanged<Artist>? onArtistTap,
-  ValueChanged<int>? onArtistPointerDown,
 }) {
   return Builder(
     builder: (BuildContext context) {
@@ -2581,7 +2564,6 @@ Widget _buildDesktopArtistLinkCell({
           onItemTap: onArtistTap == null
               ? null
               : (MediaItem media) => onArtistTap(media as Artist),
-          onItemPointerDown: onArtistPointerDown,
           style: textStyles.bodySecondary.copyWith(fontSize: 13),
         ),
       );
@@ -3187,23 +3169,25 @@ class _MediaTableCoverState extends State<MediaTableCover> {
                           scale: _isPlayHovered ? 1.08 : 1,
                           duration: _buttonScaleDuration,
                           curve: Curves.easeOutCubic,
-                          child: Listener(
-                            onPointerDown: (PointerDownEvent event) {
-                              if (_isPrimaryActivationPointer(event)) {
-                                widget.onPlayTap?.call();
-                              }
-                            },
-                            child: Container(
-                              width: 35,
-                              height: 35,
-                              decoration: BoxDecoration(
-                                color: colors.overlayPlayButtonBackground,
-                                borderRadius: BorderRadius.circular(18),
-                              ),
-                              child: Icon(
-                                Icons.play_arrow_sharp,
-                                size: 24,
-                                color: colors.overlayPlayButtonForeground,
+                          child: DesktopItemAction(
+                            child: Listener(
+                              onPointerDown: (PointerDownEvent event) {
+                                if (_isPrimaryActivationPointer(event)) {
+                                  widget.onPlayTap?.call();
+                                }
+                              },
+                              child: Container(
+                                width: 35,
+                                height: 35,
+                                decoration: BoxDecoration(
+                                  color: colors.overlayPlayButtonBackground,
+                                  borderRadius: BorderRadius.circular(18),
+                                ),
+                                child: Icon(
+                                  Icons.play_arrow_sharp,
+                                  size: 24,
+                                  color: colors.overlayPlayButtonForeground,
+                                ),
                               ),
                             ),
                           ),

@@ -208,6 +208,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
       ContextMenuAction(
         label: 'Aus Queue entfernen',
         icon: Icons.remove_circle_outline,
+        clearsSelectionOnSuccess: true,
         onSelected: () => widget.coreBridge.deleteQueueItems(
           targets
               .map((QueueItem target) => target.queueItemId)
@@ -257,6 +258,7 @@ class _QueueOverlayMobileState extends State<QueueOverlayMobile> {
           label: areAllFavorites
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+            clearsSelectionOnSuccess: areAllFavorites,
           icon: areAllFavorites
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,

@@ -139,22 +139,19 @@ class _MediaListSectionDesktopState<T extends MediaItem>
       widget.onItemTap?.call(widget.items[index]);
       return;
     }
-    _sectionFocusNode.requestFocus();
     final keys = HardwareKeyboard.instance.logicalKeysPressed;
     final isCtrlPressed =
         keys.contains(LogicalKeyboardKey.controlLeft) ||
         keys.contains(LogicalKeyboardKey.controlRight);
     if (isCtrlPressed) {
       _toggleSelectedIndex(index);
-    } else if (_selectedIndexes.length == 1 &&
-        _selectedIndexes.contains(index)) {
-      _clearSelectionFromController();
     } else {
       _selectSingleIndex(index);
     }
   }
 
   void _selectSingleIndex(int index) {
+    _sectionFocusNode.requestFocus();
     setState(() {
       _selectedIndexes
         ..clear()
@@ -162,18 +159,6 @@ class _MediaListSectionDesktopState<T extends MediaItem>
     });
     _syncSelectionSession();
     _emitSelectionChanged();
-  }
-
-  void _onTrackTitleTap(int index, Album album) {
-    final keys = HardwareKeyboard.instance.logicalKeysPressed;
-    final isCtrlPressed =
-        keys.contains(LogicalKeyboardKey.controlLeft) ||
-        keys.contains(LogicalKeyboardKey.controlRight);
-    if (widget.enableSelection && isCtrlPressed) {
-      _onTrackTap(index);
-    } else {
-      widget.onAlbumTap?.call(album);
-    }
   }
 
   void _toggleSelectedIndex(int index) {
@@ -208,7 +193,6 @@ class _MediaListSectionDesktopState<T extends MediaItem>
 
   void _showTrackContextMenu(int index, Offset position) {
     if (widget.enableSelection && !_selectedIndexes.contains(index)) {
-      _sectionFocusNode.requestFocus();
       _selectSingleIndex(index);
     }
     final selectionHandler = widget.onItemSelectionContextMenu;
@@ -677,7 +661,7 @@ class _MediaListSectionDesktopState<T extends MediaItem>
       key: ValueKey((item.provider, item.itemId, index)),
       track: track,
       coreEvents: widget.coreEvents,
-      onTitleTap: hasAlbumLink ? () => _onTrackTitleTap(index, album) : null,
+      onTitleTap: hasAlbumLink ? () => widget.onAlbumTap!(album) : null,
       isSelected: _selectedIndexes.contains(index),
       selectionModeActive:
           widget.enableSelection && _selectedIndexes.isNotEmpty,
@@ -687,13 +671,15 @@ class _MediaListSectionDesktopState<T extends MediaItem>
           ? null
           : () => unawaited(_playTracksFromIndex(index)),
       onMoreTap: widget.onItemMoreAnchorTap != null
-          ? (anchor) => widget.onItemMoreAnchorTap!(item, index, anchor)
+          ? (anchor) {
+              if (widget.enableSelection) _selectSingleIndex(index);
+              widget.onItemMoreAnchorTap!(item, index, anchor);
+            }
           : widget.onItemContextMenu == null
           ? null
           : (anchor) {
               final box = anchor.findRenderObject() as RenderBox;
-              widget.onItemContextMenu!(
-                item,
+              _showTrackContextMenu(
                 index,
                 box.localToGlobal(box.size.center(Offset.zero)),
               );
@@ -954,15 +940,12 @@ class _DesktopListTrackTile extends StatelessWidget {
                 padding: const EdgeInsets.only(left: 8),
                 child: Row(
                   children: [
-                    GestureDetector(
-                      onTap: () {},
-                      child: MediaTableCover(
-                        coverUrl: track.imageUriForSize(80),
-                        fallbackIcon: Icons.music_note_outlined,
-                        size: 48,
-                        radius: 4,
-                        onPlayTap: track.canPlay ? onPlayTap : null,
-                      ),
+                    MediaTableCover(
+                      coverUrl: track.imageUriForSize(80),
+                      fallbackIcon: Icons.music_note_outlined,
+                      size: 48,
+                      radius: 4,
+                      onPlayTap: track.canPlay ? onPlayTap : null,
                     ),
                     const SizedBox(width: 10),
                     Expanded(

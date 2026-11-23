@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 
 import '../../../app/layout/layout_utils.dart';
 import '../../../app/theme/app_theme.dart';
+import '../selection/selection_controller.dart';
 
 typedef ContextMenuActionHandler = FutureOr<void> Function();
 
@@ -35,6 +36,7 @@ class ContextMenuAction {
   final ContextMenuActionHandler onSelected;
   final bool isDestructive;
   final bool isEnabled;
+  final bool clearsSelectionOnSuccess;
 
   /// Renders a horizontal divider instead of an actionable row.
   final bool isSeparator;
@@ -49,6 +51,7 @@ class ContextMenuAction {
     this.iconQuarterTurns = 0,
     this.isDestructive = false,
     this.isEnabled = true,
+    this.clearsSelectionOnSuccess = false,
   }) : isSeparator = false,
        submenu = const <ContextMenuAction>[];
 
@@ -60,6 +63,7 @@ class ContextMenuAction {
     this.isEnabled = true,
   }) : isSeparator = false,
        isDestructive = false,
+       clearsSelectionOnSuccess = false,
        submenu = children,
        onSelected = _noopAction;
 
@@ -69,6 +73,7 @@ class ContextMenuAction {
       iconQuarterTurns = 0,
       onSelected = _noopAction,
       isDestructive = false,
+      clearsSelectionOnSuccess = false,
       isEnabled = false,
       isSeparator = true,
       submenu = const <ContextMenuAction>[];
@@ -76,6 +81,15 @@ class ContextMenuAction {
   static void _noopAction() {}
 
   bool get hasSubmenu => submenu.isNotEmpty;
+
+  // Action execution.
+  Future<void> execute() async {
+    if (clearsSelectionOnSuccess) {
+      await SelectionController.instance.runAndClearSelection(onSelected);
+    } else {
+      await onSelected();
+    }
+  }
 }
 
 class _DesktopCustomMenuLayout extends SingleChildLayoutDelegate {
@@ -400,7 +414,7 @@ class AppContextMenuController {
           },
         );
     if (selected != null && selected.isEnabled && !selected.isSeparator) {
-      await selected.onSelected();
+      await selected.execute();
     }
   }
 
@@ -496,7 +510,7 @@ class AppContextMenuController {
                   return;
                 }
                 Navigator.of(menuContext).pop();
-                await action.onSelected();
+                await action.execute();
               },
       );
     },

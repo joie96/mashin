@@ -167,6 +167,7 @@ class _HomeScreenDesktopState extends State<HomeScreenDesktop> {
         label: isFavorite
             ? 'Aus Favoriten entfernen'
             : 'Zu Favoriten hinzufügen',
+        clearsSelectionOnSuccess: isFavorite,
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,

@@ -155,6 +155,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
         label: isFavorite
             ? 'Aus Favoriten entfernen'
             : 'Zu Favoriten hinzufügen',
+        clearsSelectionOnSuccess: isFavorite,
         icon: isFavorite
             ? Icons.favorite_outlined
             : Icons.favorite_border_outlined,
@@ -281,6 +282,7 @@ class _FavoritesScreenMobileState extends State<FavoritesScreenMobile> {
           label: allFavorite
               ? 'Aus Favoriten entfernen'
               : 'Zu Favoriten hinzufügen',
+            clearsSelectionOnSuccess: allFavorite,
           icon: allFavorite
               ? Icons.favorite_outlined
               : Icons.favorite_border_outlined,

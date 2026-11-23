@@ -10,6 +10,7 @@ import '../../core/core_bridge.dart';
 import '../../core/core_models.dart';
 import '../../core/core_events.dart';
 import '../selection/selection_controller.dart';
+import 'desktop_item_action.dart';
 import 'media_link_text.dart';
 import 'media_image.dart';
 import 'media_table_section_desktop.dart';
@@ -104,7 +105,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     debugLabel: 'MediaRowDesktopSectionFocus',
   );
   final Set<int> _selectedIndexes = <int>{};
-  final Set<int> _suppressedSelectionPointers = <int>{};
   final Object _selectionSessionOwner = Object();
   final SelectionController _selectionSessionController =
       SelectionController.instance;
@@ -171,6 +171,16 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         : (BuildContext anchorContext) {
             _ensureItemSelectedForMenu(index);
             handler(item, index, anchorContext);
+          };
+  }
+
+  VoidCallback? _moreTapHandler(T item, int index) {
+    final handler = widget.onRowMoreTap;
+    return handler == null
+        ? null
+        : () {
+            _ensureItemSelectedForMenu(index);
+            handler(item, index);
           };
   }
 
@@ -369,9 +379,9 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
   }
 
   void _handleItemPointerDown(int index, PointerDownEvent event) {
+    if (MediaItemProviderIcon.handlesPointer(event)) return;
     if (event.kind == PointerDeviceKind.mouse &&
         (event.buttons & kSecondaryMouseButton) != 0) {
-      _suppressedSelectionPointers.remove(event.pointer);
       final DesktopRowContextMenuAction<T>? handler = widget.onRowContextMenu;
       final DesktopRowSelectionContextMenuAction<T>? selectionHandler =
           widget.onRowSelectionContextMenu;
@@ -393,7 +403,7 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       return;
     }
 
-    if (_suppressedSelectionPointers.remove(event.pointer)) {
+    if (DesktopItemAction.handlesPointer(event)) {
       return;
     }
 
@@ -425,10 +435,6 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
     }
 
     _selectSingleIndex(index);
-  }
-
-  void _suppressSelectionForPointer(int pointer) {
-    _suppressedSelectionPointers.add(pointer);
   }
 
   _RowLayoutMetrics _computeLayoutMetrics(double maxWidth) {
@@ -718,17 +724,12 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreTap: _moreTapHandler(item as T, absoluteIndex),
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection
-            ? onSelectPointerDown
-            : null,
+        onSelectPointerDown: onSelectPointerDown,
         onArtistTap: widget.onArtistTap,
-        onArtistPointerDown: _suppressSelectionForPointer,
         onAlbumTap: widget.onAlbumTap,
       );
     }
@@ -743,15 +744,11 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreTap: _moreTapHandler(item as T, absoluteIndex),
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection
-            ? onSelectPointerDown
-            : null,
+        onSelectPointerDown: onSelectPointerDown,
         onPlaylistTap: widget.onPlaylistTap,
         showDetails: widget.showPlaylistDetails,
         coverContent: widget.playlistCoverBuilder?.call(item),
@@ -768,15 +765,11 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreTap: _moreTapHandler(item as T, absoluteIndex),
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection
-            ? onSelectPointerDown
-            : null,
+        onSelectPointerDown: onSelectPointerDown,
         onArtistTap: widget.onArtistTap,
       );
     }
@@ -792,17 +785,12 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
         onFavoriteTap: widget.onRowFavoriteTap == null
             ? null
             : () => widget.onRowFavoriteTap!(item as T, absoluteIndex),
-        onMoreTap: widget.onRowMoreTap == null
-            ? null
-            : () => widget.onRowMoreTap!(item as T, absoluteIndex),
+        onMoreTap: _moreTapHandler(item as T, absoluteIndex),
         onMoreAnchorTap: _moreAnchorHandler(item as T, absoluteIndex),
         isSelected: isSelected,
         onSelectTap: widget.enableSelection ? onSelectTap : null,
-        onSelectPointerDown: widget.enableSelection
-            ? onSelectPointerDown
-            : null,
+        onSelectPointerDown: onSelectPointerDown,
         onArtistTap: widget.onArtistTap,
-        onArtistPointerDown: _suppressSelectionForPointer,
         onAlbumTap: widget.onAlbumTap,
       );
     }
@@ -816,13 +804,11 @@ class _MediaRowSectionDesktopState<T> extends State<MediaRowSectionDesktop<T>> {
       onFavoriteTap: widget.onRowFavoriteTap == null
           ? null
           : () => widget.onRowFavoriteTap!(item, absoluteIndex),
-      onMoreTap: widget.onRowMoreTap == null
-          ? null
-          : () => widget.onRowMoreTap!(item, absoluteIndex),
+      onMoreTap: _moreTapHandler(item, absoluteIndex),
       onMoreAnchorTap: _moreAnchorHandler(item, absoluteIndex),
       isSelected: isSelected,
       onSelectTap: widget.enableSelection ? onSelectTap : null,
-      onSelectPointerDown: widget.enableSelection ? onSelectPointerDown : null,
+      onSelectPointerDown: onSelectPointerDown,
     );
   }
 
@@ -1406,7 +1392,6 @@ Widget _buildDesktopMediaRowAlbum({
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Artist>? onArtistTap,
-  ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
   return _buildDesktopMediaRowItemBase(
@@ -1417,7 +1402,6 @@ Widget _buildDesktopMediaRowAlbum({
     secondaryText: _albumSubtitle(item),
     secondaryArtists: item.artists,
     onArtistTap: onArtistTap,
-    onArtistPointerDown: onArtistPointerDown,
     titleLinkItem: item,
     onTitleTap: onAlbumTap == null
         ? null
@@ -1536,7 +1520,6 @@ Widget _buildDesktopMediaRowTrack({
   required VoidCallback? onSelectTap,
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   ValueChanged<Artist>? onArtistTap,
-  ValueChanged<int>? onArtistPointerDown,
   ValueChanged<Album>? onAlbumTap,
 }) {
   return Opacity(
@@ -1549,7 +1532,6 @@ Widget _buildDesktopMediaRowTrack({
       secondaryText: _trackSubtitle(item),
       secondaryArtists: item.artists,
       onArtistTap: onArtistTap,
-      onArtistPointerDown: onArtistPointerDown,
       tertiaryText: _trackTertiary(item),
       tertiaryAlbum: item.album,
       onAlbumTap: onAlbumTap,
@@ -1624,7 +1606,6 @@ Widget _buildDesktopMediaRowItemBase({
   required ValueChanged<PointerDownEvent>? onSelectPointerDown,
   List<Artist>? secondaryArtists,
   ValueChanged<Artist>? onArtistTap,
-  ValueChanged<int>? onArtistPointerDown,
   Album? tertiaryAlbum,
   ValueChanged<Album>? onAlbumTap,
   MediaItem? titleLinkItem,
@@ -1670,7 +1651,6 @@ Widget _buildDesktopMediaRowItemBase({
             onMoreAnchorTap: onMoreAnchorTap,
             isSelected: isSelected,
             onSelectTap: onSelectTap,
-            onBackgroundPointerDown: onSelectPointerDown,
             isHovered: isHovered,
             showPlayOverlay: showPlayOverlay,
             isCircularCover: isCircularCover,
@@ -1721,7 +1701,6 @@ Widget _buildDesktopMediaRowItemBase({
                                 ? null
                                 : (MediaItem media) =>
                                       onArtistTap(media as Artist),
-                            onItemPointerDown: onArtistPointerDown,
                             style: TextStyle(
                               color: colors.textSecondary,
                               fontSize: 14,
@@ -1798,33 +1777,32 @@ class _DesktopRowItemFrameState extends State<_DesktopRowItemFrame> {
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
 
-    // Matches the hover/selection background of MediaTableSectionDesktop rows.
-    Color background = Colors.transparent;
-    if (widget.isSelected) {
-      background = _isHovered ? colors.hover : colors.selection;
-    } else if (_isHovered) {
-      background = colors.hover;
-    }
+    final baseBackground = widget.isSelected
+        ? colors.selection
+        : Colors.transparent;
+    final background = _isHovered
+        ? Color.alphaBlend(Theme.of(context).hoverColor, baseBackground)
+        : baseBackground;
 
     return MouseRegion(
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: Container(
-        decoration: BoxDecoration(
-          color: background,
-          borderRadius: BorderRadius.circular(8),
-        ),
-        padding: const EdgeInsets.all(_kRowItemInset),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            widget.coverBuilder(_isHovered),
-            Listener(
-              onPointerDown: widget.onSelectPointerDown,
-              behavior: HitTestBehavior.opaque,
-              child: widget.textArea,
-            ),
-          ],
+      child: Listener(
+        onPointerDown: widget.onSelectPointerDown,
+        behavior: HitTestBehavior.opaque,
+        child: Container(
+          decoration: BoxDecoration(
+            color: background,
+            borderRadius: BorderRadius.circular(8),
+          ),
+          padding: const EdgeInsets.all(_kRowItemInset),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: <Widget>[
+              widget.coverBuilder(_isHovered),
+              widget.textArea,
+            ],
+          ),
         ),
       ),
     );
@@ -1846,7 +1824,6 @@ class _DesktopMediaCover extends StatefulWidget {
   final ValueChanged<BuildContext>? onMoreAnchorTap;
   final bool isSelected;
   final VoidCallback? onSelectTap;
-  final ValueChanged<PointerDownEvent>? onBackgroundPointerDown;
   final bool isHovered;
   final bool showPlayOverlay;
   final bool isCircularCover;
@@ -1866,7 +1843,6 @@ class _DesktopMediaCover extends StatefulWidget {
     required this.onMoreAnchorTap,
     required this.isSelected,
     required this.onSelectTap,
-    required this.onBackgroundPointerDown,
     required this.isHovered,
     required this.showPlayOverlay,
     required this.isCircularCover,
@@ -1929,18 +1905,14 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
       child: Stack(
         fit: StackFit.expand,
         children: <Widget>[
-          Listener(
-            onPointerDown: widget.onBackgroundPointerDown,
-            behavior: HitTestBehavior.opaque,
-            child: widget.isCircularCover
-                ? ClipOval(
-                    child: Container(
-                      color: colors.bgTertiary,
-                      child: coverContent,
-                    ),
-                  )
-                : Container(color: colors.bgTertiary, child: coverContent),
-          ),
+          widget.isCircularCover
+              ? ClipOval(
+                  child: Container(
+                    color: colors.bgTertiary,
+                    child: coverContent,
+                  ),
+                )
+              : Container(color: colors.bgTertiary, child: coverContent),
           if (showHoverPlay || showOverlayActions)
             Positioned.fill(
               child: IgnorePointer(
@@ -1977,23 +1949,25 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
                               scale: _isPlayHovered ? 1.08 : 1,
                               duration: _buttonScaleDuration,
                               curve: Curves.easeOutCubic,
-                              child: Listener(
-                                onPointerDown: (PointerDownEvent event) {
-                                  if (_isPrimaryActivationPointer(event)) {
-                                    widget.onPlayTap?.call();
-                                  }
-                                },
-                                child: Container(
-                                  width: 56,
-                                  height: 56,
-                                  decoration: BoxDecoration(
-                                    color: colors.overlayPlayButtonBackground,
-                                    borderRadius: BorderRadius.circular(28),
-                                  ),
-                                  child: Icon(
-                                    Icons.play_arrow_sharp,
-                                    size: 30,
-                                    color: colors.overlayPlayButtonForeground,
+                              child: DesktopItemAction(
+                                child: Listener(
+                                  onPointerDown: (PointerDownEvent event) {
+                                    if (_isPrimaryActivationPointer(event)) {
+                                      widget.onPlayTap?.call();
+                                    }
+                                  },
+                                  child: Container(
+                                    width: 56,
+                                    height: 56,
+                                    decoration: BoxDecoration(
+                                      color: colors.overlayPlayButtonBackground,
+                                      borderRadius: BorderRadius.circular(28),
+                                    ),
+                                    child: Icon(
+                                      Icons.play_arrow_sharp,
+                                      size: 30,
+                                      color: colors.overlayPlayButtonForeground,
+                                    ),
                                   ),
                                 ),
                               ),
@@ -2054,9 +2028,11 @@ class _DesktopMediaCoverState extends State<_DesktopMediaCover> {
               child: AnimatedOpacity(
                 duration: _hoverFadeDuration,
                 opacity: showSelectControlVisible ? 1 : 0,
-                child: _DesktopCoverSelectionCheckbox(
-                  isChecked: widget.isSelected,
-                  onTap: widget.onSelectTap,
+                child: DesktopItemAction(
+                  child: _DesktopCoverSelectionCheckbox(
+                    isChecked: widget.isSelected,
+                    onTap: widget.onSelectTap,
+                  ),
                 ),
               ),
             ),
@@ -2171,29 +2147,31 @@ class _DesktopCoverOverlayIconButtonState
       cursor: isEnabled ? SystemMouseCursors.click : SystemMouseCursors.basic,
       onEnter: (_) => setState(() => _isHovered = true),
       onExit: (_) => setState(() => _isHovered = false),
-      child: Listener(
-        onPointerDown: widget.onTap == null && widget.onAnchorTap == null
-            ? null
-            : (PointerDownEvent event) {
-                if (_isPrimaryActivationPointer(event)) {
-                  final ValueChanged<BuildContext>? onAnchorTap =
-                      widget.onAnchorTap;
-                  if (onAnchorTap != null) {
-                    onAnchorTap(context);
-                  } else {
-                    widget.onTap?.call();
+      child: DesktopItemAction(
+        child: Listener(
+          onPointerDown: widget.onTap == null && widget.onAnchorTap == null
+              ? null
+              : (PointerDownEvent event) {
+                  if (_isPrimaryActivationPointer(event)) {
+                    final ValueChanged<BuildContext>? onAnchorTap =
+                        widget.onAnchorTap;
+                    if (onAnchorTap != null) {
+                      onAnchorTap(context);
+                    } else {
+                      widget.onTap?.call();
+                    }
                   }
-                }
-              },
-        child: SizedBox(
-          width: 32,
-          height: 32,
-          child: Center(
-            child: AnimatedScale(
-              scale: isHovered ? 1.24 : 1,
-              duration: const Duration(milliseconds: 120),
-              curve: Curves.easeOutCubic,
-              child: Icon(widget.icon, size: 18, color: iconColor),
+                },
+          child: SizedBox(
+            width: 32,
+            height: 32,
+            child: Center(
+              child: AnimatedScale(
+                scale: isHovered ? 1.24 : 1,
+                duration: const Duration(milliseconds: 120),
+                curve: Curves.easeOutCubic,
+                child: Icon(widget.icon, size: 18, color: iconColor),
+              ),
             ),
           ),
         ),

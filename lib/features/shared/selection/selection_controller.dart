@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:flutter/scheduler.dart';
 
@@ -100,6 +102,15 @@ class SelectionController extends ChangeNotifier {
 
   void onMenuTap() {
     _activeRegistration?.onMenuTap?.call();
+  }
+
+  /// Clears the originating selection after success, never a newer session.
+  Future<void> runAndClearSelection(FutureOr<void> Function() action) async {
+    final owner = _activeOwner;
+    await action();
+    if (owner != null && identical(_activeOwner, owner)) {
+      onClose();
+    }
   }
 
   void onClose() {

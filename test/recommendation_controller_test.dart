@@ -21,6 +21,7 @@ import 'package:mashin/features/shared/context_menu/context_menu_controller.dart
 import 'package:mashin/features/shared/selection/selection_controller.dart';
 import 'package:mashin/features/shared/selection/mobile_section_selection.dart';
 import 'package:mashin/features/shared/widgets/media_list_section_desktop.dart';
+import 'package:mashin/features/shared/widgets/desktop_item_action.dart';
 import 'package:mashin/features/shared/widgets/media_list_section_mobile.dart';
 import 'package:mashin/features/shared/widgets/media_link_text.dart';
 import 'package:mashin/features/shared/widgets/detail_provider_switcher.dart';
@@ -34,6 +35,212 @@ import 'package:mashin/features/shared/widgets/mood_playlist_cover.dart';
 import 'package:mashin/features/shared/widgets/media_image.dart';
 
 void main() {
+  for (final outcome in ['success', 'failure', 'new-owner', 'ordinary']) {
+    testWidgets('removal menu selection lifecycle: $outcome', (tester) async {
+      final selection = SelectionController.instance;
+      final owner = Object();
+      final newerOwner = Object();
+      var closeCount = 0;
+      void activate(Object activeOwner) => selection.activate(
+        owner: activeOwner,
+        registration: SelectionSessionRegistration(
+          allSelected: false,
+          selectedCount: 2,
+          onToggleAll: () {},
+          onMenuTap: null,
+          onClose: () {
+            closeCount++;
+            selection.deactivate(activeOwner);
+          },
+        ),
+      );
+      addTearDown(selection.onClose);
+      activate(owner);
+      final completion = Completer<void>();
+      final action = ContextMenuAction(
+        label: 'Remove',
+        icon: Icons.delete_outline,
+        clearsSelectionOnSuccess: outcome != 'ordinary',
+        onSelected: () => completion.future,
+      );
+      final execution = action.execute();
+      expect(selection.isVisible, isTrue);
+      if (outcome == 'new-owner') activate(newerOwner);
+      if (outcome == 'failure') {
+        final assertion = expectLater(execution, throwsStateError);
+        completion.completeError(StateError('Removal failed'));
+        await assertion;
+      } else {
+        completion.complete();
+        await execution;
+      }
+      expect(selection.isVisible, outcome != 'success');
+      expect(
+        closeCount,
+        outcome == 'success' || outcome == 'new-owner' ? 1 : 0,
+      );
+    });
+  }
+
+  for (final control in ['list', 'row', 'table']) {
+    for (final isCompact in [false, true]) {
+      testWidgets(
+        'removal menu clears section selection: $control compact=$isCompact',
+        (tester) async {
+          tester.view.physicalSize = Size(isCompact ? 800 : 1200, 800);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final bridge = _RecommendationBridge();
+          addTearDown(bridge.eventsController.close);
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(events.dispose);
+          final tracks = List.generate(
+            4,
+            (index) => Track.fromJson({
+              'provider': 'source',
+              'item_id': 'remove-$index',
+              'name': 'Remove $index',
+            }),
+          );
+          final items = ValueNotifier(tracks);
+          addTearDown(items.dispose);
+          final completion = Completer<void>();
+          List<Track> selected = [];
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.light().copyWith(
+                platform: TargetPlatform.windows,
+              ),
+              home: Scaffold(
+                body: Builder(
+                  builder: (context) {
+                    void showMenu() => unawaited(
+                      const AppContextMenuController().showContextMenu(
+                        context: context,
+                        globalPosition: const Offset(100, 100),
+                        actions: [
+                          ContextMenuAction(
+                            label: 'Remove selected',
+                            icon: Icons.delete_outline,
+                            clearsSelectionOnSuccess: true,
+                            onSelected: () async {
+                              await completion.future;
+                              items.value = tracks.skip(2).toList();
+                            },
+                          ),
+                        ],
+                      ),
+                    );
+                    return ValueListenableBuilder(
+                      valueListenable: items,
+                      builder: (_, currentItems, _) => SingleChildScrollView(
+                        child: switch (control) {
+                          'list' => MediaListSectionDesktop<Track>(
+                            title: 'Tracks',
+                            items: currentItems,
+                            isLoading: false,
+                            emptyText: 'Empty',
+                            onSelectionChanged: (value) => selected = value,
+                            onSelectionMenuTap: showMenu,
+                          ),
+                          'row' => MediaRowSectionDesktop<Track>(
+                            title: 'Tracks',
+                            items: currentItems,
+                            coreBridge: bridge,
+                            isLoading: false,
+                            emptyText: 'Empty',
+                            onSelectionChanged: (value) => selected = value,
+                            onSelectionMenuTap: showMenu,
+                          ),
+                          _ => MediaTableSectionDesktop<Track>(
+                            title: 'Tracks',
+                            items: currentItems,
+                            coreBridge: bridge,
+                            coreEvents: events,
+                            isLoading: false,
+                            emptyText: 'Empty',
+                            onSelectionChanged: (value) => selected = value,
+                            onSelectionMenuTap: showMenu,
+                          ),
+                        },
+                      ),
+                    );
+                  },
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          await tester.tap(
+            find.text('Remove 0'),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await tester.tap(
+            find.text('Remove 1'),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await tester.pumpAndSettle();
+          expect(selected, tracks.take(2).toList());
+          SelectionController.instance.onMenuTap();
+          await tester.pumpAndSettle();
+          await tester.tap(find.text('Remove selected'));
+          await tester.pumpAndSettle();
+          expect(selected, tracks.take(2).toList());
+          expect(SelectionController.instance.isVisible, isTrue);
+          completion.complete();
+          await tester.pumpAndSettle();
+          expect(selected, isEmpty);
+          expect(SelectionController.instance.isVisible, isFalse);
+          expect(SelectionController.instance.selectedCount, 0);
+          expect(find.byIcon(Icons.check), findsNothing);
+          await tester.tap(
+            find.text('Remove 2'),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.pumpAndSettle();
+          expect(selected, [tracks[2]]);
+          await tester.pumpWidget(const SizedBox.shrink());
+          expect(SelectionController.instance.isVisible, isFalse);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  testWidgets('desktop item action excludes only primary action pointers', (
+    tester,
+  ) async {
+    final handled = <bool>[];
+    await tester.pumpWidget(
+      Directionality(
+        textDirection: TextDirection.ltr,
+        child: Center(
+          child: Listener(
+            onPointerDown: (event) =>
+                handled.add(DesktopItemAction.handlesPointer(event)),
+            child: const DesktopItemAction(
+              child: SizedBox(
+                width: 100,
+                height: 100,
+                child: ColoredBox(color: Colors.red),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+    await tester.tap(find.byType(ColoredBox), kind: PointerDeviceKind.mouse);
+    await tester.tap(
+      find.byType(ColoredBox),
+      kind: PointerDeviceKind.mouse,
+      buttons: kSecondaryMouseButton,
+    );
+    expect(handled, [true, false]);
+  });
+
   const moodIcons = <String, IconData>{
     'relax': Symbols.self_improvement,
     'focus': Symbols.mindfulness,
@@ -468,7 +675,7 @@ void main() {
   );
 
   testWidgets(
-    'desktop track title links to its album while control-click selects',
+    'desktop track title navigates without selecting even with control',
     (tester) async {
       final track = Track.fromJson({
         'provider': 'source',
@@ -534,9 +741,9 @@ void main() {
       await tester.tap(find.text('Track title'));
       await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
       await tester.pumpAndSettle();
-      expect(openedAlbum, isNull);
-      expect(selected, [track]);
-      SelectionController.instance.onClose();
+      expect(openedAlbum, same(track.album));
+      expect(selected, isEmpty);
+      openedAlbum = null;
       await tester.pumpAndSettle();
       await tester.tap(find.text('No album'));
       await tester.pumpAndSettle();
@@ -597,10 +804,10 @@ void main() {
       await tester.tap(find.byIcon(Icons.more_vert_outlined).first);
       await tester.pumpAndSettle();
       expect(menuCount, 1);
-      expect(selected, isEmpty);
+      expect(selected, [tracks[0]]);
       await tester.tap(find.byType(MediaTableCover).first);
       await tester.pumpAndSettle();
-      expect(selected, isEmpty);
+      expect(selected, [tracks[0]]);
       expect(bridge.playedItems, tracks);
       await tester.tap(find.text('Track 0'));
       await tester.pumpAndSettle();
@@ -712,7 +919,7 @@ void main() {
       await tester.pumpAndSettle();
       await tester.tap(find.text('Refresh 0'));
       await tester.pumpAndSettle();
-      expect(selected, isEmpty);
+      expect(selected, [tracks[0]]);
       await tester.tap(find.text('Refresh 0'));
       await tester.pumpAndSettle();
       expect(SelectionController.instance.isVisible, isTrue);
@@ -948,6 +1155,316 @@ void main() {
     }
   }
 
+  for (final control in ['list', 'table', 'row']) {
+    for (final usesAnchor in [false, true]) {
+      testWidgets(
+        'desktop $control separates actions from selection, anchor=$usesAnchor',
+        (tester) async {
+          final bridge = _RecommendationBridge();
+          addTearDown(bridge.eventsController.close);
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(events.dispose);
+          final track = Track.fromJson({
+            'provider': 'source',
+            'item_id': 'action-track',
+            'name': 'Action track',
+            'duration': 180,
+            'album': {
+              'provider': 'source',
+              'item_id': 'action-album',
+              'name': 'Action album',
+            },
+            'artists': [
+              {
+                'provider': 'source',
+                'item_id': 'action-artist',
+                'name': 'Action artist',
+              },
+            ],
+          });
+          List<Track> selected = [];
+          var selectionChanges = 0;
+          var menus = 0;
+          var favorites = 0;
+          var navigations = 0;
+          void onSelection(List<Track> items) {
+            selected = items;
+            selectionChanges++;
+          }
+
+          void onMenu() {
+            expect(selected, [track]);
+            menus++;
+          }
+
+          final Widget section = switch (control) {
+            'list' => MediaListSectionDesktop<Track>(
+              title: 'Tracks',
+              items: [track],
+              isLoading: false,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              onAlbumTap: (_) => navigations++,
+              onSelectionChanged: onSelection,
+              onItemMoreAnchorTap: usesAnchor ? (_, _, _) => onMenu() : null,
+              onItemContextMenu: (_, _, _) => onMenu(),
+            ),
+            'table' => MediaTableSectionDesktop<Track>(
+              title: 'Tracks',
+              items: [track],
+              isLoading: false,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              coreEvents: events,
+              onAlbumTap: (_) => navigations++,
+              onArtistTap: (_) => navigations++,
+              onSelectionChanged: onSelection,
+              onRowFavoriteTap: (_, _) => favorites++,
+              onRowMoreTap: usesAnchor ? null : (_, _) => onMenu(),
+              onRowMoreAnchorTap: usesAnchor ? (_, _, _) => onMenu() : null,
+              onRowContextMenu: (_, _, _) => onMenu(),
+            ),
+            _ => MediaRowSectionDesktop<Track>(
+              title: 'Tracks',
+              items: [track],
+              isLoading: false,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              onAlbumTap: (_) => navigations++,
+              onArtistTap: (_) => navigations++,
+              onSelectionChanged: onSelection,
+              onRowFavoriteTap: (_, _) => favorites++,
+              onRowMoreTap: usesAnchor ? null : (_, _) => onMenu(),
+              onRowMoreAnchorTap: usesAnchor ? (_, _, _) => onMenu() : null,
+              onRowContextMenu: (_, _, _) => onMenu(),
+            ),
+          };
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: AppTheme.light().copyWith(
+                platform: TargetPlatform.windows,
+              ),
+              home: Scaffold(body: SingleChildScrollView(child: section)),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          addTearDown(mouse.removePointer);
+          await mouse.addPointer(location: Offset.zero);
+          Future<void> click(Finder target, {bool secondary = false}) async {
+            final position = tester.getCenter(target);
+            await mouse.moveTo(position);
+            await tester.pumpAndSettle();
+            await tester.tapAt(
+              position,
+              kind: PointerDeviceKind.mouse,
+              buttons: secondary ? kSecondaryMouseButton : kPrimaryMouseButton,
+            );
+            await tester.pumpAndSettle();
+          }
+
+          Future<void> checkActions() async {
+            final changesBefore = selectionChanges;
+            await click(find.byIcon(Icons.play_arrow_sharp).last);
+            expect(bridge.playedItems, [track]);
+            if (control != 'list') {
+              await click(find.byIcon(Icons.favorite_border_outlined).last);
+              await click(find.text('Action artist'));
+              expect(favorites, greaterThan(0));
+            }
+            await click(
+              find.text(control == 'list' ? 'Action track' : 'Action album'),
+            );
+            expect(navigations, greaterThan(0));
+            expect(selectionChanges, changesBefore);
+          }
+
+          await checkActions();
+          expect(selected, isEmpty);
+          await click(find.byIcon(Icons.more_vert_outlined).last);
+          expect(menus, 1);
+          expect(selected, [track]);
+          await checkActions();
+          expect(selected, [track]);
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          expect(selected, isEmpty);
+          final background = find.text(switch (control) {
+            'list' => '3:00',
+            'table' => '1',
+            _ => 'Action track',
+          }).last;
+          await click(background);
+          expect(selected, [track]);
+          await click(background);
+          expect(selected, [track]);
+          await tester.sendKeyEvent(LogicalKeyboardKey.escape);
+          await tester.pumpAndSettle();
+          final cover = find
+              .ancestor(
+                of: find.byIcon(Icons.play_arrow_sharp).last,
+                matching: find.byType(ClipRRect),
+              )
+              .first;
+          final coverRect = tester.getRect(cover);
+          final coverPosition = Offset(coverRect.left + 4, coverRect.center.dy);
+          await mouse.moveTo(coverPosition);
+          await tester.pumpAndSettle();
+          await tester.tapAt(coverPosition, kind: PointerDeviceKind.mouse);
+          await tester.pumpAndSettle();
+          expect(selected, [track]);
+          await click(find.byIcon(Icons.check).last);
+          expect(selected, isEmpty);
+          await click(
+            find.byIcon(Icons.play_arrow_sharp).last,
+            secondary: true,
+          );
+          expect(selected, [track]);
+          expect(menus, 2);
+          await tester.pumpWidget(const SizedBox.shrink());
+          expect(SelectionController.instance.isVisible, isFalse);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  for (final control in ['list', 'table', 'row']) {
+    for (final isDark in [false, true]) {
+      testWidgets(
+        'desktop $control overlays hover on selection, dark=$isDark',
+        (tester) async {
+          final theme = (isDark ? AppTheme.dark() : AppTheme.light()).copyWith(
+            platform: TargetPlatform.windows,
+          );
+          final colors = theme.extension<MashinColors>()!;
+          final bridge = _RecommendationBridge();
+          addTearDown(bridge.eventsController.close);
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(events.dispose);
+          final track = Track.fromJson({
+            'provider': 'source',
+            'item_id': 'hover-track',
+            'name': 'Hover track',
+          });
+          List<Track> selected = [];
+          final boundaryKey = GlobalKey();
+          final Widget section = switch (control) {
+            'list' => MediaListSectionDesktop<Track>(
+              title: 'Tracks',
+              items: [track],
+              isLoading: false,
+              emptyText: 'Empty',
+              onSelectionChanged: (items) => selected = items,
+            ),
+            'table' => MediaTableSectionDesktop<Track>(
+              title: 'Tracks',
+              items: [track],
+              isLoading: false,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              coreEvents: events,
+              onSelectionChanged: (items) => selected = items,
+            ),
+            _ => MediaRowSectionDesktop<Track>(
+              title: 'Tracks',
+              items: [track],
+              isLoading: false,
+              emptyText: 'Empty',
+              coreBridge: bridge,
+              onSelectionChanged: (items) => selected = items,
+            ),
+          };
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: theme,
+              home: RepaintBoundary(
+                key: boundaryKey,
+                child: Scaffold(body: SingleChildScrollView(child: section)),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final mouse = await tester.createGesture(
+            kind: PointerDeviceKind.mouse,
+          );
+          addTearDown(mouse.removePointer);
+          await mouse.addPointer(location: const Offset(790, 590));
+          await tester.sendKeyDownEvent(LogicalKeyboardKey.controlLeft);
+          await mouse.moveTo(tester.getCenter(find.text('Hover track')));
+          await mouse.down(tester.getCenter(find.text('Hover track')));
+          await mouse.up();
+          await tester.sendKeyUpEvent(LogicalKeyboardKey.controlLeft);
+          await mouse.moveTo(const Offset(790, 590));
+          await tester.pumpAndSettle();
+          expect(selected, [track]);
+
+          final frame = find
+              .ancestor(
+                of: find.text('Hover track'),
+                matching: find.byWidgetPredicate((widget) {
+                  if (widget is Material)
+                    return widget.color == colors.selection;
+                  if (widget is! Container) return false;
+                  final decoration = widget.decoration;
+                  return decoration is BoxDecoration &&
+                      decoration.color == colors.selection;
+                }),
+              )
+              .first;
+          final rect = tester.getRect(frame);
+          final samplePosition = Offset(rect.left + 2, rect.center.dy);
+
+          Future<Color> backgroundColor() async {
+            final boundary =
+                boundaryKey.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary;
+            final image = await tester.runAsync(() => boundary.toImage());
+            final pixels = await tester.runAsync(
+              () => image!.toByteData(format: ui.ImageByteFormat.rawRgba),
+            );
+            final position = boundary.globalToLocal(samplePosition);
+            final offset =
+                (position.dy.floor() * image!.width + position.dx.floor()) * 4;
+            final color = Color.fromARGB(
+              pixels!.getUint8(offset + 3),
+              pixels.getUint8(offset),
+              pixels.getUint8(offset + 1),
+              pixels.getUint8(offset + 2),
+            );
+            image.dispose();
+            return color;
+          }
+
+          Future<void> expectBackground(Color expected) async {
+            final actual = await backgroundColor();
+            expect(actual.a, closeTo(expected.a, 1 / 255));
+            expect(actual.r, closeTo(expected.r, 1 / 255));
+            expect(actual.g, closeTo(expected.g, 1 / 255));
+            expect(actual.b, closeTo(expected.b, 1 / 255));
+          }
+
+          await expectBackground(colors.selection);
+          await mouse.moveTo(samplePosition);
+          await tester.pumpAndSettle();
+          await expectBackground(
+            Color.alphaBlend(theme.hoverColor, colors.selection),
+          );
+          expect(selected, [track]);
+          await mouse.moveTo(const Offset(790, 590));
+          await tester.pumpAndSettle();
+          await expectBackground(colors.selection);
+          expect(selected, [track]);
+          await tester.pumpWidget(const SizedBox.shrink());
+          expect(SelectionController.instance.isVisible, isFalse);
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   for (final control in ['table', 'row', 'slide']) {
     testWidgets(
       'desktop $control favorite and context buttons scale without background or resizing',
@@ -1066,6 +1583,7 @@ void main() {
                   items: [track],
                   isLoading: false,
                   emptyText: 'Empty',
+                  enableSelection: false,
                   onItemMoreAnchorTap: isEnabled
                       ? (item, index, anchor) => menuCount++
                       : null,

@@ -1047,7 +1047,11 @@ class _AppShellState extends State<AppShell> {
       context: context,
       playlistName: playlist.name,
     );
-    if (confirmed) await controller.removePlaylist(playlist);
+    if (confirmed) {
+      await SelectionController.instance.runAndClearSelection(
+        () => controller.removePlaylist(playlist),
+      );
+    }
   }
 
   void _setThemePreference(ThemePreference preference) {
