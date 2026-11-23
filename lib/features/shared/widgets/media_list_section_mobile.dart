@@ -10,6 +10,7 @@ import '../selection/mobile_section_selection.dart';
 import 'detail_provider_switcher.dart';
 import 'media_list_section_desktop.dart';
 import 'media_table_section_desktop.dart';
+import 'media_track_row_skeleton.dart';
 import 'mobile_section_header.dart';
 
 class MediaListSectionMobile<T extends MediaItem> extends StatefulWidget {
@@ -148,6 +149,8 @@ class _MediaListSectionMobileState<T extends MediaItem>
 
   double get _rowExtent => _isTrackSection ? 64 : 50;
 
+  double get _rowGap => _isTrackSection ? 0 : _columnGap;
+
   List<MediaItem> _playableItems() {
     return widget.items.where(_isValidPlayable).toList(growable: false);
   }
@@ -199,7 +202,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
       );
     }
     return SizedBox(
-      height: _rowsPerColumn * _rowExtent + (_rowsPerColumn - 1) * _columnGap,
+      height: _rowsPerColumn * _rowExtent + (_rowsPerColumn - 1) * _rowGap,
       child: PageView.builder(
         controller: _mobileChunkPageController,
         padEnds: false,
@@ -220,7 +223,7 @@ class _MediaListSectionMobileState<T extends MediaItem>
         children: <Widget>[
           for (var row = 0; row < _rowsPerColumn; row++)
             if (startIndex + row < widget.items.length) ...<Widget>[
-              if (row > 0) const SizedBox(height: _columnGap),
+              if (row > 0) SizedBox(height: _rowGap),
               _buildSelectableListTile(startIndex + row),
             ],
         ],
@@ -230,44 +233,43 @@ class _MediaListSectionMobileState<T extends MediaItem>
 
   // The selection wrapper owns row gestures independently of child buttons.
   Widget _buildSelectableListTile(int index) {
+    if (_isTrackSection) return _buildTrackListTile(index);
     if (widget.items[index] is Playlist) return _buildMediaListTile(index);
     return MobileSelectableSectionItem(
       selectionModeActive: _selectionController.isSelectionModeActive,
       isSelected: _selectionController.isSelected(index),
-      showSelectionIndicator: !_isTrackSection,
       onLongPress: () =>
           _selectionController.select(index, widget.items.length),
       onToggleSelection: () =>
           _selectionController.toggle(index, widget.items.length),
-      onTap: _isTrackSection
-          ? widget.coreBridge != null && _isValidPlayable(widget.items[index])
-                ? () => unawaited(_playTracksFromIndex(index))
-                : null
-          : widget.onItemTap == null
+      onTap: widget.onItemTap == null
           ? null
           : () => widget.onItemTap!(widget.items[index]),
-      child: _buildTypedListTile(index),
+      child: _buildMediaListTile(index),
     );
   }
 
-  // Typed list rendering uses the section type for both rows and skeletons.
-  Widget _buildTypedListTile(int index) {
-    if (_isTrackSection) return _buildTrackListTile(index);
-    return _buildMediaListTile(index);
-  }
-
+  // Loading placeholders follow the section's media type.
   Widget _buildTypedListSkeleton() => _MobileListSkeletonGrid(
     itemWidth: widget.itemWidth,
     isTrack: _isTrackSection,
   );
 
-  // The outer wrapper owns long-press selection; child buttons own their actions.
+  // Track rows share the table's ink feedback while child buttons own actions.
   Widget _buildTrackListTile(int index) {
     final item = widget.items[index];
     return _MobileListTrackTile(
       track: item as Track,
+      isFirst: index % _rowsPerColumn == 0,
       selectionModeActive: _selectionController.isSelectionModeActive,
       isSelected: _selectionController.isSelected(index),
+      onLongPress: () =>
+          _selectionController.select(index, widget.items.length),
+      onTap: _selectionController.isSelectionModeActive
+          ? () => _selectionController.toggle(index, widget.items.length)
+          : widget.coreBridge != null && _isValidPlayable(item)
+          ? () => unawaited(_playTracksFromIndex(index))
+          : null,
       onToggleSelection: () =>
           _selectionController.toggle(index, widget.items.length),
       coreEvents: widget.coreEvents,
@@ -297,8 +299,11 @@ class _MediaListSectionMobileState<T extends MediaItem>
 class _MobileListTrackTile extends StatelessWidget {
   const _MobileListTrackTile({
     required this.track,
+    required this.isFirst,
     required this.selectionModeActive,
     required this.isSelected,
+    required this.onLongPress,
+    required this.onTap,
     required this.onToggleSelection,
     this.coreEvents,
     this.onPlayTap,
@@ -306,8 +311,11 @@ class _MobileListTrackTile extends StatelessWidget {
   });
 
   final Track track;
+  final bool isFirst;
   final bool selectionModeActive;
   final bool isSelected;
+  final VoidCallback onLongPress;
+  final VoidCallback? onTap;
   final VoidCallback onToggleSelection;
   final MashinCoreBridgeEvents? coreEvents;
   final VoidCallback? onPlayTap;
@@ -327,88 +335,107 @@ class _MobileListTrackTile extends StatelessWidget {
     return Opacity(
       opacity: track.canPlay ? 1 : 0.35,
       child: Material(
-        color: isSelected ? colors.selection : colors.bgSecondary,
-        borderRadius: BorderRadius.circular(5),
+        color: Colors.transparent,
+        shape: isFirst
+            ? const Border()
+            : Border(top: BorderSide(color: colors.border)),
         clipBehavior: Clip.antiAlias,
-        child: SizedBox(
-          height: 64,
-          child: Padding(
-            padding: const EdgeInsets.only(left: 8),
-            child: Row(
-              children: [
-                MediaTableCover(
-                  coverUrl: track.imageUriForSize(80),
-                  fallbackIcon: Icons.music_note_outlined,
-                  size: 48,
-                  radius: 4,
-                  onPlayTap: track.canPlay ? onPlayTap : null,
-                ),
-                const SizedBox(width: 10),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
+        child: Ink(
+          color: isSelected ? colors.selection : Colors.transparent,
+          child: InkWell(
+            onLongPress: onLongPress,
+            onTap: onTap,
+            splashColor: colors.selection.withValues(alpha: 0.42),
+            highlightColor: colors.selection.withValues(alpha: 0.18),
+            child: AbsorbPointer(
+              absorbing: selectionModeActive,
+              child: SizedBox(
+                height: 64,
+                child: Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 6, 0, 6),
+                  child: Row(
                     children: [
-                      PlaybackAwareBuilder(
-                        coreEvents: coreEvents,
-                        item: track,
-                        builder: (context, isCurrent) => Text(
-                          track.name.trim().isEmpty ? 'Unbekannt' : track.name,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: styles.mobileTitle.copyWith(
-                            color: isCurrent ? colors.accent : null,
-                          ),
+                      MediaTableCover(
+                        coverUrl: track.imageUriForSize(80),
+                        fallbackIcon: Icons.music_note_outlined,
+                        size: 52,
+                        radius: 8,
+                        onPlayTap: track.canPlay ? onPlayTap : null,
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            PlaybackAwareBuilder(
+                              coreEvents: coreEvents,
+                              item: track,
+                              builder: (context, isCurrent) => Text(
+                                track.name.trim().isEmpty
+                                    ? 'Unbekannt'
+                                    : track.name,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: styles.mobileTitle.copyWith(
+                                  color: isCurrent ? colors.accent : null,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(height: 1),
+                            Text(
+                              subtitle,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: styles.mobileSubtitle,
+                            ),
+                          ],
                         ),
                       ),
-                      const SizedBox(height: 1),
-                      Text(
-                        subtitle,
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                        style: styles.mobileSubtitle,
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 42,
+                        child: Text(
+                          formatDuration(track.duration),
+                          maxLines: 1,
+                          textAlign: TextAlign.right,
+                          style: styles.mobileTrailing,
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      SizedBox(
+                        width: 48,
+                        child: MediaItemProviderIcon(item: track),
+                      ),
+                      Builder(
+                        builder: (anchor) => SizedBox(
+                          width: 48,
+                          height: 48,
+                          child: Center(
+                            child: selectionModeActive
+                                ? MobileSelectionCheckBox(
+                                    isChecked: isSelected,
+                                    isVisible: true,
+                                    onTap: onToggleSelection,
+                                  )
+                                : IconButton(
+                                    tooltip: 'Weitere Optionen',
+                                    onPressed: onMoreTap == null
+                                        ? null
+                                        : () => onMoreTap!(anchor),
+                                    icon: Icon(
+                                      Icons.more_vert_outlined,
+                                      size: 18,
+                                      color: colors.textSecondary,
+                                    ),
+                                  ),
+                          ),
+                        ),
                       ),
                     ],
                   ),
                 ),
-                const SizedBox(width: 8),
-                SizedBox(
-                  width: 42,
-                  child: Text(
-                    formatDuration(track.duration),
-                    maxLines: 1,
-                    textAlign: TextAlign.right,
-                    style: styles.mobileTrailing,
-                  ),
-                ),
-                const SizedBox(width: 4),
-                SizedBox(width: 48, child: MediaItemProviderIcon(item: track)),
-                Builder(
-                  builder: (anchor) => SizedBox(
-                    width: 40,
-                    height: 48,
-                    child: Center(
-                      child: selectionModeActive
-                          ? MobileSelectionCheckBox(
-                              isChecked: isSelected,
-                              isVisible: true,
-                              onTap: onToggleSelection,
-                            )
-                          : IconButton(
-                              tooltip: 'Weitere Optionen',
-                              onPressed: onMoreTap == null
-                                  ? null
-                                  : () => onMoreTap!(anchor),
-                              icon: Icon(
-                                Icons.more_vert_outlined,
-                                size: 18,
-                                color: colors.textSecondary,
-                              ),
-                            ),
-                    ),
-                  ),
-                ),
-              ],
+              ),
             ),
           ),
         ),
@@ -526,7 +553,7 @@ class _MobileListSkeletonGrid extends StatelessWidget {
     final colors = context.mashinColors;
 
     return SizedBox(
-      height: isTrack ? 208 : 166,
+      height: isTrack ? 192 : 166,
       child: PageView.builder(
         controller: PageController(viewportFraction: 0.92),
         padEnds: false,
@@ -539,33 +566,42 @@ class _MobileListSkeletonGrid extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: <Widget>[
                 for (int row = 0; row < 3; row++) ...<Widget>[
-                  if (row > 0) const SizedBox(height: 8),
-                  Container(
-                    height: isTrack ? 64 : 50,
-                    decoration: BoxDecoration(
-                      color: colors.bgSecondary,
-                      borderRadius: BorderRadius.circular(10),
-                    ),
-                    child: Row(
-                      children: <Widget>[
-                        Container(
-                          width: isTrack ? 48 : 10,
-                          color: colors.bgTertiary,
+                  if (row > 0 && !isTrack) const SizedBox(height: 8),
+                  if (isTrack)
+                    MediaTrackRowSkeleton(
+                      isFirst: row == 0,
+                      durationColumnWidth: 42,
+                      providerColumnWidth: 48,
+                      menuColumnWidth: 48,
+                      menuGap: 0,
+                      trailingPadding: 0,
+                    )
+                  else
+                    SizedBox(
+                      height: 50,
+                      child: DecoratedBox(
+                        decoration: BoxDecoration(
+                          color: colors.bgSecondary,
+                          borderRadius: BorderRadius.circular(10),
                         ),
-                        const SizedBox(width: 12),
-                        Expanded(
-                          child: Container(
-                            height: 20,
-                            decoration: BoxDecoration(
-                              color: colors.bgTertiary,
-                              borderRadius: BorderRadius.circular(8),
+                        child: Row(
+                          children: <Widget>[
+                            Container(width: 10, color: colors.bgTertiary),
+                            const SizedBox(width: 12),
+                            Expanded(
+                              child: Container(
+                                height: 20,
+                                decoration: BoxDecoration(
+                                  color: colors.bgTertiary,
+                                  borderRadius: BorderRadius.circular(8),
+                                ),
+                              ),
                             ),
-                          ),
+                            const SizedBox(width: 12),
+                          ],
                         ),
-                        const SizedBox(width: 12),
-                      ],
+                      ),
                     ),
-                  ),
                 ],
               ],
             ),

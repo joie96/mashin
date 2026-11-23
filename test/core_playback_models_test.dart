@@ -741,11 +741,12 @@ void main() {
       );
       expect(resolved.startItem, 1);
       expect(bridge.playlistReads, 1);
+      expect(bridge.allowsDynamicTracks, isFalse);
     },
   );
 
   test(
-    'dynamic playlist commands retain their server-managed start path',
+    'dynamic playlists expand into tracks before queue submission',
     () async {
       final bridge = _PlaybackResolutionBridge();
       final resolved = await resolveQueuePlayMedia(bridge, <MediaItem>[
@@ -756,16 +757,25 @@ void main() {
           isEditable: false,
           isDynamic: true,
         ),
+      ], startItem: 0);
+      expect(resolved.mediaItems.map((item) => item['item_id']), [
+        'first',
+        'second',
       ]);
-      expect(resolved.mediaItems.single['item_id'], 'dynamic');
-      expect(resolved.mediaItems.single['is_dynamic'], isTrue);
-      expect(bridge.playlistReads, 0);
+      expect(
+        resolved.mediaItems.map((item) => item['media_type']),
+        everyElement('track'),
+      );
+      expect(resolved.startItem, 0);
+      expect(bridge.playlistReads, 1);
+      expect(bridge.allowsDynamicTracks, isTrue);
     },
   );
 }
 
 class _PlaybackResolutionBridge implements MashinCoreBridgeApi {
   int playlistReads = 0;
+  bool allowsDynamicTracks = false;
 
   @override
   Future<List<Track>> getPlaylistTracks(
@@ -775,6 +785,7 @@ class _PlaybackResolutionBridge implements MashinCoreBridgeApi {
     bool allowDynamicTracks = false,
   }) async {
     playlistReads++;
+    allowsDynamicTracks = allowDynamicTracks;
     return const <Track>[
       Track(
         itemId: 'first',

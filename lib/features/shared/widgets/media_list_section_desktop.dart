@@ -13,6 +13,7 @@ import '../selection/selection_controller.dart';
 import 'detail_provider_switcher.dart';
 import 'media_link_text.dart';
 import 'media_table_section_desktop.dart';
+import 'media_track_row_skeleton.dart';
 
 class MediaListSectionDesktop<T extends MediaItem> extends StatefulWidget {
   final String title;
@@ -60,7 +61,6 @@ class _MediaListSectionDesktopState<T extends MediaItem>
   static const _pageTransitionDuration = Duration(milliseconds: 250);
   static const _pageTransitionCurve = Curves.easeInOutCubic;
   static const int _rowsPerColumn = 3;
-  static const double _columnGap = 12;
   int _pageStartIndex = 0;
   bool _isPageTransitionRunning = false;
   int _navigationDirection = 1;
@@ -346,6 +346,10 @@ class _MediaListSectionDesktopState<T extends MediaItem>
 
   double get _rowExtent => _isTrackSection ? 64 : 48;
 
+  double get _columnGap => _isTrackSection ? 8 : 12;
+
+  double get _rowGap => _isTrackSection ? 0 : _columnGap;
+
   List<MediaItem> _playableItems() {
     return widget.items.where(_isValidPlayable).toList(growable: false);
   }
@@ -355,7 +359,7 @@ class _MediaListSectionDesktopState<T extends MediaItem>
       return 1;
     }
 
-    final minimumWidth = _isTrackSection ? 340.0 : 220.0;
+    final minimumWidth = _isTrackSection ? 280.0 : 220.0;
     final int count = ((width + _columnGap) / (minimumWidth + _columnGap))
         .floor();
     return count.clamp(1, 6);
@@ -374,7 +378,7 @@ class _MediaListSectionDesktopState<T extends MediaItem>
         ? (itemCount ~/ pageSize) * _rowsPerColumn +
               math.min(_rowsPerColumn, itemCount % pageSize)
         : _rowsPerColumn;
-    return rowCount * _rowExtent + (rowCount - 1) * _columnGap;
+    return rowCount * _rowExtent + (rowCount - 1) * _rowGap;
   }
 
   // Section and row rendering.
@@ -532,6 +536,7 @@ class _MediaListSectionDesktopState<T extends MediaItem>
             : IgnorePointer(
                 ignoring: _isPageTransitionRunning,
                 child: AnimatedSwitcher(
+                  key: ValueKey<int>(columnCount),
                   duration: _pageTransitionDuration,
                   switchInCurve: _pageTransitionCurve,
                   switchOutCurve: _pageTransitionCurve,
@@ -573,18 +578,18 @@ class _MediaListSectionDesktopState<T extends MediaItem>
         ? _rowsPerColumn
         : math.min(_rowsPerColumn, visibleCount);
     return SizedBox(
-      height: rowCount * _rowExtent + (rowCount - 1) * _columnGap,
+      height: rowCount * _rowExtent + (rowCount - 1) * _rowGap,
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           for (var column = 0; column < columnCount; column++) ...[
-            if (column > 0) const SizedBox(width: _columnGap),
+            if (column > 0) SizedBox(width: _columnGap),
             Expanded(
               child: Column(
                 children: [
                   for (var row = 0; row < _rowsPerColumn; row++)
                     if (column * _rowsPerColumn + row < visibleCount) ...[
-                      if (row > 0) const SizedBox(height: _columnGap),
+                      if (row > 0) SizedBox(height: _rowGap),
                       SizedBox(
                         height: _rowExtent,
                         child: startIndex == null
@@ -616,7 +621,7 @@ class _MediaListSectionDesktopState<T extends MediaItem>
           startIndex < math.min(_expandedItemCount, widget.items.length);
           startIndex += pageSize
         ) ...[
-          if (startIndex > 0) const SizedBox(height: _columnGap),
+          if (startIndex > 0) SizedBox(height: _rowGap),
           _buildPage(columnCount: columnCount, startIndex: startIndex),
         ],
       ],
@@ -660,6 +665,9 @@ class _MediaListSectionDesktopState<T extends MediaItem>
     return _DesktopListTrackTile(
       key: ValueKey((item.provider, item.itemId, index)),
       track: track,
+      isFirst:
+          index % _rowsPerColumn == 0 &&
+          (!_isExpanded || index < _lastVisibleCount),
       coreEvents: widget.coreEvents,
       onTitleTap: hasAlbumLink ? () => widget.onAlbumTap!(album) : null,
       isSelected: _selectedIndexes.contains(index),
@@ -885,6 +893,7 @@ class _DesktopListTrackTile extends StatelessWidget {
   const _DesktopListTrackTile({
     super.key,
     required this.track,
+    required this.isFirst,
     this.coreEvents,
     this.onTap,
     this.onTitleTap,
@@ -897,6 +906,7 @@ class _DesktopListTrackTile extends StatelessWidget {
   });
 
   final Track track;
+  final bool isFirst;
   final MashinCoreBridgeEvents? coreEvents;
   final VoidCallback? onTap;
   final VoidCallback? onTitleTap;
@@ -929,22 +939,24 @@ class _DesktopListTrackTile extends StatelessWidget {
           }
         },
         child: Material(
-          color: isSelected ? colors.selection : colors.bgSecondary,
-          borderRadius: BorderRadius.circular(5),
+          color: isSelected ? colors.selection : Colors.transparent,
+          shape: isFirst
+              ? const Border()
+              : Border(top: BorderSide(color: colors.border)),
           clipBehavior: Clip.antiAlias,
           child: InkWell(
             onTap: track.canPlay ? onTap : null,
             child: SizedBox(
               height: 64,
               child: Padding(
-                padding: const EdgeInsets.only(left: 8),
+                padding: const EdgeInsets.fromLTRB(8, 6, 0, 6),
                 child: Row(
                   children: [
                     MediaTableCover(
                       coverUrl: track.imageUriForSize(80),
                       fallbackIcon: Icons.music_note_outlined,
-                      size: 48,
-                      radius: 4,
+                      size: 52,
+                      radius: 8,
                       onPlayTap: track.canPlay ? onPlayTap : null,
                     ),
                     const SizedBox(width: 10),
@@ -981,24 +993,31 @@ class _DesktopListTrackTile extends StatelessWidget {
                         ],
                       ),
                     ),
-                    const SizedBox(width: 8),
+                    const SizedBox(width: 10),
                     SizedBox(
-                      width: 42,
-                      child: Text(
-                        formatDuration(track.duration),
-                        maxLines: 1,
-                        textAlign: TextAlign.right,
-                        style: styles.mobileTrailing,
+                      width: 36,
+                      child: FittedBox(
+                        fit: BoxFit.scaleDown,
+                        alignment: Alignment.centerRight,
+                        child: Text(
+                          formatDuration(track.duration),
+                          maxLines: 1,
+                          textAlign: TextAlign.right,
+                          style: styles.mobileTrailing,
+                        ),
                       ),
                     ),
-                    const SizedBox(width: 4),
+                    const SizedBox(width: 10),
                     SizedBox(
-                      width: 48,
-                      child: MediaItemProviderIcon(item: track),
+                      width: 40,
+                      child: MediaItemProviderIcon(
+                        item: track,
+                        hitTargetSize: const Size(40, 48),
+                      ),
                     ),
                     Builder(
                       builder: (anchor) => SizedBox(
-                        width: 40,
+                        width: 32,
                         height: 48,
                         child: Center(
                           child: selectionModeActive
@@ -1235,6 +1254,7 @@ class _DesktopListSkeletonGrid extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final colors = context.mashinColors;
+    final bool isTrack = rowExtent == 64;
 
     return GridView.builder(
       primary: false,
@@ -1242,12 +1262,22 @@ class _DesktopListSkeletonGrid extends StatelessWidget {
       physics: const NeverScrollableScrollPhysics(),
       gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
         crossAxisCount: columnCount,
-        crossAxisSpacing: 12,
-        mainAxisSpacing: 12,
+        crossAxisSpacing: isTrack ? 8 : 12,
+        mainAxisSpacing: isTrack ? 0 : 12,
         mainAxisExtent: rowExtent,
       ),
       itemCount: columnCount * 3,
       itemBuilder: (BuildContext context, int index) {
+        if (isTrack) {
+          return MediaTrackRowSkeleton(
+            isFirst: index < columnCount,
+            durationColumnWidth: 36,
+            providerColumnWidth: 40,
+            menuColumnWidth: 32,
+            menuGap: 0,
+            trailingPadding: 0,
+          );
+        }
         return DecoratedBox(
           decoration: BoxDecoration(
             color: colors.bgSecondary,
@@ -1255,10 +1285,7 @@ class _DesktopListSkeletonGrid extends StatelessWidget {
           ),
           child: Row(
             children: <Widget>[
-              Container(
-                width: rowExtent == 64 ? 48 : 8,
-                color: colors.bgTertiary,
-              ),
+              Container(width: 8, color: colors.bgTertiary),
               const SizedBox(width: 16),
               Expanded(
                 child: Container(

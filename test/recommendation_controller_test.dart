@@ -31,10 +31,205 @@ import 'package:mashin/features/shared/widgets/media_slide_section_desktop.dart'
 import 'package:mashin/features/shared/widgets/media_slide_section_mobile.dart';
 import 'package:mashin/features/shared/widgets/media_table_section_desktop.dart';
 import 'package:mashin/features/shared/widgets/media_table_section_mobile.dart';
+import 'package:mashin/features/shared/widgets/media_track_row_skeleton.dart';
 import 'package:mashin/features/shared/widgets/mood_playlist_cover.dart';
 import 'package:mashin/features/shared/widgets/media_image.dart';
 
 void main() {
+  for (final isDark in [false, true]) {
+    for (final width in [280.0, 380.0]) {
+      testWidgets(
+        'shared track skeleton follows table geometry: dark=$isDark width=$width',
+        (tester) async {
+          for (final isFirst in [true, false]) {
+            await tester.pumpWidget(
+              MaterialApp(
+                theme: isDark ? AppTheme.dark() : AppTheme.light(),
+                home: Scaffold(
+                  body: Align(
+                    alignment: Alignment.topLeft,
+                    child: SizedBox(
+                      width: width,
+                      child: MediaTrackRowSkeleton(isFirst: isFirst),
+                    ),
+                  ),
+                ),
+              ),
+            );
+            await tester.pumpAndSettle();
+            final row = find.byType(MediaTrackRowSkeleton);
+            final colors = tester.element(row).mashinColors;
+            final boxes = find.descendant(
+              of: row,
+              matching: find.byWidgetPredicate(
+                (widget) =>
+                    widget is Container &&
+                    widget.decoration is BoxDecoration &&
+                    (widget.decoration as BoxDecoration).color ==
+                        colors.bgTertiary,
+              ),
+            );
+            expect(boxes, findsNWidgets(6));
+            expect(tester.getSize(row), Size(width, 64));
+            expect(tester.getSize(boxes.first), const Size(52, 52));
+            expect(
+              tester.getTopLeft(boxes.first) - tester.getTopLeft(row),
+              const Offset(8, 6),
+            );
+            expect(
+              tester.getSize(boxes.at(1)),
+              Size(width == 280 ? 78 : 176, 15),
+            );
+            expect(
+              tester.getSize(boxes.at(2)),
+              Size(width == 280 ? 78 : 124, 12),
+            );
+            expect(
+              tester.getTopLeft(boxes.at(2)).dy -
+                  tester.getBottomLeft(boxes.at(1)).dy,
+              4,
+            );
+            expect(tester.getSize(boxes.at(3)), const Size(34, 12));
+            expect(tester.getSize(boxes.at(4)), const Size(16, 16));
+            expect(tester.getSize(boxes.at(5)), const Size(18, 18));
+            expect(find.byIcon(Icons.music_note_outlined), findsOneWidget);
+            final decoration =
+                tester
+                        .widget<DecoratedBox>(
+                          find
+                              .descendant(
+                                of: row,
+                                matching: find.byType(DecoratedBox),
+                              )
+                              .first,
+                        )
+                        .decoration
+                    as BoxDecoration;
+            expect(decoration.color, Colors.transparent);
+            expect(
+              decoration.border,
+              isFirst
+                  ? const Border()
+                  : Border(top: BorderSide(color: colors.border)),
+            );
+            expect(tester.takeException(), isNull);
+          }
+        },
+      );
+    }
+  }
+
+  for (final isMobile in [false, true]) {
+    for (final isDark in [false, true]) {
+      testWidgets(
+        'track list matches mobile table appearance: mobile=$isMobile dark=$isDark',
+        (tester) async {
+          final bridge = _RecommendationBridge();
+          addTearDown(bridge.eventsController.close);
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(events.dispose);
+          final tracks = List.generate(
+            3,
+            (index) => Track.fromJson({
+              'item_id': 'appearance-$index',
+              'provider': 'source',
+              'name': 'Appearance $index',
+              'duration': 245,
+            }),
+          );
+          final theme = isDark ? AppTheme.dark() : AppTheme.light();
+          Widget host(Widget child) => MaterialApp(
+            theme: theme,
+            home: Scaffold(
+              body: Align(
+                alignment: Alignment.topLeft,
+                child: SizedBox(width: 380, child: child),
+              ),
+            ),
+          );
+          await tester.pumpWidget(
+            host(
+              CustomScrollView(
+                slivers: [
+                  MediaTableSectionMobile<Track>(
+                    title: '',
+                    items: tracks,
+                    isLoading: false,
+                    emptyText: 'Empty',
+                    maxItemsPerPage: 3,
+                    coreBridge: bridge,
+                    coreEvents: events,
+                  ),
+                ],
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final referenceCover = tester.widget<MediaTableCover>(
+            find.byType(MediaTableCover).first,
+          );
+          final referenceDecoration =
+              tester
+                      .widget<Ink>(
+                        find
+                            .ancestor(
+                              of: find.byType(MediaTableCover).at(1),
+                              matching: find.byType(Ink),
+                            )
+                            .first,
+                      )
+                      .decoration
+                  as BoxDecoration;
+          await tester.pumpWidget(
+            host(
+              isMobile
+                  ? MediaListSectionMobile<Track>(
+                      title: '',
+                      items: tracks,
+                      isLoading: false,
+                      emptyText: 'Empty',
+                      coreBridge: bridge,
+                      coreEvents: events,
+                    )
+                  : MediaListSectionDesktop<Track>(
+                      title: '',
+                      items: tracks,
+                      isLoading: false,
+                      emptyText: 'Empty',
+                      coreBridge: bridge,
+                      coreEvents: events,
+                    ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          for (var index = 0; index < tracks.length; index++) {
+            final coverFinder = find.byType(MediaTableCover).at(index);
+            final cover = tester.widget<MediaTableCover>(coverFinder);
+            expect(cover.size, referenceCover.size);
+            expect(cover.radius, referenceCover.radius);
+            final rowFinder = find
+                .ancestor(of: coverFinder, matching: find.byType(Material))
+                .first;
+            final row = tester.widget<Material>(rowFinder);
+            expect(row.color, referenceDecoration.color);
+            expect(
+              row.shape,
+              index == 0 ? const Border() : referenceDecoration.border,
+            );
+            final rowBounds = tester.getRect(rowFinder);
+            expect(rowBounds.height, 64);
+            expect(rowBounds.top, index * 64);
+            expect(
+              tester.getTopLeft(coverFinder) - rowBounds.topLeft,
+              const Offset(8, 6),
+            );
+          }
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
   for (final outcome in ['success', 'failure', 'new-owner', 'ordinary']) {
     testWidgets('removal menu selection lifecycle: $outcome', (tester) async {
       final selection = SelectionController.instance;
@@ -1865,6 +2060,51 @@ void main() {
     },
   );
 
+  testWidgets('mobile track table uses the shared reference skeleton', (
+    tester,
+  ) async {
+    final bridge = _RecommendationBridge();
+    addTearDown(bridge.eventsController.close);
+    final events = MashinCoreBridgeEvents(coreBridge: bridge);
+    addTearDown(events.dispose);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: AppTheme.light(),
+        home: Scaffold(
+          body: CustomScrollView(
+            slivers: [
+              MediaTableSectionMobile<Track>(
+                title: '',
+                items: const [],
+                isLoading: true,
+                emptyText: 'Empty',
+                maxItemsPerPage: 3,
+                coreBridge: bridge,
+                coreEvents: events,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    final skeletons = find.byType(MediaTrackRowSkeleton);
+    expect(skeletons, findsAtLeastNWidgets(3));
+    for (final skeleton in tester.widgetList<MediaTrackRowSkeleton>(
+      skeletons,
+    )) {
+      expect(skeleton.durationColumnWidth, 34);
+      expect(skeleton.providerColumnWidth, 20);
+      expect(skeleton.menuColumnWidth, 40);
+      expect(skeleton.menuGap, 10);
+      expect(skeleton.trailingPadding, 8);
+    }
+    for (var index = 0; index < 3; index++) {
+      expect(tester.getSize(skeletons.at(index)).height, 64);
+    }
+    expect(tester.takeException(), isNull);
+  });
+
   for (final isMobile in [false, true]) {
     testWidgets(
       'list section type keeps skeleton and content heights consistent, mobile=$isMobile',
@@ -1918,8 +2158,8 @@ void main() {
             );
             await tester.pumpAndSettle();
             final expectedHeight = isMobile
-                ? (isTrackSection ? 208.0 : 166.0)
-                : (isTrackSection ? 248.0 : 200.0);
+                ? (isTrackSection ? 192.0 : 166.0)
+                : (isTrackSection ? 224.0 : 200.0);
             expect(
               tester.getSize(find.byWidget(section)).height,
               expectedHeight,
@@ -1928,6 +2168,94 @@ void main() {
               find.byType(MediaTableCover),
               !isLoading && isTrackSection ? findsOneWidget : findsNothing,
             );
+            if (isLoading && isTrackSection) {
+              final skeletons = find.byType(MediaTrackRowSkeleton);
+              expect(skeletons, findsAtLeastNWidgets(3));
+              for (final skeleton in tester.widgetList<MediaTrackRowSkeleton>(
+                skeletons,
+              )) {
+                expect(skeleton.durationColumnWidth, isMobile ? 42 : 36);
+                expect(skeleton.providerColumnWidth, isMobile ? 48 : 40);
+                expect(skeleton.menuColumnWidth, isMobile ? 48 : 32);
+                expect(skeleton.menuGap, 0);
+                expect(skeleton.trailingPadding, 0);
+              }
+              final covers = find.byWidgetPredicate(
+                (widget) =>
+                    widget is Container &&
+                    widget.constraints?.maxWidth == 52 &&
+                    widget.constraints?.maxHeight == 52,
+              );
+              expect(covers, findsAtLeastNWidgets(3));
+              for (var index = 0; index < 3; index++) {
+                final cover = covers.at(index);
+                final coverDecoration =
+                    tester.widget<Container>(cover).decoration as BoxDecoration;
+                expect(coverDecoration.borderRadius, BorderRadius.circular(8));
+                final row = find
+                    .ancestor(
+                      of: cover,
+                      matching: find.byWidgetPredicate(
+                        (widget) =>
+                            widget is DecoratedBox &&
+                            widget.decoration is BoxDecoration &&
+                            (widget.decoration as BoxDecoration).border != null,
+                      ),
+                    )
+                    .first;
+                final decoration =
+                    tester.widget<DecoratedBox>(row).decoration
+                        as BoxDecoration;
+                expect(
+                  find.descendant(
+                    of: cover,
+                    matching: find.byIcon(Icons.music_note_outlined),
+                  ),
+                  findsOneWidget,
+                );
+                for (final (height, radius) in [
+                  (15.0, 6.0),
+                  (12.0, 6.0),
+                  (12.0, 4.0),
+                  (16.0, 8.0),
+                  (18.0, 9.0),
+                ]) {
+                  expect(
+                    find.descendant(
+                      of: row,
+                      matching: find.byWidgetPredicate(
+                        (widget) =>
+                            widget is Container &&
+                            widget.constraints?.maxHeight == height &&
+                            widget.decoration is BoxDecoration &&
+                            (widget.decoration as BoxDecoration).borderRadius ==
+                                BorderRadius.circular(radius),
+                      ),
+                    ),
+                    findsOneWidget,
+                  );
+                }
+                expect(decoration.color, Colors.transparent);
+                expect(decoration.borderRadius, isNull);
+                expect(
+                  decoration.border,
+                  index == 0
+                      ? const Border()
+                      : Border(
+                          top: BorderSide(
+                            color: tester.element(row).mashinColors.border,
+                          ),
+                        ),
+                );
+                final bounds = tester.getRect(row);
+                expect(bounds.height, 64);
+                expect(bounds.top, index * 64);
+                expect(
+                  tester.getTopLeft(cover) - bounds.topLeft,
+                  const Offset(8, 6),
+                );
+              }
+            }
             expect(tester.takeException(), isNull);
           }
         }
@@ -2117,12 +2445,12 @@ void main() {
       await tester.tap(find.byTooltip('Vorherige Seite'));
       await tester.pumpAndSettle();
       expect(find.text('Track 6'), findsOneWidget);
-      await showList(1043, tracks);
+      await showList(855, tracks);
       expect(find.byType(MediaTableCover), findsNWidgets(6));
-      await showList(1044, tracks);
+      await showList(856, tracks);
       expect(find.byType(MediaTableCover), findsNWidgets(9));
       await showList(1200, tracks);
-      expect(find.byType(MediaTableCover), findsNWidgets(9));
+      expect(find.byType(MediaTableCover), findsNWidgets(12));
       await showList(800, tracks.take(4).toList());
       expect(find.byType(MediaTableCover), findsNWidgets(4));
       expect(find.text('Track 0'), findsOneWidget);
@@ -2229,6 +2557,122 @@ void main() {
           expect(SelectionController.instance.isVisible, isFalse);
           expect(nonemptySelections, 0);
           expect(find.byType(MobileSelectableSectionItem), findsNothing);
+          await tester.pumpWidget(const SizedBox());
+          await tester.pumpAndSettle();
+          expect(tester.takeException(), isNull);
+        },
+      );
+    }
+  }
+
+  for (final isTable in [true, false]) {
+    for (final isDark in [false, true]) {
+      testWidgets(
+        'mobile track selection animates ink feedback: table=$isTable dark=$isDark',
+        (tester) async {
+          tester.view.physicalSize = const Size(390, 844);
+          tester.view.devicePixelRatio = 1;
+          addTearDown(tester.view.resetPhysicalSize);
+          addTearDown(tester.view.resetDevicePixelRatio);
+          final bridge = _RecommendationBridge();
+          addTearDown(bridge.eventsController.close);
+          final events = MashinCoreBridgeEvents(coreBridge: bridge);
+          addTearDown(events.dispose);
+          final track = Track.fromJson({
+            'provider': 'source',
+            'item_id': 'selection-animation',
+            'name': 'Animated track',
+          });
+          final boundaryKey = GlobalKey();
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: isDark ? AppTheme.dark() : AppTheme.light(),
+              home: RepaintBoundary(
+                key: boundaryKey,
+                child: Scaffold(
+                  body: isTable
+                      ? CustomScrollView(
+                          slivers: [
+                            MediaTableSectionMobile<Track>(
+                              title: '',
+                              items: [track],
+                              isLoading: false,
+                              emptyText: 'Empty',
+                              maxItemsPerPage: 3,
+                              coreBridge: bridge,
+                              coreEvents: events,
+                            ),
+                          ],
+                        )
+                      : MediaListSectionMobile<Track>(
+                          title: '',
+                          items: [track],
+                          isLoading: false,
+                          emptyText: 'Empty',
+                          coreBridge: bridge,
+                          coreEvents: events,
+                        ),
+                ),
+              ),
+            ),
+          );
+          await tester.pumpAndSettle();
+          final title = find.text('Animated track');
+          final row = find
+              .ancestor(of: title, matching: find.byType(InkWell))
+              .first;
+          final inkWell = tester.widget<InkWell>(row);
+          final colors = tester.element(row).mashinColors;
+          expect(inkWell.onLongPress, isNotNull);
+          expect(inkWell.splashColor, colors.selection.withValues(alpha: 0.42));
+          expect(
+            inkWell.highlightColor,
+            colors.selection.withValues(alpha: 0.18),
+          );
+          final bounds = tester.getRect(row);
+          final samplePosition = bounds.topLeft + const Offset(74, 56);
+          Future<Color> backgroundColor() async {
+            final boundary =
+                boundaryKey.currentContext!.findRenderObject()!
+                    as RenderRepaintBoundary;
+            final image = await tester.runAsync(() => boundary.toImage());
+            final pixels = await tester.runAsync(
+              () => image!.toByteData(format: ui.ImageByteFormat.rawRgba),
+            );
+            final position = boundary.globalToLocal(samplePosition);
+            final offset =
+                (position.dy.floor() * image!.width + position.dx.floor()) * 4;
+            final color = Color.fromARGB(
+              pixels!.getUint8(offset + 3),
+              pixels.getUint8(offset),
+              pixels.getUint8(offset + 1),
+              pixels.getUint8(offset + 2),
+            );
+            image.dispose();
+            return color;
+          }
+
+          final initialColor = await backgroundColor();
+          final gesture = await tester.startGesture(tester.getCenter(title));
+          await tester.pump();
+          await tester.pump(const Duration(milliseconds: 100));
+          await tester.pump(const Duration(milliseconds: 200));
+          expect(SelectionController.instance.isVisible, isFalse);
+          final pressedColor = await backgroundColor();
+          expect(pressedColor, isNot(initialColor));
+          await tester.pump(const Duration(milliseconds: 400));
+          await gesture.up();
+          await tester.pumpAndSettle();
+          expect(SelectionController.instance.selectedCount, 1);
+          expect(tester.getRect(row), bounds);
+          final selectedColor = await backgroundColor();
+          expect(selectedColor, isNot(initialColor));
+          expect(selectedColor, isNot(pressedColor));
+          expect(bridge.playedItems, isEmpty);
+          SelectionController.instance.onClose();
+          await tester.pumpAndSettle();
+          expect(await backgroundColor(), initialColor);
+          expect(SelectionController.instance.isVisible, isFalse);
           await tester.pumpWidget(const SizedBox());
           await tester.pumpAndSettle();
           expect(tester.takeException(), isNull);
@@ -2353,7 +2797,7 @@ void main() {
       await tester.pumpAndSettle();
       final pageView = tester.widget<PageView>(find.byType(PageView));
       expect(pageView.controller!.viewportFraction, 0.92);
-      expect(tester.getSize(find.byType(PageView)).height, 208);
+      expect(tester.getSize(find.byType(PageView)).height, 192);
       await tester.tap(
         find.byWidgetPredicate(
           (widget) =>
@@ -2397,14 +2841,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(SelectionController.instance.selectedCount, 1);
       expect(find.byTooltip('Weitere Optionen'), findsNothing);
-      expect(
-        tester
-            .widgetList<MobileSelectableSectionItem>(
-              find.byType(MobileSelectableSectionItem),
-            )
-            .every((item) => !item.showSelectionIndicator),
-        isTrue,
-      );
+      expect(find.byType(MobileSelectableSectionItem), findsNothing);
       expect(tester.getRect(first), rowBounds);
       for (var index = 0; index < 3; index++) {
         final checkbox = rowCheckbox(index);
@@ -2523,6 +2960,38 @@ void main() {
           await tester.pumpAndSettle();
           expect(find.text('Track artist'), findsOneWidget);
           expect(find.text('4:05'), findsOneWidget);
+          if (!isMobile) {
+            expect(
+              tester.getSize(find.byType(MediaItemProviderIcon)),
+              const Size(40, 48),
+            );
+            expect(
+              tester
+                  .getSize(
+                    find
+                        .ancestor(
+                          of: find.text('4:05'),
+                          matching: find.byType(SizedBox),
+                        )
+                        .first,
+                  )
+                  .width,
+              36,
+            );
+            expect(
+              tester
+                  .getSize(
+                    find
+                        .ancestor(
+                          of: find.byTooltip('Weitere Optionen'),
+                          matching: find.byType(SizedBox),
+                        )
+                        .first,
+                  )
+                  .width,
+              32,
+            );
+          }
           expect(
             tester
                 .widget<MediaItemProviderIcon>(

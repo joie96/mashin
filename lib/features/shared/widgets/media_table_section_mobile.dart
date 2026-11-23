@@ -12,6 +12,7 @@ import '../../core/core_events.dart';
 import '../../core/core_models.dart';
 import '../selection/selection_controller.dart';
 import 'media_table_section_desktop.dart';
+import 'media_track_row_skeleton.dart';
 import 'mobile_section_header.dart';
 
 class MediaTableSectionMobile<T> extends StatefulWidget {
@@ -1241,13 +1242,7 @@ Widget _buildMobileTableRowBase({
 }
 
 Widget _buildMobileTableRowTrackSkeleton({required bool isFirst}) {
-  return _MobileTableRowSkeleton(
-    isFirst: isFirst,
-    fallbackIcon: Icons.music_note_outlined,
-    titleWidth: 176,
-    subtitleWidth: 124,
-    trailingWidth: 34,
-  );
+  return MediaTrackRowSkeleton(isFirst: isFirst);
 }
 
 Widget _buildMobileTableRowQueueSkeleton({required bool isFirst}) {

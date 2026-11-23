@@ -156,11 +156,13 @@ class MediaItemProviderIcon extends StatefulWidget {
     super.key,
     required this.item,
     this.size = 16,
+    this.hitTargetSize = const Size(48, 48),
     this.primaryIconOffset,
   });
 
   final MediaItem item;
   final double size;
+  final Size hitTargetSize;
   final Offset? primaryIconOffset;
   static final Set<int> _providerPointers = <int>{};
 
@@ -173,7 +175,6 @@ class MediaItemProviderIcon extends StatefulWidget {
 }
 
 class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
-  static const Size _iconArea = Size(48, 48);
   static const double _stackIconSize = 24;
   static const double _stackHeight = 40;
   late ItemProviderSelection _selection;
@@ -218,6 +219,7 @@ class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
     builder: (context, snapshot) => ListenableBuilder(
       listenable: _selection,
       builder: (context, child) {
+        final iconArea = widget.hitTargetSize;
         final mappings = _selection.mappings
             .where((mapping) => mapping.available)
             .toList();
@@ -228,12 +230,12 @@ class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
         final primaryIconOffset =
             widget.primaryIconOffset ??
             Offset(
-              (_iconArea.width - widget.size) / 2,
-              (_iconArea.height - widget.size) / 2,
+              (iconArea.width - widget.size) / 2,
+              (iconArea.height - widget.size) / 2,
             );
         if (!_selection.canCycle) {
           return SizedBox.fromSize(
-            size: _iconArea,
+            size: iconArea,
             child: Stack(
               children: <Widget>[
                 Positioned(
@@ -275,7 +277,7 @@ class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
                 onPressed: _isCycling || snapshot.hasError ? null : _cycle,
                 style:
                     IconButton.styleFrom(
-                      fixedSize: _iconArea,
+                      fixedSize: iconArea,
                       enabledMouseCursor: SystemMouseCursors.click,
                       disabledMouseCursor: SystemMouseCursors.basic,
                       padding: EdgeInsets.zero,
@@ -289,7 +291,7 @@ class _MediaItemProviderIconState extends State<MediaItemProviderIcon> {
                     ),
                 icon: ExcludeSemantics(
                   child: SizedBox.fromSize(
-                    size: _iconArea,
+                    size: iconArea,
                     child: Stack(
                       clipBehavior: Clip.none,
                       children: <Widget>[
