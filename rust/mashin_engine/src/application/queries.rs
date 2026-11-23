@@ -301,6 +301,7 @@ pub(crate) enum ApplicationQuery {
         #[serde(default = "default_limit")]
         limit: u32,
     },
+    LibraryPlaylists {},
     SearchMedia {
         query: String,
         media_type: MediaType,

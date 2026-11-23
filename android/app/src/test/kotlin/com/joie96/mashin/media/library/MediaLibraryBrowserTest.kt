@@ -55,6 +55,8 @@ class MediaLibraryBrowserTest {
                 userData.toString()
             } else if (kind == "recentlyPlayedTracks") {
                 "[]"
+            } else if (kind == "libraryPlaylists") {
+                results[kind]?.toString() ?: "[]"
             } else {
                 val reference = JSONObject(checkNotNull(argument))
                 references.add(kind to reference)
@@ -155,16 +157,25 @@ class MediaLibraryBrowserTest {
     @Test
     fun allRecommendationSubmenusWaitForTheirDataAndFinishOnCoreEvents() {
         for ((parent, folderId, mediaType) in listOf(
+            Triple("home:artistRecommendations", "user_artist_recommendations", "artist"),
+            Triple("home:topAlbums", "user_top_albums_monthly", "album"),
+            Triple("home:albumRecommendations", "user_album_recommendations", "album"),
+            Triple("home:rediscovery", "user_rediscovery_tracks", "track"),
             Triple("home:recommendations", "user_recommendations", "track"),
             Triple("home:favoriteGenres", "user_genre_playlists_monthly", "playlist"),
             Triple("home:playlistSuggestions", "user_artist_playlists_monthly", "playlist"),
             Triple("home:topTracks", "user_top_tracks_monthly", "track"),
             Triple("home:topArtists", "user_top_artists_monthly", "artist"),
-            Triple("discover:exploration", "user_exploration_weekly", "track"),
-            Triple("discover:albums", "sitewide_top_albums_weekly", "album"),
-            Triple("discover:similarUsers", "similarusers_jam_weekly", "track"),
-            Triple("discover:artists", "sitewide_top_artists_weekly", "artist"),
-            Triple("discover:tracks", "sitewide_top_tracks_weekly", "track"),
+            Triple("discover:artistRadio", "global_artist_radio_playlists", "playlist"),
+            Triple("discover:globalTracks", "global_top_tracks", "track"),
+            Triple("discover:globalArtists", "global_top_artists", "artist"),
+            Triple("discover:germanTracks", "de_top_tracks", "track"),
+            Triple("discover:germanArtists", "de_top_artists", "artist"),
+            Triple("discover:moods", "global_mood_playlists", "playlist"),
+            Triple("discover:genres", "global_genre_playlists", "playlist"),
+            Triple("discover:decades", "global_decade_playlists", "playlist"),
+            Triple("discover:globalAlbums", "global_popular_artist_albums", "album"),
+            Triple("discover:germanAlbums", "de_popular_artist_albums", "album"),
         )) {
             isLoadingRecommendations = true
             val pending = browser.onGetChildren(session, controller, parent, 0, Int.MAX_VALUE, null)
@@ -188,9 +199,9 @@ class MediaLibraryBrowserTest {
         publishRecommendations()
         assertEquals("partial", checkNotNull(pending.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
 
-        folders.put(folder("sitewide_top_albums_weekly"))
+        folders.put(folder("global_popular_artist_albums"))
         publishRecommendations()
-        assertTrue(children("discover:albums").isEmpty())
+        assertTrue(children("discover:globalAlbums").isEmpty())
     }
 
     @Test
@@ -211,6 +222,21 @@ class MediaLibraryBrowserTest {
         pending.zip(categories).forEach { (result, category) ->
             assertEquals(category.first, checkNotNull(result.get(5, TimeUnit.SECONDS).value).last().mediaMetadata.title)
         }
+    }
+
+    @Test
+    fun playlistsIncludeTheFullLibraryWithoutDuplicatingPrivatePlaylists() {
+        val privatePlaylist = item("private", "playlist").put("provider", "library")
+        userData = JSONObject().put("playlists", JSONArray().put(privatePlaylist))
+        results["libraryPlaylists"] = JSONArray().put(privatePlaylist)
+            .put(item("shared", "playlist")).put(item("provider", "playlist")).put(item("another", "playlist"))
+        val playlists = children("node:playlists")
+        assertEquals(listOf("private", "shared", "provider", "another"), playlists.map { it.mediaMetadata.title.toString() })
+        assertEquals(playlists.drop(2).map { it.mediaId }, checkNotNull(browser.onGetChildren(
+            session, controller, "node:playlists", 1, 2, null).get(5, TimeUnit.SECONDS).value).map { it.mediaId })
+        results["libraryPlaylists"] = JSONArray().put(item("new", "playlist"))
+        browser.onCoreEvent("user_data_metadata_changed")
+        assertEquals(listOf("new", "private"), children("node:playlists").map { it.mediaMetadata.title.toString() })
     }
 
     @Test
@@ -238,8 +264,10 @@ class MediaLibraryBrowserTest {
             item("private", "playlist").put("provider", "library").put("is_loading_tracks", true)))
         val scoped = MediaLibraryBrowser(RuntimeEnvironment.getApplication(), query = { _, _ -> snapshot.toString() },
             catalogQuery = { command, _ ->
-                assertEquals("playlistTracks", command)
-                com.google.common.util.concurrent.SettableFuture.create<String>().also(started::add)
+                if (command == "libraryPlaylists") Futures.immediateFuture("[]") else {
+                    assertEquals("playlistTracks", command)
+                    com.google.common.util.concurrent.SettableFuture.create<String>().also(started::add)
+                }
             }) { Futures.immediateVoidFuture() }
         try {
             val parent = checkNotNull(scoped.onGetChildren(session, controller, "node:playlists", 0, 10, null)
@@ -269,7 +297,7 @@ class MediaLibraryBrowserTest {
     @Test
     fun closingBrowserCancelsUnfinishedLoadingRequests() {
         isLoadingRecommendations = true
-        val pending = browser.onGetChildren(session, controller, "discover:tracks", 0, Int.MAX_VALUE, null)
+        val pending = browser.onGetChildren(session, controller, "discover:globalTracks", 0, Int.MAX_VALUE, null)
         assertThrows(TimeoutException::class.java) { pending.get(100, TimeUnit.MILLISECONDS) }
         browser.close()
         assertTrue(pending.isCancelled)
@@ -289,9 +317,11 @@ class MediaLibraryBrowserTest {
             for ((parent, expected) in listOf(
                 "root" to listOf("node:home", "node:discover", "node:playlists", "node:favorites"),
                 "node:home" to listOf("home:recommendations", "home:favoriteGenres", "home:playlistSuggestions",
-                    "home:topTracks", "home:topArtists", "home:recent"),
-                "node:discover" to listOf("discover:exploration", "discover:albums", "discover:similarUsers",
-                    "discover:artists", "discover:tracks"),
+                    "home:topTracks", "home:topArtists", "home:artistRecommendations", "home:topAlbums",
+                    "home:albumRecommendations", "home:rediscovery", "home:recent"),
+                "node:discover" to listOf("discover:artistRadio", "discover:globalTracks", "discover:globalArtists",
+                    "discover:germanTracks", "discover:germanArtists", "discover:moods", "discover:genres",
+                    "discover:decades", "discover:globalAlbums", "discover:germanAlbums"),
                 "node:favorites" to listOf("favorites:tracks", "favorites:albums", "favorites:playlists", "favorites:artists"),
             )) {
                 val result = blockedBrowser.onGetChildren(session, controller, parent, 0, Int.MAX_VALUE, null)
@@ -306,19 +336,27 @@ class MediaLibraryBrowserTest {
     }
 
     @Test
-    fun discoverListsTheFiveRequestedSectionsInOrder() {
+    fun discoverListsCurrentSectionsInAppOrderWithoutGenreSpecificFolders() {
         val sections = children("node:discover")
-        assertEquals(listOf("Entdecke etwas Neues", "Alben der Woche", "Andere Nutzer hören",
-            "Artists der Woche", "Songs der Woche"), sections.map { it.mediaMetadata.title.toString() })
+        assertEquals(listOf("Das hören andere", "Track-Charts weltweit", "Künstler-Charts weltweit",
+            "Track-Charts Deutschland", "Künstler-Charts Deutschland", "Musik für deine Stimmung",
+            "Genre-Playlists", "Jahrzehnt-Playlists", "Alben weltweit beliebter Künstler:innen",
+            "Alben in Deutschland beliebter Künstler:innen"), sections.map { it.mediaMetadata.title.toString() })
         assertTrue(sections.all { it.mediaMetadata.isBrowsable == true && it.mediaMetadata.isPlayable == false })
-        assertEquals(children("node:home").first().mediaMetadata.artworkUri, sections[0].mediaMetadata.artworkUri)
         assertEquals("android.resource://com.joie96.mashin/drawable/groups",
-            sections[2].mediaMetadata.artworkUri.toString())
+            sections[0].mediaMetadata.artworkUri.toString())
         assertEquals(MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
-            sections[1].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
+            sections[0].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
         assertEquals(MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM,
-            sections[3].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
+            sections[2].mediaMetadata.extras?.getInt(MediaConstants.EXTRAS_KEY_CONTENT_STYLE_BROWSABLE))
         assertTrue(references.isEmpty())
+    }
+
+    @Test
+    fun moodPlaylistsExposeLocalCoverUrisInsteadOfServerArtwork() {
+        folders.put(folder("global_mood_playlists", item("global_mood_playlist_focus", "playlist")))
+        assertEquals("content://com.joie96.mashin.mediaart/mood/focus",
+            children("discover:moods").single().mediaMetadata.artworkUri.toString())
     }
 
     @Test
@@ -334,28 +372,28 @@ class MediaLibraryBrowserTest {
     @Test
     fun recommendationQueriesSelectTheRequiredView() {
         folders.put(folder("user_recommendations", item("home-track", "track")))
-        folders.put(folder("sitewide_top_tracks_weekly", item("explore-track", "track")))
+        folders.put(folder("global_top_tracks", item("explore-track", "track")))
         assertEquals("home-track", children("home:recommendations").last().mediaMetadata.title)
-        assertEquals("explore-track", children("discover:tracks").last().mediaMetadata.title)
+        assertEquals("explore-track", children("discover:globalTracks").last().mediaMetadata.title)
         assertEquals(listOf("home", "explore"), recommendationViews)
     }
 
     @Test
-    fun weeklyAlbumsAndArtistsExposeTheirNestedContentsAndPlayback() {
-        folders.put(folder("sitewide_top_albums_weekly", item("album", "album"), item("wrong", "artist")))
-        folders.put(folder("sitewide_top_artists_weekly", item("artist", "artist")))
+    fun popularAlbumsAndChartArtistsExposeTheirNestedContentsAndPlayback() {
+        folders.put(folder("global_popular_artist_albums", item("album", "album"), item("wrong", "artist")))
+        folders.put(folder("global_top_artists", item("artist", "artist")))
         results["albumTracks:album"] = JSONArray().put(item("album-track", "track"))
         results["artistAlbums:artist"] = JSONArray().put(item("album", "album"))
         results["artistTopTracks:artist"] = JSONArray().put(item("artist-track", "track"))
         results["similarArtists:artist"] = JSONArray().put(item("similar", "artist"))
-        val album = children("discover:albums").single()
+        val album = children("discover:globalAlbums").single()
         assertTrue(album.mediaMetadata.isBrowsable == true)
         val tracks = children(album.mediaId)
         assertEquals("album-track", tracks.last().mediaMetadata.title)
         browser.startPlayback(tracks.first().mediaId).get()
         assertEquals(PlaybackCommandKind.QueuePlayMedia, requests.last().kind)
 
-        val artist = children("discover:artists").single()
+        val artist = children("discover:globalArtists").single()
         val artistSections = children(artist.mediaId)
         assertEquals(listOf("Artist-Radio", "Alben", "Ähnliche Artists", "Top-Tracks"),
             artistSections.map { it.mediaMetadata.title.toString() })
@@ -367,18 +405,18 @@ class MediaLibraryBrowserTest {
     }
 
     @Test
-    fun weeklySongsFilterInvalidEntriesAndMissingRecommendationsStayEmpty() {
-        assertTrue(children("discover:tracks").isEmpty())
-        folders.put(folder("sitewide_top_tracks_weekly", item("song", "track"), item("wrong", "album"),
+    fun chartSongsFilterInvalidEntriesAndRadioFoldersExposePlaylists() {
+        assertTrue(children("discover:globalTracks").isEmpty())
+        folders.put(folder("global_top_tracks", item("song", "track"), item("wrong", "album"),
             item("", "track"), item("missing-provider", "track").put("provider", "")))
         publishRecommendations()
-        val songs = children("discover:tracks")
+        val songs = children("discover:globalTracks")
         assertEquals(listOf("Abspielen", "Zufällige Wiedergabe", "song"),
             songs.map { it.mediaMetadata.title.toString() })
-        assertTrue(children("discover:exploration").isEmpty())
-        folders.put(folder("user_exploration_weekly", item("empty-playlist", "playlist")))
+        assertTrue(children("discover:artistRadio").isEmpty())
+        folders.put(folder("global_artist_radio_playlists", item("radio-playlist", "playlist")))
         publishRecommendations()
-        assertTrue(children("discover:exploration").isEmpty())
+        assertEquals("radio-playlist", children("discover:artistRadio").single().mediaMetadata.title)
     }
 
     // Fixtures cross the same JSON boundary as Rust query results.

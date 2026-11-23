@@ -80,7 +80,7 @@ class MediaLibraryReadsTest {
 
     @Test
     fun everyReadAcceptsKnownEmptyBeforeRefreshAndRetainsItOnFailure() {
-        LibraryReadKind.entries.filter { it.command != "recommendations" }.forEach { kind ->
+        LibraryReadKind.entries.filter { it.command != "recommendations" && it != LibraryReadKind.LibraryPlaylists }.forEach { kind ->
             val remote = SettableFuture.create<String>()
             val read = LibraryRead(kind, if (kind == LibraryReadKind.Recent) null else "id", "provider")
             val reads = MediaLibraryReads { command, _ -> assertEquals(kind.command, command); remote }

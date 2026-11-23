@@ -576,6 +576,30 @@ impl Application {
                 )
                 .await
             }
+            LibraryPlaylists {} => {
+                let mut playlists = Vec::new();
+                let mut offset = 0;
+                loop {
+                    let result = self.refresh_catalog(
+                        generation,
+                        CatalogQuery::LibraryPlaylists {
+                            favorite: None,
+                            limit: 50,
+                            offset,
+                            summary: true,
+                        },
+                        false,
+                    ).await?;
+                    let QueryResult::MediaItems(page) = result else {
+                        return Err(ApplicationError::internal("expected library playlists"));
+                    };
+                    let is_last_page = page.len() < 50;
+                    playlists.extend(page);
+                    if is_last_page { break; }
+                    offset += 50;
+                }
+                Ok(QueryResult::MediaItems(playlists))
+            }
             SearchMedia {
                 query,
                 media_type,
@@ -987,6 +1011,56 @@ mod phase_e_tests {
     use crate::domain::session::AccessToken;
     use serde_json::json;
     use std::sync::Arc;
+
+    struct PlaylistPages {
+        offsets: std::sync::Mutex<Vec<u32>>,
+        count: u32,
+    }
+
+    impl crate::application::repositories::CatalogClient for PlaylistPages {
+        fn begin_startup(&self) -> Box<dyn Send> { Box::new(()) }
+
+        fn load_catalog(&self, query: CatalogQuery, force_refresh: bool)
+            -> futures_util::future::BoxFuture<'_, Result<CatalogValue, String>> {
+            Box::pin(async move {
+                let CatalogQuery::LibraryPlaylists { favorite, limit, offset, summary } = query else {
+                    panic!("expected library playlist page");
+                };
+                assert_eq!(favorite, None);
+                assert_eq!(limit, 50);
+                assert!(summary);
+                assert!(!force_refresh);
+                self.offsets.lock().unwrap().push(offset);
+                let items = (offset..(offset + limit).min(self.count)).map(|index| {
+                    serde_json::from_value(json!({
+                        "media_type":"playlist", "provider":"library", "item_id":index.to_string(),
+                        "name":format!("Playlist {index}")
+                    })).unwrap()
+                }).collect();
+                Ok(CatalogValue::Playlists(items))
+            })
+        }
+    }
+
+    #[tokio::test]
+    async fn library_playlists_query_reads_all_pages_and_stops_at_the_library_boundary() {
+        for count in [0, 2, 50, 123] {
+            let (client, worker) = server(Vec::new());
+            let application = application(client.base_url(), EventPublisher::new(|_| {}));
+            let pages = Arc::new(PlaylistPages { offsets: Default::default(), count });
+            let mut services = crate::bootstrap::session::online_services(Arc::new(client));
+            services.catalog = pages.clone();
+            application.coordinator.lock().unwrap().repositories = Some(services);
+            let context = application.query_context().unwrap();
+            let result = application.clone().execute_query(ApplicationQuery::LibraryPlaylists {}, context).await.unwrap();
+            let QueryResult::MediaItems(items) = result else { panic!("expected playlist results"); };
+            assert_eq!(items.len(), count as usize);
+            assert_eq!(items.iter().map(|item| item.fields().item_id.as_str().to_owned()).collect::<Vec<_>>(),
+                (0..count).map(|index| index.to_string()).collect::<Vec<_>>());
+            assert_eq!(*pages.offsets.lock().unwrap(), (0..=count / 50).map(|page| page * 50).collect::<Vec<_>>());
+            worker.join().unwrap();
+        }
+    }
 
     struct DelayedProviders {
         release: Arc<tokio::sync::Notify>,

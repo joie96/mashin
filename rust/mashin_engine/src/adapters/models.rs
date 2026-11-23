@@ -103,6 +103,15 @@ mod tests {
     use crate::application::queries::ApplicationQuery;
 
     #[test]
+    fn library_playlists_query_uses_the_strict_native_envelope() {
+        let request: NativeOperationRequest = serde_json::from_value(
+            serde_json::json!({"requestId":42,"kind":"libraryPlaylists"}),
+        ).unwrap();
+        assert!(matches!(request.operation, NativeOperation::Query(ApplicationQuery::LibraryPlaylists {})));
+        assert!(super::decode_query("libraryPlaylists", Some(r#"{"unexpected":true}"#)).is_err());
+    }
+
+    #[test]
     fn catalog_completion_requires_explicit_observation_and_rejects_strict_operations() {
         use serde_json::json;
         for kind in ["providerManifests", "recentlyPlayedTracks", "artistAlbums", "playlistTracks"] {

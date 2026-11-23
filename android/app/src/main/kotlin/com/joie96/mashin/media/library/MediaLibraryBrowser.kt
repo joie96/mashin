@@ -199,6 +199,7 @@ internal class MediaLibraryBrowser(
         if (catalogEvent != null) search.onCatalogEvent(catalogEvent)
         if (catalogEvent != null) catalogReads.onCoreEvent(catalogEvent)
         if (eventType == "recommendations_changed") catalogReads.refreshRecommendations()
+        if (eventType in setOf("user_data_changed", "user_data_metadata_changed")) catalogReads.refreshLibraryPlaylists()
         if ((eventType == "cache_cleared" && artworkRevision == null) || eventType in setOf("provider_instances_changed", "session_changed")) {
             readRevision.incrementAndGet()
             activeRequests.keys.toList().forEach { it.cancel(false) }
@@ -548,14 +549,23 @@ internal class MediaLibraryBrowser(
         "home:playlistSuggestions" -> recommendationItems(parentId, "user_artist_playlists_monthly", "playlist", normalizePlaylistNames = true)
         "home:topTracks" -> recommendationItems(parentId, "user_top_tracks_monthly", "track")
         "home:topArtists" -> recommendationItems(parentId, "user_top_artists_monthly", "artist")
+        "home:artistRecommendations" -> recommendationItems(parentId, "user_artist_recommendations", "artist")
+        "home:topAlbums" -> recommendationItems(parentId, "user_top_albums_monthly", "album")
+        "home:albumRecommendations" -> recommendationItems(parentId, "user_album_recommendations", "album")
+        "home:rediscovery" -> recommendationItems(parentId, "user_rediscovery_tracks", "track")
         "home:recent" -> catalogValue(parentId, LibraryRead(LibraryReadKind.Recent))?.let {
             LibraryChildren(mediaItemsFromJson(parentId, it, true, mediaType = "track"))
         } ?: LibraryChildren(emptyList(), true)
-        "discover:exploration" -> discoverRecommendationItems(parentId, "user_exploration_weekly", "track", true)
-        "discover:albums" -> discoverRecommendationItems(parentId, "sitewide_top_albums_weekly", "album")
-        "discover:similarUsers" -> discoverRecommendationItems(parentId, "similarusers_jam_weekly", "track", true)
-        "discover:artists" -> discoverRecommendationItems(parentId, "sitewide_top_artists_weekly", "artist")
-        "discover:tracks" -> discoverRecommendationItems(parentId, "sitewide_top_tracks_weekly", "track")
+        "discover:artistRadio" -> discoverRecommendationItems(parentId, "global_artist_radio_playlists", "playlist")
+        "discover:globalTracks" -> discoverRecommendationItems(parentId, "global_top_tracks", "track")
+        "discover:globalArtists" -> discoverRecommendationItems(parentId, "global_top_artists", "artist")
+        "discover:germanTracks" -> discoverRecommendationItems(parentId, "de_top_tracks", "track")
+        "discover:germanArtists" -> discoverRecommendationItems(parentId, "de_top_artists", "artist")
+        "discover:moods" -> discoverRecommendationItems(parentId, "global_mood_playlists", "playlist")
+        "discover:genres" -> discoverRecommendationItems(parentId, "global_genre_playlists", "playlist")
+        "discover:decades" -> discoverRecommendationItems(parentId, "global_decade_playlists", "playlist")
+        "discover:globalAlbums" -> discoverRecommendationItems(parentId, "global_popular_artist_albums", "album")
+        "discover:germanAlbums" -> discoverRecommendationItems(parentId, "de_popular_artist_albums", "album")
         "favorites:tracks" -> userDataItems("tracks", "track", true)
         "favorites:albums" -> userDataItems("albums", "album")
         "favorites:playlists" -> userDataItems("playlists", "playlist")
@@ -569,6 +579,10 @@ internal class MediaLibraryBrowser(
         libraryItem("home:playlistSuggestions", "Playlist-Empfehlungen", false, iconResource = R.drawable.playlist_play),
         libraryItem("home:topTracks", "Top-Tracks", false, iconResource = R.drawable.music_note),
         libraryItem("home:topArtists", "Top-Artists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
+        libraryItem("home:artistRecommendations", "Künstler-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.person_add),
+        libraryItem("home:topAlbums", "Top-Alben", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
+        libraryItem("home:albumRecommendations", "Album-Empfehlungen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.auto_awesome),
+        libraryItem("home:rediscovery", "Wiederentdecken", false, iconResource = R.drawable.history),
         libraryItem("home:recent", "Kürzlich gespielt", false, iconResource = R.drawable.music_history),
     )
 
@@ -580,21 +594,40 @@ internal class MediaLibraryBrowser(
     )
 
     private fun discoverItems(): List<MediaItem> = listOf(
-        libraryItem("discover:exploration", "Entdecke etwas Neues", false, iconResource = R.drawable.music_note_2),
-        libraryItem("discover:albums", "Alben der Woche", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
-        libraryItem("discover:similarUsers", "Andere Nutzer hören", false, iconResource = R.drawable.groups),
-        libraryItem("discover:artists", "Artists der Woche", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.artist),
-        libraryItem("discover:tracks", "Songs der Woche", false, iconResource = R.drawable.music_note),
+        libraryItem("discover:artistRadio", "Das hören andere", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.groups),
+        libraryItem("discover:globalTracks", "Track-Charts weltweit", false, iconResource = R.drawable.globe),
+        libraryItem("discover:globalArtists", "Künstler-Charts weltweit", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.globe),
+        libraryItem("discover:germanTracks", "Track-Charts Deutschland", false, iconResource = R.drawable.flag),
+        libraryItem("discover:germanArtists", "Künstler-Charts Deutschland", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.flag),
+        libraryItem("discover:moods", "Musik für deine Stimmung", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.mood),
+        libraryItem("discover:genres", "Genre-Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.genres),
+        libraryItem("discover:decades", "Jahrzehnt-Playlists", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.calendar_month),
+        libraryItem("discover:globalAlbums", "Alben weltweit beliebter Künstler:innen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
+        libraryItem("discover:germanAlbums", "Alben in Deutschland beliebter Künstler:innen", false, browsableStyle = MediaConstants.EXTRAS_VALUE_CONTENT_STYLE_GRID_ITEM, iconResource = R.drawable.album),
     )
 
-    private fun playlistItems(): LibraryChildren = privatePlaylistItems()
+    private fun playlistItems(): LibraryChildren {
+        val data = userDataSnapshot()
+        val source = catalogValue("node:playlists", LibraryRead(LibraryReadKind.LibraryPlaylists))
+        val playlists = linkedMapOf<Pair<String, String>, JSONObject>()
+        fun addItems(items: JSONArray?) {
+            if (items == null) return
+            for (index in 0 until items.length()) {
+                val item = items.optJSONObject(index) ?: continue
+                playlists[item.optString("provider") to item.optString("item_id")] = item
+            }
+        }
+        addItems(source?.let(::JSONArray))
+        addItems(data.optJSONArray("playlists"))
+        return LibraryChildren(mediaItemsFromJson("node:playlists", JSONArray(playlists.values.toList()).toString(), mediaType = "playlist"),
+            source == null || data.optBoolean("is_loading_playlists"))
+    }
 
-    // Exploration and similar-user recommendations contain playlists rather than direct tracks.
+    // Explorer folders preserve the media types and ordering of the native recommendation view.
     private fun discoverRecommendationItems(
         parentId: String,
         folderId: String,
         mediaType: String,
-        expandPlaylistTracks: Boolean = false,
     ): LibraryChildren {
         val snapshot = catalogSnapshot(parentId, LibraryRead(LibraryReadKind.ExploreRecommendations))
             ?: return LibraryChildren(emptyList(), true)
@@ -608,12 +641,6 @@ internal class MediaLibraryBrowser(
             hasMatchingFolder = true
             isLoading = isLoading || folder.optBoolean("is_loading")
             val items = folder.optJSONArray("items") ?: JSONArray()
-            if (expandPlaylistTracks) {
-                val tracks = folder.optJSONArray("playlist_tracks") ?: JSONArray()
-                for (trackIndex in 0 until tracks.length()) {
-                    tracks.optJSONObject(trackIndex)?.let(selected::put)
-                }
-            }
             for (itemIndex in 0 until items.length()) {
                 val item = items.optJSONObject(itemIndex) ?: continue
                 if (item.optString("item_id").isBlank() || item.optString("provider").isBlank()) continue
@@ -721,12 +748,6 @@ internal class MediaLibraryBrowser(
         val items = data.optJSONObject("favorites")?.optJSONArray(category)
         return LibraryChildren(mediaItemsFromJson("favorites:$category", items?.toString(), includeTrackListActions, mediaType = mediaType),
             data.optBoolean("is_loading_favorites"))
-    }
-
-    private fun privatePlaylistItems(): LibraryChildren {
-        val data = userDataSnapshot()
-        return LibraryChildren(mediaItemsFromJson("node:playlists", data.optJSONArray("playlists")?.toString(), mediaType = "playlist"),
-            data.optBoolean("is_loading_playlists"))
     }
 
     private fun userDataSnapshot(): JSONObject {

@@ -12,7 +12,7 @@ import java.util.Base64
 
 open class MediaArtworkContentProvider : ContentProvider() {
     companion object {
-        private const val AUTHORITY = "com.joie96.mashin.mediaart"
+        internal const val AUTHORITY = "com.joie96.mashin.mediaart"
         private const val REQUEST_PARAMETER = "request"
         private const val TAG = "MediaArtworkProvider"
 
@@ -31,6 +31,9 @@ open class MediaArtworkContentProvider : ContentProvider() {
 
         // Album precedence and original metadata positions are shared by all Android consumers.
         fun buildUri(item: JSONObject): String? {
+            if (item.optString("media_type") == "playlist") {
+                MoodPlaylistArtwork.buildUri(item.optString("item_id"))?.let { return it.toString() }
+            }
             val mediaItem = item.optJSONObject("media_item")
             val album = mediaItem?.optJSONObject("album") ?: item.optJSONObject("album")
             for (owner in listOfNotNull(album, item, mediaItem)) {
@@ -80,11 +83,22 @@ open class MediaArtworkContentProvider : ContentProvider() {
 
     override fun onCreate(): Boolean = true
 
-    override fun getType(uri: Uri): String = "image/*"
+    override fun getType(uri: Uri): String = if (MoodPlaylistArtwork.keyFromUri(uri) != null) "image/png" else "image/*"
 
     // Media3 receives a one-shot descriptor without retaining artwork files.
     override fun openFile(uri: Uri, mode: String): ParcelFileDescriptor? {
         if (mode != "r") return null
+        MoodPlaylistArtwork.keyFromUri(uri)?.let { key ->
+            return openPipeHelper(uri, "image/png", null, key) { output, _, _, _, _ ->
+                runCatching {
+                    ParcelFileDescriptor.AutoCloseOutputStream(output).use { stream ->
+                        val bitmap = MoodPlaylistArtwork.render(checkNotNull(context), key)
+                        try { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, stream) }
+                        finally { bitmap.recycle() }
+                    }
+                }.onFailure { error -> Log.w(TAG, "Unable to render mood artwork: ${error::class.java.simpleName}") }
+            }
+        }
         val request = uri.getQueryParameter(REQUEST_PARAMETER)?.let { runCatching { JSONObject(it) }.getOrNull() } ?: return null
         return openPipeHelper(uri, "image/*", null, request) { output, _, _, _, _ ->
             runCatching {

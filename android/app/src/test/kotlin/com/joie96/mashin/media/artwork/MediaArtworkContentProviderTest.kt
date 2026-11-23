@@ -18,6 +18,7 @@ import org.robolectric.Robolectric
 import org.robolectric.RobolectricTestRunner
 import org.robolectric.RuntimeEnvironment
 import org.robolectric.annotation.Config
+import org.robolectric.annotation.GraphicsMode
 import org.robolectric.annotation.LooperMode
 import org.robolectric.util.ReflectionHelpers
 
@@ -25,6 +26,26 @@ import org.robolectric.util.ReflectionHelpers
 @Config(sdk = [35])
 @LooperMode(LooperMode.Mode.LEGACY)
 class MediaArtworkContentProviderTest {
+    @Test
+    @GraphicsMode(GraphicsMode.Mode.NATIVE)
+    fun moodArtworkProducesDecodedPngWithoutNativeImageQueries() {
+        val provider = object : MediaArtworkContentProvider() {
+            override fun queryImage(argument: JSONObject): JSONObject = error("Mood covers are local")
+        }
+        provider.attachInfo(RuntimeEnvironment.getApplication(), ProviderInfo().apply { authority = "com.joie96.mashin.mediaart" })
+        val item = JSONObject().put("media_type", "playlist").put("item_id", "global_mood_playlist_relax")
+            .put("name", "Translated name").put("image", JSONObject().put("path", "data:image/png;base64,AQID"))
+        val uri = Uri.parse(MediaArtworkContentProvider.buildUri(item))
+        assertEquals("content://com.joie96.mashin.mediaart/mood/relax", uri.toString())
+        assertEquals("image/png", provider.getType(uri))
+        val bytes = readPipe(provider, uri)
+        val bitmap = checkNotNull(android.graphics.BitmapFactory.decodeByteArray(bytes, 0, bytes.size))
+        try {
+            assertEquals(512, bitmap.width)
+            assertEquals(512, bitmap.height)
+        } finally { bitmap.recycle(); provider.shutdown() }
+    }
+
     @Test
     fun presentationRevisionsTargetOnlyMatchingProxyAndPreserveNativeRequest() {
         val proxy = "a".repeat(64)

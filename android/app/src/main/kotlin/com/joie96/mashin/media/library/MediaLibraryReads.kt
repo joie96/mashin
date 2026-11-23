@@ -10,6 +10,7 @@ import org.json.JSONObject
 
 internal enum class LibraryReadKind(val command: String, val catalog: String, val value: String, val mediaType: String) {
     Recent("recentlyPlayedTracks", "RecentlyPlayed", "Tracks", "track"),
+    LibraryPlaylists("libraryPlaylists", "LibraryPlaylists", "Playlists", "playlist"),
     AlbumTracks("albumTracks", "AlbumTracks", "Tracks", "track"),
     PlaylistTracks("playlistTracks", "PlaylistTracks", "Tracks", "track"),
     ArtistAlbums("artistAlbums", "ArtistAlbums", "Albums", "album"),
@@ -75,6 +76,16 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
         }
     }
 
+    @Synchronized
+    fun refreshLibraryPlaylists() {
+        observations.toMap().forEach { (read, observation) ->
+            if (read.kind == LibraryReadKind.LibraryPlaylists) {
+                if (observation.request?.isDone == true) restart(read)
+                else observation.requiresRefresh = true
+            }
+        }
+    }
+
     // Current values are independent of the still-running native refresh.
     @Synchronized
     fun results(read: LibraryRead): ListenableFuture<String> {
@@ -114,6 +125,14 @@ internal class MediaLibraryReads(private val query: (String, String?) -> Listena
             }
         }
         observations.toMap().forEach { (read, observation) ->
+            if (read.kind == LibraryReadKind.LibraryPlaylists) {
+                if (query.has(read.kind.catalog) && event.optString("type") == "catalog_read_changed" &&
+                    event.optJSONObject("snapshot")?.optString("phase") == "invalidated") {
+                    release(read)
+                    onInvalidated?.invoke(read)
+                }
+                return@forEach
+            }
             if (read.kind.command == "recommendations") {
                 if (event.optString("type") == "catalog_read_changed" &&
                     event.optJSONObject("snapshot")?.optString("phase") == "invalidated" &&

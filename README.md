@@ -16,6 +16,20 @@ A Music Assistant server and account. Additional server requirements:
 
 Supported targets: Windows x64/ARM64 and Android ARM64.
 
+## Android Auto
+
+Home and Explore follow the app's recommendation sections, excluding
+genre-specific artist and album rows. Playlists includes all library playlists,
+not only owned private playlists. Mood playlists use locally rendered covers
+with the app's symbols and dark color palette.
+
+The additional Android Auto drawables are downloaded from Google's
+[Material Symbols](https://github.com/google/material-design-icons) under
+Apache-2.0: Outlined, weight 400, optical size 48, filled for mood covers only.
+Resource names follow Google's symbol names, with `_fill1` for filled variants;
+`public` is named `globe` to avoid the reserved Java keyword.
+Their fixed foreground color matches the existing Android Auto drawables.
+
 ## Building
 
 See the [build guide](scripts/README.md) for setup and release builds.

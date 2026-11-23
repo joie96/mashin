@@ -35,6 +35,28 @@ import org.robolectric.annotation.LooperMode
 class PlaybackSessionCallbackTest {
     // Controller browsing and search contracts.
     @Test
+    fun androidAutoDiscoversTheExportedBrowserAndMediaCapability() {
+        val context = RuntimeEnvironment.getApplication()
+        val services = context.packageManager.queryIntentServices(
+            android.content.Intent("android.media.browse.MediaBrowserService").setPackage(context.packageName), 0)
+        val service = services.single().serviceInfo
+        assertEquals("com.joie96.mashin.media.PlaybackService", service.name)
+        assertTrue(service.enabled)
+        assertTrue(service.exported)
+        val application = context.packageManager.getApplicationInfo(context.packageName, android.content.pm.PackageManager.GET_META_DATA)
+        val description = application.metaData.getInt("com.google.android.gms.car.application")
+        assertTrue(description != 0)
+        context.resources.getXml(description).use { parser ->
+            var hasMediaCapability = false
+            while (parser.next() != org.xmlpull.v1.XmlPullParser.END_DOCUMENT) {
+                if (parser.eventType == org.xmlpull.v1.XmlPullParser.START_TAG && parser.name == "uses" &&
+                    parser.getAttributeValue(null, "name") == "media") hasMediaCapability = true
+            }
+            assertTrue(hasMediaCapability)
+        }
+    }
+
+    @Test
     fun legacySelectionPublishesBufferingThenCanonicalPlayback() {
         val context = RuntimeEnvironment.getApplication()
         val browser = MediaLibraryBrowser(context) { Futures.immediateVoidFuture() }
